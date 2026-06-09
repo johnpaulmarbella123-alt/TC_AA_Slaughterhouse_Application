@@ -119,7 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
         return const RequestsContent();
       case 2:
-        return const NotificationContent();
+        return const NotifyPage();
       case 3:
         return const PaymentContent();
       case 4:

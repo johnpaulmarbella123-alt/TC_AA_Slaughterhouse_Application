@@ -49,8 +49,10 @@ class _SignUpPageState extends State<SignUpPage> {
                         child: Container(
                           padding: const EdgeInsets.all(40),
                           decoration: BoxDecoration(
+                            // ignore: deprecated_member_use
                             color: Colors.black.withOpacity(0.3),
                             borderRadius: BorderRadius.circular(20),
+                            // ignore: deprecated_member_use
                             border: Border.all(color: Colors.white.withOpacity(0.2)),
                           ),
                           child: Column(
