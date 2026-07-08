@@ -13,27 +13,50 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// Global notifier so profile page can update the top-bar avatar instantly
+final ValueNotifier<String?> globalAvatarUrl = ValueNotifier<String?>(null);
+
+// Global notifier for unread notification count — updated by NotifyPage,
+// consumed by the bottom-nav badge. Instant updates, no stream lag.
+final ValueNotifier<int> globalUnreadNotifCount = ValueNotifier<int>(0);
+
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedTab = 0;
   int _bottomNavIndex = 0;
-  String? _avatarUrl;
 
-  // Keep profile widget alive so it doesn't rebuild on tab switch
-ProfileContent? _profileWidget;
+  /// Tracks which tabs have been visited so we only build them on first use.
+  final Set<int> _visitedTabs = {0}; // Home is always visited
+
+  /// Incremented when user switches to the Notify tab to force a reload.
+  final ValueNotifier<int> _notifyRefreshTrigger = ValueNotifier<int>(0);
 
   @override
   void initState() {
     super.initState();
-    _profileWidget = ProfileContent(onAvatarChanged: _onAvatarChanged);
     _loadAvatar();
+    // Listen for avatar changes from any page
+    globalAvatarUrl.addListener(_onAvatarUrlChanged);
+    // Listen for unread count changes from NotifyPage
+    globalUnreadNotifCount.addListener(_onUnreadCountChanged);
+
+    // Precache the heavy hero image so it's ready when the Home tab renders
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      precacheImage(const AssetImage('assets/images/BG.jpeg'), context);
+    });
   }
 
-  // Called by profile when avatar changes
-  void _onAvatarChanged() {
-  PaintingBinding.instance.imageCache.clear(); // ← clears cached images
-  PaintingBinding.instance.imageCache.clearLiveImages();
-  _loadAvatar();
-}
+  @override
+  void dispose() {
+    globalAvatarUrl.removeListener(_onAvatarUrlChanged);
+    globalUnreadNotifCount.removeListener(_onUnreadCountChanged);
+    _notifyRefreshTrigger.dispose();
+    super.dispose();
+  }
+
+  void _onAvatarUrlChanged() {
+    debugPrint('TOP-BAR: globalAvatarUrl changed to ${globalAvatarUrl.value}');
+    if (mounted) setState(() {});
+  }
 
   Future<void> _loadAvatar() async {
     final user = Supabase.instance.client.auth.currentUser;
@@ -44,22 +67,30 @@ ProfileContent? _profileWidget;
           .select('avatar_url')
           .eq('id', user.id)
           .single();
-      if (mounted) {
-        final url = data['avatar_url'];
-        setState(() {
-          // Add cache buster so Image.network reloads fresh
-          _avatarUrl = url != null
-              ? '$url?t=${DateTime.now().millisecondsSinceEpoch}'
-              : null;
-        });
+      final url = data['avatar_url'];
+      if (url != null) {
+        globalAvatarUrl.value = '$url?t=${DateTime.now().millisecondsSinceEpoch}';
       }
-    } catch (_) {}
+      debugPrint('TOP-BAR: Loaded avatar from DB = ${globalAvatarUrl.value}');
+    } catch (e) {
+      debugPrint('TOP-BAR: Error loading avatar: $e');
+    }
   }
 
-void _onBottomNavTap(int index) {
-  setState(() => _bottomNavIndex = index);
-  _loadAvatar();
-}
+  void _onUnreadCountChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onBottomNavTap(int index) {
+    setState(() {
+      _bottomNavIndex = index;
+      _visitedTabs.add(index); // mark tab as visited so it gets built
+    });
+    // Force NotifyPage to reload when user switches to it
+    if (index == 2) {
+      _notifyRefreshTrigger.value++;
+    }
+  }
 
   void request() => _onBottomNavTap(1);
   void notify() => _onBottomNavTap(2);
@@ -68,6 +99,8 @@ void _onBottomNavTap(int index) {
 
   @override
   Widget build(BuildContext context) {
+    final avatarUrl = globalAvatarUrl.value;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -104,20 +137,23 @@ void _onBottomNavTap(int index) {
                         border: Border.all(color: Colors.grey.shade400, width: 1),
                       ),
                       child: ClipOval(
-                        child: _avatarUrl != null
-    ? Image.network(
-        _avatarUrl!,
-        key: ValueKey(_avatarUrl), // ← add this line
-        fit: BoxFit.cover,
-        width: 40,
-        height: 40,
-        errorBuilder: (_, __, ___) => const Icon(
-          Icons.person_outline,
-          size: 24,
-          color: Colors.grey,
-        ),
-      )
-    : const Icon(
+                        child: avatarUrl != null
+                            ? Image.network(
+                                avatarUrl,
+                                key: ValueKey(avatarUrl),
+                                fit: BoxFit.cover,
+                                width: 40,
+                                height: 40,
+                                errorBuilder: (_, error, ___) {
+                                  debugPrint('TOP-BAR: Image.network FAILED: $error');
+                                  return const Icon(
+                                    Icons.person_outline,
+                                    size: 24,
+                                    color: Colors.grey,
+                                  );
+                                },
+                              )
+                            : const Icon(
                                 Icons.person_outline,
                                 size: 24,
                                 color: Colors.grey,
@@ -141,7 +177,8 @@ void _onBottomNavTap(int index) {
                 children: [
                   _navItem(Icons.home, "Home", _bottomNavIndex == 0, () => _onBottomNavTap(0)),
                   _navItem(Icons.description_outlined, "Requests", _bottomNavIndex == 1, request),
-                  _navItem(Icons.notifications_none, "Notify", _bottomNavIndex == 2, notify),
+                  _navItem(Icons.notifications_none, "Notify", _bottomNavIndex == 2, notify,
+                      badgeCount: globalUnreadNotifCount.value),
                   _navItem(Icons.payment_outlined, "Payment", _bottomNavIndex == 3, payment),
                   _navItem(Icons.person_outline, "Profile", _bottomNavIndex == 4, profile),
                 ],
@@ -154,21 +191,26 @@ void _onBottomNavTap(int index) {
   }
 
   Widget _buildBodyContent() {
-    switch (_bottomNavIndex) {
-      case 0:
-        return _buildHomeContent();
-      case 1:
-        return const RequestsContent();
-      case 2:
-        return const NotifyPage();
-      case 3:
-        return const PaymentContent();
-     case 4:
-  _profileWidget ??= ProfileContent(onAvatarChanged: _onAvatarChanged);
-  return _profileWidget!;
-      default:
-        return _buildHomeContent();
-    }
+    // Lazy IndexedStack: only build tabs that have been visited.
+    // Unvisited tabs are empty SizedBox placeholders (zero cost).
+    final allTabs = <Widget>[
+      _buildHomeContent(),                           // 0: Home
+      const RequestsContent(),                       // 1: Requests
+      NotifyPage(                                    // 2: Notify
+        onNavigateToTab: _onBottomNavTap,
+        refreshTrigger: _notifyRefreshTrigger,
+      ),
+      const PaymentContent(),                        // 3: Payment
+      const ProfileContent(),                        // 4: Profile
+    ];
+
+    return IndexedStack(
+      index: _bottomNavIndex,
+      children: [
+        for (int i = 0; i < allTabs.length; i++)
+          _visitedTabs.contains(i) ? allTabs[i] : const SizedBox.shrink(),
+      ],
+    );
   }
 
   Widget _buildHomeContent() {
@@ -267,7 +309,7 @@ void _onBottomNavTap(int index) {
                 const SizedBox(width: 8),
                 _machineCard("assets/images/pic5.jpeg", "Stainless steel table"),
                 const SizedBox(width: 8),
-                _machineCard("assets/images/pic6.jpeg", ""),
+                _machineCard("assets/images/pic6.jpeg", "Stainless steel cable hoist"),
                 const SizedBox(width: 8),
                 _machineCard("assets/images/pic7.jpeg", "Stainless steel sink"),
                 const SizedBox(width: 8),
@@ -547,7 +589,8 @@ void _onBottomNavTap(int index) {
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.asset(imageUrl, width: 150, height: 90, fit: BoxFit.cover),
+          child: Image.asset(imageUrl, width: 150, height: 90, fit: BoxFit.cover,
+              cacheWidth: 300), // decode at 2x display size, not full resolution
         ),
         const SizedBox(height: 4),
         Text(label, style: const TextStyle(fontSize: 10)),
@@ -720,15 +763,39 @@ void _onBottomNavTap(int index) {
     );
   }
 
-  Widget _navItem(IconData icon, String label, bool active, VoidCallback onTap) {
+  Widget _navItem(IconData icon, String label, bool active, VoidCallback onTap,
+      {int badgeCount = 0}) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon,
-              size: 28,
-              color: active ? const Color(0xFF1E855A) : Colors.black54),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(icon,
+                  size: 28,
+                  color: active ? const Color(0xFF1E855A) : Colors.black54),
+              if (badgeCount > 0)
+                Positioned(
+                  right: -6,
+                  top: -4,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                    child: Text(
+                      badgeCount > 99 ? '99+' : '$badgeCount',
+                      style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ),
+            ],
+          ),
           Text(
             label,
             style: TextStyle(

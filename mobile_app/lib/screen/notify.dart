@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../pages/home_page.dart' show globalUnreadNotifCount;
+import 'condemnation_slip_screen.dart';
+import 'notification_options_dialog.dart';
+import 'receipt_detail_screen.dart';
 
 class NotifyPage extends StatefulWidget {
-  const NotifyPage({super.key});
+  /// Callback to switch bottom-nav tab (e.g. index 1 = Requests).
+  /// Passed from HomeScreen so notification actions can navigate tabs.
+  final void Function(int tabIndex)? onNavigateToTab;
+
+  /// Increment this to force a notification reload (e.g. when switching tabs).
+  final ValueNotifier<int>? refreshTrigger;
+
+  const NotifyPage({super.key, this.onNavigateToTab, this.refreshTrigger});
 
   @override
   State<NotifyPage> createState() => _NotifyPageState();
@@ -19,7 +30,18 @@ class _NotifyPageState extends State<NotifyPage> {
   void initState() {
     super.initState();
     _loadNotifications();
-    _subscribeRealtime(); // NEW: live updates
+    _subscribeRealtime();
+    widget.refreshTrigger?.addListener(_onRefreshTriggered);
+  }
+
+  @override
+  void dispose() {
+    widget.refreshTrigger?.removeListener(_onRefreshTriggered);
+    super.dispose();
+  }
+
+  void _onRefreshTriggered() {
+    _loadNotifications();
   }
 
   // =========================
@@ -36,10 +58,18 @@ class _NotifyPageState extends State<NotifyPage> {
           .eq('user_id', user.id)
           .order('created_at', ascending: false);
 
+      // DEBUG: print the raw rows so you can see exactly what
+      // Supabase is returning (column names + value types) in your
+      // console. Remove this once things look right.
+      for (final row in data) {
+        debugPrint('NOTIF ROW: $row');
+      }
+
       setState(() {
         notifications = List<Map<String, dynamic>>.from(data);
         isLoading = false;
       });
+      _syncGlobalUnreadCount();
     } catch (e) {
       debugPrint("Notification load error: $e");
       setState(() => isLoading = false);
@@ -59,38 +89,160 @@ class _NotifyPageState extends State<NotifyPage> {
         .eq('user_id', user.id)
         .order('created_at', ascending: false)
         .listen((data) {
-          if (mounted) setState(() => notifications = data);
+          for (final row in data) {
+            debugPrint('NOTIF STREAM ROW: $row');
+          }
+          if (mounted) {
+            setState(() => notifications = List<Map<String, dynamic>>.from(data));
+            _syncGlobalUnreadCount();
+          }
         });
   }
 
   // =========================
   // MARK AS READ
   // =========================
-  Future<void> _markAsRead(String id) async {
-    await supabase
-        .from('notifications')
-        .update({'is_read': true})
-        .eq('id', id);
+  Future<void> _markAsRead(dynamic id) async {
+    // Immediately update local state so UI is instant
+    setState(() {
+      final idx = notifications.indexWhere((n) => n['id'] == id);
+      if (idx != -1) {
+        notifications[idx] = {...notifications[idx], 'is_read': true};
+      }
+    });
+    _syncGlobalUnreadCount();
+    // Then persist to DB (stream will eventually sync too)
+    await supabase.from('notifications').update({'is_read': true}).eq('id', id);
   }
 
   Future<void> _markAllAsRead() async {
     final user = supabase.auth.currentUser;
     if (user == null) return;
+    // Immediately update local state
+    setState(() {
+      for (int i = 0; i < notifications.length; i++) {
+        notifications[i] = {...notifications[i], 'is_read': true};
+      }
+    });
+    _syncGlobalUnreadCount();
+    // Then persist to DB
     await supabase
         .from('notifications')
         .update({'is_read': true})
         .eq('user_id', user.id);
   }
 
+  /// Push the current unread count to the global notifier
+  /// so the bottom-nav badge updates instantly.
+  void _syncGlobalUnreadCount() {
+    globalUnreadNotifCount.value = _unreadCount;
+  }
+
+  // =========================
+  // SAFE VALUE HELPERS
+  // These stop one bad/unexpected column value from blanking out
+  // or crashing an entire notification card.
+  // =========================
+  bool _asBool(dynamic value, {bool fallback = false}) {
+    if (value is bool) return value;
+    if (value is int) return value != 0;
+    if (value is String) return value.toLowerCase() == 'true' || value == '1';
+    return fallback;
+  }
+
+  Map<String, dynamic> _asMap(dynamic value) {
+    if (value is Map) {
+      return value.map((k, v) => MapEntry(k.toString(), v));
+    }
+    return {};
+  }
+
   // =========================
   // FILTER
   // =========================
   List<Map<String, dynamic>> get _filtered => showUnreadOnly
-      ? notifications.where((n) => n['is_read'] == false).toList()
+      ? notifications.where((n) => !_asBool(n['is_read'])).toList()
       : notifications;
 
   int get _unreadCount =>
-      notifications.where((n) => n['is_read'] == false).length;
+      notifications.where((n) => !_asBool(n['is_read'])).length;
+
+  // =========================
+  // ACTION HANDLER
+  // =========================
+  void _handleAction(String? type, Map<String, dynamic> data, Map<String, dynamic> notif) {
+    switch (type) {
+      case 'receipt_issued':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ReceiptDetailScreen()),
+        );
+        break;
+
+      case 'post_mortem_failed':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CondemnationSlipScreen(data: data),
+          ),
+        );
+        break;
+
+      case 'health_issue':
+      case 'operation_failed':
+        NotificationOptionsDialog.show(
+          context: context,
+          notifType: type!,
+          data: data,
+          title: (notif['title'] ?? '').toString(),
+          onReschedule: () {
+            widget.onNavigateToTab?.call(1); // Requests tab
+          },
+        );
+        break;
+
+      case 'request_status_changed':
+        final status = data['status'] ?? '';
+        if (status != 'approved') {
+          // Rejected — navigate to Requests to reschedule
+          widget.onNavigateToTab?.call(1);
+        }
+        break;
+
+      case 'status_update':
+      case 'admin_manual':
+        _showDetailDialog(notif);
+        break;
+
+      default:
+        _showDetailDialog(notif);
+        break;
+    }
+  }
+
+  void _showDetailDialog(Map<String, dynamic> notif) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text(
+          (notif['title'] ?? 'Notification').toString(),
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+        content: Text(
+          (notif['message'] ?? notif['body'] ?? 'No details available.').toString(),
+          style: const TextStyle(fontSize: 13, color: Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close',
+                style: TextStyle(color: Color(0xFF0A3D2E))),
+          ),
+        ],
+      ),
+    );
+  }
 
   // =========================
   // ICON + BADGE CONFIG
@@ -168,6 +320,12 @@ class _NotifyPageState extends State<NotifyPage> {
           iconColor: const Color(0xFFC26E00),
           iconBg: const Color(0xFFFFF3E5),
         );
+      case 'report_filed':
+        return _NotifStyle(
+          icon: Icons.notifications,
+          iconColor: const Color(0xFFD32F2F),
+          iconBg: const Color(0xFFFFEBEE),
+        );
       default:
         return _NotifStyle(
           icon: Icons.notifications,
@@ -180,12 +338,19 @@ class _NotifyPageState extends State<NotifyPage> {
   // =========================
   // TIME FORMAT
   // =========================
-  String _timeAgo(String iso) {
-    final diff = DateTime.now().difference(DateTime.parse(iso));
-    if (diff.inMinutes < 1) return 'Just now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
-    if (diff.inDays < 1) return '${diff.inHours}h ago';
-    return '${diff.inDays}d ago';
+  String _timeAgo(dynamic isoValue) {
+    if (isoValue == null) return '';
+    try {
+      final date = DateTime.parse(isoValue.toString());
+      final diff = DateTime.now().difference(date);
+      if (diff.inMinutes < 1) return 'Just now';
+      if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+      if (diff.inDays < 1) return '${diff.inHours}h ago';
+      return '${diff.inDays}d ago';
+    } catch (e) {
+      debugPrint('Bad created_at value: $isoValue ($e)');
+      return '';
+    }
   }
 
   // =========================
@@ -286,23 +451,46 @@ class _NotifyPageState extends State<NotifyPage> {
     return ListView.separated(
       padding: const EdgeInsets.all(12),
       itemCount: _filtered.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (_, i) {
         final notif = _filtered[i];
-        final type = notif['type'] as String?;
-        final data = (notif['data'] as Map<String, dynamic>?) ?? {};
-        final style = _styleFor(type, data);
-        final isRead = notif['is_read'] as bool? ?? true;
 
-        return _NotifCard(
-          notif: notif,
-          style: style,
-          isRead: isRead,
-          timeAgo: _timeAgo(notif['created_at']),
-          onTap: () {
-            if (!isRead) _markAsRead(notif['id']);
-          },
-        );
+        // Wrapped in try/catch so one malformed row shows a visible
+        // error card instead of silently blanking out.
+        try {
+          final type = notif['type'] as String?;
+          final data = _asMap(notif['data']);
+          final style = _styleFor(type, data);
+          final isRead = _asBool(notif['is_read'], fallback: true);
+
+          return _NotifCard(
+            notif: notif,
+            style: style,
+            isRead: isRead,
+            timeAgo: _timeAgo(notif['created_at']),
+            onTap: () {
+              if (!isRead) _markAsRead(notif['id']);
+            },
+            onAction: () {
+              if (!isRead) _markAsRead(notif['id']);
+              _handleAction(type, data, notif);
+            },
+          );
+        } catch (e) {
+          debugPrint('Failed to render notif $notif: $e');
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Text(
+              'Could not display this notification ($e)',
+              style: TextStyle(fontSize: 11, color: Colors.red.shade800),
+            ),
+          );
+        }
       },
     );
   }
@@ -317,6 +505,7 @@ class _NotifCard extends StatelessWidget {
   final bool isRead;
   final String timeAgo;
   final VoidCallback onTap;
+  final VoidCallback? onAction;
 
   const _NotifCard({
     required this.notif,
@@ -324,6 +513,7 @@ class _NotifCard extends StatelessWidget {
     required this.isRead,
     required this.timeAgo,
     required this.onTap,
+    this.onAction,
   });
 
   @override
@@ -331,21 +521,36 @@ class _NotifCard extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border(
-            left: BorderSide(
-              color: isRead ? Colors.transparent : const Color(0xFF3ECFA3),
-              width: 3,
-            ),
-            top: BorderSide(color: Colors.grey.shade200),
-            right: BorderSide(color: Colors.grey.shade200),
-            bottom: BorderSide(color: Colors.grey.shade200),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Unread accent bar
+              Container(
+                width: 3,
+                color: isRead ? Colors.transparent : const Color(0xFF3ECFA3),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: _buildCardContent(),
+                ),
+              ),
+            ],
           ),
         ),
-        padding: const EdgeInsets.all(12),
-        child: Row(
+      ),
+    );
+  }
+
+  Widget _buildCardContent() {
+    return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Icon
@@ -382,16 +587,16 @@ class _NotifCard extends StatelessWidget {
                     ),
                   // Title
                   Text(
-                    notif['title'] ?? '',
+                    (notif['title'] ?? '').toString(),
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: isRead ? FontWeight.normal : FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  // Body — uses 'message' (your column) or 'body'
+                  // Body — uses 'message' (your column) or 'body' as fallback
                   Text(
-                    notif['message'] ?? notif['body'] ?? '',
+                    (notif['message'] ?? notif['body'] ?? '').toString(),
                     style: const TextStyle(fontSize: 11, color: Colors.grey),
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
@@ -402,7 +607,7 @@ class _NotifCard extends StatelessWidget {
                     Align(
                       alignment: Alignment.centerRight,
                       child: OutlinedButton(
-                        onPressed: () {},
+                        onPressed: onAction,
                         style: OutlinedButton.styleFrom(
                           foregroundColor: style.actionColor,
                           side: BorderSide(color: style.actionColor!),
@@ -441,9 +646,7 @@ class _NotifCard extends StatelessWidget {
                 ),
               ),
           ],
-        ),
-      ),
-    );
+        );
   }
 }
 

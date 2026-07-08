@@ -162,10 +162,10 @@ class _SignupScreenState
               ),
 
               alignment:
-                  const Alignment(-0.2, 0.2),
+                  const Alignment(-0.2, 0.8),
 
               child: const Padding(
-                padding: EdgeInsets.all(40),
+                padding: EdgeInsets.all(30),
 
                 child: Text(
                   "Create Account!\nSign Up to get started !!",

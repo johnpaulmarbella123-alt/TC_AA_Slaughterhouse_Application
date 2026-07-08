@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
+import '../pages/home_page.dart'; // for globalAvatarUrl
+import 'dart:async';
 
 class ProfileContent extends StatefulWidget {
-  final VoidCallback? onAvatarChanged; // ← added this
-
-  const ProfileContent({super.key, this.onAvatarChanged});
+  const ProfileContent({super.key});
 
   @override
   State<ProfileContent> createState() => _ProfileContentState();
@@ -29,14 +29,23 @@ class _ProfileContentState extends State<ProfileContent> {
   late TextEditingController _phoneController;
   late TextEditingController _addressController;
 
-  @override
-  void initState() {
-    super.initState();
-    _nameController = TextEditingController();
-    _phoneController = TextEditingController();
-    _addressController = TextEditingController();
-    loadUserData();
-  }
+StreamSubscription<AuthState>? _authSub;
+
+@override
+void initState() {
+  super.initState();
+  _nameController = TextEditingController();
+  _phoneController = TextEditingController();
+  _addressController = TextEditingController();
+
+  loadUserData();
+
+  _authSub = Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+    if (data.session != null && mounted) {
+      loadUserData();
+    }
+  });
+}
 
   Future<void> loadUserData() async {
     final user = Supabase.instance.client.auth.currentUser;
@@ -50,12 +59,13 @@ class _ProfileContentState extends State<ProfileContent> {
           .single();
 
       setState(() {
-        name = data['display_name'] ?? 'No Name';
-        phoneNumber = data['phone'] ?? '';
-        address = data['address'] ?? 'No Address';
-        final url = data['avatar_url'];
-        avatarUrl = url != null ? '$url?t=${DateTime.now().millisecondsSinceEpoch}' : null;
-      });
+  name = data['display_name'] ?? 'No Name';
+  phoneNumber = data['phone'] ?? '';
+  address = data['address'] ?? 'No Address';
+  final url = data['avatar_url'];
+  avatarUrl = url;
+  debugPrint('AVATAR: loaded avatarUrl from DB = $avatarUrl');
+});
 
       _nameController.text = name;
       _phoneController.text = phoneNumber;
@@ -66,57 +76,91 @@ class _ProfileContentState extends State<ProfileContent> {
   }
 
   Future<void> _pickAndUploadImage() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+  final user = Supabase.instance.client.auth.currentUser;
+  if (user == null) return;
 
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 40,
-      maxWidth: 300,
-    );
-    if (picked == null) return;
+  final picked = await _picker.pickImage(
+    source: ImageSource.gallery,
+    imageQuality: 40,
+    maxWidth: 300,
+  );
+  if (picked == null) return;
 
-    setState(() => _uploadingImage = true);
+  setState(() => _uploadingImage = true);
 
-    try {
-      final file = File(picked.path);
-      final fileName = '${user.id}/avatar.jpg';
+  try {
+    final file = File(picked.path);
 
-      await Supabase.instance.client.storage
-          .from('avatars')
-          .upload( fileName, file, fileOptions: const FileOptions(upsert: true),
- );
+    // Unique path every upload — avoids CDN cache reusing old bytes at the same path
+    final newFilePath =
+        '${user.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final oldAvatarUrl = avatarUrl; // remember old one so we can clean it up after
 
-      final url = Supabase.instance.client.storage
-          .from('avatars')
-          .getPublicUrl(fileName);
+    // Upload new file under the new unique path
+    await Supabase.instance.client.storage
+        .from('avatars')
+        .upload(newFilePath, file,
+            fileOptions: const FileOptions(cacheControl: '3600', upsert: false));
+    debugPrint('AVATAR: Upload completed at $newFilePath');
 
-      await Supabase.instance.client
-          .from('profiles')
-          .update({'avatar_url': url}).eq('id', user.id);
+    final url =
+        Supabase.instance.client.storage.from('avatars').getPublicUrl(newFilePath);
+    debugPrint('AVATAR: Public URL = $url');
 
-      setState(() {
-        avatarUrl = '$url?t=${DateTime.now().millisecondsSinceEpoch}';
-      });
+    // Save the new URL to profiles table
+    await Supabase.instance.client
+        .from('profiles')
+        .update({'avatar_url': url}).eq('id', user.id);
+    debugPrint('AVATAR: Profile updated in DB');
 
-      // Notify home page to refresh its avatar
-      widget.onAvatarChanged?.call();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to upload image: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+    // Best-effort cleanup of the previous avatar file (ignore failures)
+    if (oldAvatarUrl != null) {
+      try {
+        final oldPath = _extractStoragePath(oldAvatarUrl);
+        if (oldPath != null) {
+          await Supabase.instance.client.storage.from('avatars').remove([oldPath]);
+          debugPrint('AVATAR: Old file removed: $oldPath');
+        }
+      } catch (e) {
+        debugPrint('AVATAR: Old file cleanup failed (non-fatal): $e');
       }
-    } finally {
-      setState(() => _uploadingImage = false);
     }
-  }
 
-  @override
+    setState(() {
+      avatarUrl = url; // no query-string trick needed, path itself is unique now
+    });
+
+    globalAvatarUrl.value = url;
+    debugPrint('AVATAR: globalAvatarUrl updated to $url');
+  } catch (e) {
+    debugPrint('AVATAR: Upload FAILED: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to upload image: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  } finally {
+    setState(() => _uploadingImage = false);
+  }
+}
+// Pulls the storage object path (e.g. "userId/avatar_12345.jpg") out of a public URL
+String? _extractStoragePath(String publicUrl) {
+  final marker = '/avatars/';
+  final idx = publicUrl.indexOf(marker);
+  if (idx == -1) return null;
+  var path = publicUrl.substring(idx + marker.length);
+  // strip any old-style cache-busting query param if present
+  final qIdx = path.indexOf('?');
+  if (qIdx != -1) path = path.substring(0, qIdx);
+  return path;
+}
+
+ @override
   void dispose() {
+    _authSub?.cancel();
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
@@ -224,8 +268,7 @@ class _ProfileContentState extends State<ProfileContent> {
       children: [
         GestureDetector(
           onTap: _uploadingImage ? null : _pickAndUploadImage,
-          child: Stack(
-            alignment: Alignment.bottomRight,
+          child: Stack( alignment: Alignment.bottomRight,
             children: [
               Container(
                 width: 100,
@@ -244,14 +287,18 @@ class _ProfileContentState extends State<ProfileContent> {
                         child: avatarUrl != null
                             ? Image.network(
                                 avatarUrl!,
+                                key: ValueKey(avatarUrl),
                                 fit: BoxFit.cover,
                                 width: 100,
                                 height: 100,
-                                errorBuilder: (_, __, ___) => const Icon(
-                                  Icons.person_outline,
-                                  size: 60,
-                                  color: Colors.grey,
-                                ),
+                                errorBuilder: (_, error, ___) {
+  debugPrint('AVATAR: Image.network failed to load: $error');
+  return const Icon(
+    Icons.person_outline,
+    size: 60,
+    color: Colors.grey,
+  );
+},
                               )
                             : const Icon(
                                 Icons.person_outline,
