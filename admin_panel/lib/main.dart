@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/hero_section.dart';
 import 'screens/dashboard.dart';
+import 'pages/login_page.dart';
+import 'pages/signup_page.dart';
 import 'theme.dart';
 
 void main() async {
@@ -24,9 +26,11 @@ class MyApp extends StatelessWidget {
       title: 'Tabaco City Slaughterhouse',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
-      initialRoute: '/',
+      initialRoute: Supabase.instance.client.auth.currentSession == null ? '/' : '/dashboard',
       routes: {
         '/': (context) => const HeroSection(),
+        '/login': (context) => const LoginPage(),
+        '/signup': (context) => const SignupPage(),
         '/dashboard': (context) => const DashboardPage(),
       },
     );
