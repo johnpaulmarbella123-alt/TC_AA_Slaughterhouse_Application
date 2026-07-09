@@ -5,222 +5,196 @@ class DashboardPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final isDesktop = screenSize.width > 1000;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      drawer: !isDesktop ? _buildSidebar(context) : null,
-      appBar: !isDesktop
-          ? AppBar(
-              title: const Text('TC-AA Management System'),
-              backgroundColor: const Color(0xFF2D6A4F),
-              foregroundColor: Colors.white,
-            )
-          : null,
-      body: Row(
-        children: [
-          if (isDesktop) _buildSidebar(context),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Hero Banner Section
-                  _buildHeroBanner(context),
-
-                  Padding(
-                    padding: const EdgeInsets.all(32.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'System Overview',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF2D3748),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        // Statistics Grid
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            return GridView.count(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              crossAxisCount: constraints.maxWidth > 1200 ? 4 : (constraints.maxWidth > 800 ? 2 : 1),
-                              crossAxisSpacing: 24,
-                              mainAxisSpacing: 24,
-                              childAspectRatio: 1.5,
-                              children: [
-                                _buildStatCard('Pending Requests', '28', Icons.pending_actions, Colors.orange),
-                                _buildStatCard('Approved Schedules', '15', Icons.event_available, Colors.green),
-                                _buildStatCard('Livestock Records', '1,240', Icons.pets, Colors.blue),
-                                _buildStatCard('Revenue Reports', '₱142.5k', Icons.assessment, Colors.purple),
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 32),
-                        // Notifications / Recent Activity Area
-                        _buildRecentActivity(context),
-                      ],
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 1,
+        shadowColor: Colors.black.withValues(alpha: 0.1),
+        title: Row(
+          children: [
+            Image.asset('assets/images/logo1.png', height: 40),
+            const SizedBox(width: 12),
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Tabaco City Slaughterhouse',
+                  style: TextStyle(
+                    color: Color(0xFF2D6A4F),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                  ),
+                ),
+                Text(
+                  'Management system',
+                  style: TextStyle(
+                    color: Color(0xFF718096),
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+                  const Text(
+                    'WELCOME, ADMIN!',
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A202C),
                     ),
                   ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Overview and system statistics',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF718096),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Divider(),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Dashboard',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2D3748),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Overview and system statistics',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Color(0xFF718096),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Statistics Grid
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: constraints.maxWidth > 1200 ? 4 : (constraints.maxWidth > 800 ? 2 : 1),
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                        childAspectRatio: constraints.maxWidth > 1200 ? 2.0 : 2.5,
+                        children: [
+                          _buildStatCard('Total Revenue', '₱15,000', 'This week', Icons.payments_outlined, Colors.grey),
+                          _buildStatCard('Animal Processed', '362', 'This week', Icons.show_chart, Colors.grey),
+                          _buildStatCard('Avg Processing Time', '4.5h', 'Per livestock', Icons.access_time, Colors.grey),
+                          _buildStatCard('Satisfaction Rate', '98.5%', 'Customer feedback', Icons.trending_up, Colors.grey),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 32),
+                  const Text(
+                    'Quick Navigation Tools',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF2D3748),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return GridView.count(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        crossAxisCount: constraints.maxWidth > 1200 ? 3 : (constraints.maxWidth > 800 ? 2 : 1),
+                        crossAxisSpacing: 16,
+                        mainAxisSpacing: 16,
+                        childAspectRatio: constraints.maxWidth > 1200 ? 2.2 : 2.0,
+                        children: [
+                          _buildNavigationCard('Receiving & New Requests', 'Pending', '3', Icons.assignment_outlined, Colors.redAccent),
+                          _buildNavigationCard('Document Verification', 'verified', '21', Icons.fact_check_outlined, Colors.blueAccent),
+                          _buildNavigationCard('Slaughter & Inspection', 'Processed', '18', Icons.content_cut, Colors.green),
+                          _buildNavigationCard('Payment & Cashiering', 'Complete', '16', Icons.payment_outlined, Colors.orangeAccent),
+                          _buildNavigationCard('Meat Releasing', 'Released', '15', Icons.inventory_2_outlined, Colors.orange),
+                          _buildNavigationCard('Report & Records', 'This week', '168', Icons.receipt_long_outlined, Colors.pinkAccent),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 32),
+                  _buildRecentActivity(context),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildSidebar(BuildContext context) {
+  Widget _buildStatCard(String title, String value, String subtitle, IconData icon, Color iconColor) {
     return Container(
-      width: 280,
-      color: const Color(0xFF1A202C),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            child: Row(
-              children: [
-                Image.asset('assets/images/logo1.png', height: 40),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'TC-AA Admin',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(color: Colors.white12),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              children: [
-                _buildNavItem(Icons.dashboard, 'Dashboard', true),
-                _buildNavItem(Icons.people, 'Users', false),
-                _buildNavItem(Icons.assignment, 'Requests', false),
-                _buildNavItem(Icons.calendar_month, 'Slaughter Schedule', false),
-                _buildNavItem(Icons.pets, 'Livestock Records', false),
-                _buildNavItem(Icons.bar_chart, 'Reports', false),
-                _buildNavItem(Icons.notifications, 'Notifications', false),
-                _buildNavItem(Icons.settings, 'Settings', false),
-              ],
-            ),
-          ),
-          const Divider(color: Colors.white12),
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.white70),
-            title: const Text('Logout', style: TextStyle(color: Colors.white70)),
-            onTap: () => Navigator.pushReplacementNamed(context, '/'),
-          ),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNavItem(IconData icon, String title, bool isActive) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: isActive ? const Color(0xFF2D6A4F) : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: ListTile(
-        leading: Icon(icon, color: isActive ? Colors.white : Colors.white70),
-        title: Text(
-          title,
-          style: TextStyle(
-            color: isActive ? Colors.white : Colors.white70,
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-        onTap: () {},
-      ),
-    );
-  }
-
-  Widget _buildHeroBanner(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 250,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/BG.jpeg',
-              fit: BoxFit.cover,
-            ),
-          ),
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFF2D6A4F).withValues(alpha: 0.8),
-                    Colors.black.withValues(alpha: 0.6),
-                  ],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Welcome, Administrator',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 600),
-                  child: const Text(
-                    'Manage livestock processing, customer requests, schedules, inspections, and reports efficiently.',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Color(0xFF4A5568),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Icon(icon, color: iconColor, size: 20),
+            ],
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2D3748),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              color: Color(0xFFA0AEC0),
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationCard(String title, String subtitle, String badgeCount, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -229,34 +203,63 @@ class DashboardPage extends StatelessWidget {
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, color: color, size: 24),
               ),
-              const Icon(Icons.more_vert, color: Colors.grey),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  badgeCount,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF4A5568),
+                  ),
+                ),
+              ),
             ],
           ),
-          const Spacer(),
+          const SizedBox(height: 16),
           Text(
-            value,
+            title,
             style: const TextStyle(
-              fontSize: 28,
+              fontSize: 15,
               fontWeight: FontWeight.bold,
               color: Color(0xFF2D3748),
             ),
           ),
           const SizedBox(height: 4),
           Text(
-            title,
+            subtitle,
             style: const TextStyle(
+              fontSize: 13,
               color: Color(0xFF718096),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const Spacer(),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: () {},
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: Colors.grey.shade300),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                foregroundColor: const Color(0xFF2D3748),
+              ),
+              child: const Text('Open Modules'),
             ),
           ),
         ],
@@ -270,83 +273,74 @@ class DashboardPage extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Notifications & Recent Activity',
+            'Recent Activity',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
               color: Color(0xFF2D3748),
             ),
           ),
-          const SizedBox(height: 20),
-          _buildActivityItem(
-            'New Slaughter Request',
-            'Requested by: Juan Dela Cruz for 5 Hogs',
-            '10 mins ago',
-            Icons.add_task,
-            Colors.blue,
+          const SizedBox(height: 4),
+          const Text(
+            'latest operations in the system',
+            style: TextStyle(
+              fontSize: 14,
+              color: Color(0xFF718096),
+            ),
           ),
-          _buildActivityItem(
-            'Inspection Completed',
-            'Batch #8271 has passed the hygiene inspection.',
-            '1 hour ago',
-            Icons.verified,
-            Colors.green,
-          ),
-          _buildActivityItem(
-            'System Alert',
-            'Scheduled maintenance on Sunday at 2:00 AM.',
-            '5 hours ago',
-            Icons.warning,
-            Colors.orange,
-          ),
+          const SizedBox(height: 24),
+          _buildActivityItem('Livestock received', 'REF-2025-001', '10 mins ago', Colors.green),
+          const Divider(height: 24),
+          _buildActivityItem('Document verified', 'REF-2025-002', '25 mins ago', Colors.green),
+          const Divider(height: 24),
+          _buildActivityItem('Payment processed', 'REF-2025-003', '45 mins ago', Colors.green),
+          const Divider(height: 24),
+          _buildActivityItem('Awaiting inspection', 'REF-2025-004', '1 hour ago', Colors.orange),
         ],
       ),
     );
   }
 
-  Widget _buildActivityItem(String title, String subtitle, String time, IconData icon, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.1),
-            child: Icon(icon, color: color, size: 20),
+  Widget _buildActivityItem(String title, String subtitle, String time, Color color) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color,
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
-                ),
-                Text(
-                  subtitle,
-                  style: const TextStyle(color: Color(0xFF718096), fontSize: 13),
-                ),
-              ],
-            ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF2D3748)),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: const TextStyle(color: Color(0xFF718096), fontSize: 13),
+              ),
+            ],
           ),
-          Text(
-            time,
-            style: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 12),
-          ),
-        ],
-      ),
+        ),
+        Text(
+          time,
+          style: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 12),
+        ),
+      ],
     );
   }
 }
