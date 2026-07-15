@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -50,6 +51,10 @@ class _LoginPageState extends State<LoginPage> {
           _showError('Access denied. Admin privileges required.');
           return;
         }
+
+        // Save the "keep me logged in" preference
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
