@@ -29,7 +29,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF218358)),
         useMaterial3: true,
-        fontFamily: 'Roboto', // Professional Sans Serif
+        fontFamily: 'Roboto',
       ),
       home: const AuthGate(),
       routes: {

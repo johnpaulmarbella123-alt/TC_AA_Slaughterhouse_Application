@@ -173,9 +173,10 @@ class _NotifyPageState extends State<NotifyPage> {
   void _handleAction(String? type, Map<String, dynamic> data, Map<String, dynamic> notif) {
     switch (type) {
       case 'receipt_issued':
+        final requestId = data['request_id'];
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const ReceiptDetailScreen()),
+          MaterialPageRoute(builder: (_) => ReceiptDetailScreen(requestId: requestId)),
         );
         break;
 
@@ -185,6 +186,18 @@ class _NotifyPageState extends State<NotifyPage> {
           MaterialPageRoute(
             builder: (_) => CondemnationSlipScreen(data: data),
           ),
+        );
+        break;
+
+      case 'anti_mortem_failed':
+        NotificationOptionsDialog.show(
+          context: context,
+          notifType: 'anti_mortem_failed',
+          data: data,
+          title: (notif['title'] ?? '').toString(),
+          onReschedule: () {
+            widget.onNavigateToTab?.call(1);
+          },
         );
         break;
 
@@ -199,6 +212,14 @@ class _NotifyPageState extends State<NotifyPage> {
             widget.onNavigateToTab?.call(1); // Requests tab
           },
         );
+        break;
+
+      case 'pickup_approved':
+        _showPickupApprovedDialog(notif, data);
+        break;
+
+      case 'confine_confirmed':
+        _showConfineConfirmedDialog(notif, data);
         break;
 
       case 'request_status_changed':
@@ -244,6 +265,174 @@ class _NotifyPageState extends State<NotifyPage> {
     );
   }
 
+  void _showPickupApprovedDialog(Map<String, dynamic> notif, Map<String, dynamic> data) {
+    final pickupDate = data['pickup_date'] ?? '';
+    final pickupTime = data['pickup_time'] ?? '8:00 AM';
+    final adminNotes = data['admin_notes'] ?? '';
+    final livestock = data['livestock_type'] ?? 'Livestock';
+
+    String formattedDate = pickupDate;
+    try {
+      if (pickupDate.toString().isNotEmpty) {
+        final dt = DateTime.parse(pickupDate.toString());
+        formattedDate = '${dt.month}/${dt.day}/${dt.year}';
+      }
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.check_circle, size: 20, color: Colors.green.shade600),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('Pickup Approved',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              (notif['message'] ?? '').toString(),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _pickupRow('Livestock', livestock),
+                  _pickupRow('Pickup Date', formattedDate),
+                  _pickupRow('Pickup Time', pickupTime),
+                  _pickupRow('Location', 'Tabaco City Slaughterhouse'),
+                  if (adminNotes.toString().isNotEmpty)
+                    _pickupRow('Notes', adminNotes.toString()),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK', style: TextStyle(color: Color(0xFF0A3D2E))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pickupRow(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text('$label:', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+        ),
+        Expanded(
+          child: Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+        ),
+      ],
+    ),
+  );
+
+  void _showConfineConfirmedDialog(Map<String, dynamic> notif, Map<String, dynamic> data) {
+    final newDate = data['new_date'] ?? '';
+    final adminNotes = data['admin_notes'] ?? '';
+    final livestock = data['livestock_type'] ?? 'Livestock';
+
+    String formattedDate = newDate;
+    try {
+      if (newDate.toString().isNotEmpty) {
+        final dt = DateTime.parse(newDate.toString());
+        formattedDate = '${dt.month}/${dt.day}/${dt.year}';
+      }
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.local_hospital, size: 20, color: Colors.blue.shade600),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('Confinement Confirmed',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              (notif['message'] ?? '').toString(),
+              style: const TextStyle(fontSize: 13, color: Colors.black87),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _pickupRow('Livestock', livestock),
+                  _pickupRow('New Schedule', formattedDate),
+                  _pickupRow('Location', 'Tabaco City Slaughterhouse'),
+                  if (adminNotes.toString().isNotEmpty)
+                    _pickupRow('Notes', adminNotes.toString()),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK', style: TextStyle(color: Color(0xFF0A3D2E))),
+          ),
+        ],
+      ),
+    );
+  }
+
   // =========================
   // ICON + BADGE CONFIG
   // =========================
@@ -259,10 +448,21 @@ class _NotifyPageState extends State<NotifyPage> {
         final status = data['status'] ?? '';
         final approved = status == 'approved';
         return _NotifStyle(
-          icon: approved ? Icons.verified : Icons.block,
+          icon: approved ? Icons.check_circle : Icons.block,
           iconColor: approved ? const Color(0xFF1A8C62) : const Color(0xFFC0392B),
           iconBg: approved ? const Color(0xFFE4F8F0) : const Color(0xFFFCEAEA),
           actionLabel: approved ? null : 'Reschedule',
+          actionColor: const Color(0xFFA32D2D),
+        );
+      case 'anti_mortem_failed':
+        return _NotifStyle(
+          icon: Icons.close,
+          iconColor: const Color(0xFFC0392B),
+          iconBg: const Color(0xFFFCEAEA),
+          badge: 'Health Issue Detected',
+          badgeBg: const Color(0xFFFCEAEA),
+          badgeText: const Color(0xFFA32D2D),
+          actionLabel: 'View Options',
           actionColor: const Color(0xFFA32D2D),
         );
       case 'health_issue':
@@ -281,18 +481,40 @@ class _NotifyPageState extends State<NotifyPage> {
           icon: Icons.close,
           iconColor: const Color(0xFFC0392B),
           iconBg: const Color(0xFFFCEAEA),
-          badge: 'Post-mortem inspection failed',
+          badge: 'Post-Mortem Result Failed',
           badgeBg: const Color(0xFFFFF3E5),
           badgeText: const Color(0xFF854F0B),
           actionLabel: 'View condemnation slip',
           actionColor: const Color(0xFF854F0B),
+        );
+      case 'pickup_approved':
+        return _NotifStyle(
+          icon: Icons.check_circle,
+          iconColor: const Color(0xFF1A8C62),
+          iconBg: const Color(0xFFE4F8F0),
+          badge: 'Pickup Approved',
+          badgeBg: const Color(0xFFE4F8F0),
+          badgeText: const Color(0xFF0A3D2E),
+          actionLabel: 'View Details',
+          actionColor: const Color(0xFF0F6E56),
+        );
+      case 'confine_confirmed':
+        return _NotifStyle(
+          icon: Icons.local_hospital,
+          iconColor: const Color(0xFF185FA5),
+          iconBg: const Color(0xFFE6F1FB),
+          badge: 'Confinement Confirmed',
+          badgeBg: const Color(0xFFE6F1FB),
+          badgeText: const Color(0xFF185FA5),
+          actionLabel: 'View Details',
+          actionColor: const Color(0xFF185FA5),
         );
       case 'receipt_issued':
         return _NotifStyle(
           icon: Icons.check_circle,
           iconColor: const Color(0xFF1A8C62),
           iconBg: const Color(0xFFE4F8F0),
-          actionLabel: 'View receipt & pay',
+          actionLabel: 'View Receipt & Pay',
           actionColor: const Color(0xFF0F6E56),
         );
       case 'operation_failed':
@@ -320,15 +542,43 @@ class _NotifyPageState extends State<NotifyPage> {
           iconColor: const Color(0xFFC26E00),
           iconBg: const Color(0xFFFFF3E5),
         );
+      case 'doc_verified':
+        return _NotifStyle(
+          icon: Icons.check_circle,
+          iconColor: const Color(0xFF1A8C62),
+          iconBg: Colors.transparent,
+          imagePath: 'assets/images/docu.verify.png',
+        );
+      case 'doc_rejected':
+        return _NotifStyle(
+          icon: Icons.close,
+          iconColor: const Color(0xFFC0392B),
+          iconBg: Colors.transparent,
+          imagePath: 'assets/images/docu_reject.png',
+        );
+      case 'request_approved':
+        return _NotifStyle(
+          icon: Icons.check_circle,
+          iconColor: const Color(0xFF1A8C62),
+          iconBg: const Color(0xFFE4F8F0),
+        );
+      case 'request_rejected':
+        return _NotifStyle(
+          icon: Icons.block,
+          iconColor: const Color(0xFFC0392B),
+          iconBg: const Color(0xFFFCEAEA),
+          actionLabel: 'Reschedule',
+          actionColor: const Color(0xFFA32D2D),
+        );
       case 'report_filed':
         return _NotifStyle(
-          icon: Icons.notifications,
-          iconColor: const Color(0xFFD32F2F),
-          iconBg: const Color(0xFFFFEBEE),
+          icon: Icons.check_circle,
+          iconColor: const Color(0xFF1A8C62),
+          iconBg: const Color(0xFFE4F8F0),
         );
       default:
         return _NotifStyle(
-          icon: Icons.notifications,
+          icon: Icons.check_circle,
           iconColor: Colors.grey,
           iconBg: Colors.grey.shade100,
         );
@@ -553,7 +803,7 @@ class _NotifCard extends StatelessWidget {
     return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Icon
+            // Icon or custom image
             Container(
               width: 40,
               height: 40,
@@ -561,7 +811,16 @@ class _NotifCard extends StatelessWidget {
                 color: style.iconBg,
                 shape: BoxShape.circle,
               ),
-              child: Icon(style.icon, color: style.iconColor, size: 20),
+              child: style.imagePath != null
+                  ? ClipOval(
+                      child: Image.asset(
+                        style.imagePath!,
+                        width: 40,
+                        height: 40,
+                        fit: BoxFit.cover,
+                      ),
+                    )
+                  : Icon(style.icon, color: style.iconColor, size: 20),
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -713,6 +972,8 @@ class _NotifStyle {
   final Color iconColor, iconBg;
   final String? badge, actionLabel;
   final Color? badgeBg, badgeText, actionColor;
+  /// Optional asset path — when set, renders an image instead of the icon.
+  final String? imagePath;
 
   const _NotifStyle({
     required this.icon,
@@ -723,5 +984,6 @@ class _NotifStyle {
     this.badgeBg,
     this.badgeText,
     this.actionColor,
+    this.imagePath,
   });
 }

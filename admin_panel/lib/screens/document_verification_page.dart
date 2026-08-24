@@ -46,7 +46,7 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('DocVerification load error: ' + e.toString());
+      debugPrint('DocVerification load error: ${e.toString()}');
       setState(() => _isLoading = false);
     }
   }
@@ -59,8 +59,8 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
       if (userId != null) {
         final refNo = _refNo(req);
         final msg = reason.isNotEmpty
-            ? 'Your request (' + refNo + ') was cancelled: ' + reason + '. Please resubmit with correct documents.'
-            : 'Your request (' + refNo + ') was cancelled due to document issues. Please resubmit with correct documents.';
+            ? 'Your request ($refNo) was cancelled: $reason. Please resubmit with correct documents.'
+            : 'Your request ($refNo) was cancelled due to document issues. Please resubmit with correct documents.';
         await supabase.from('notifications').insert({'user_id': userId, 'title': 'Document Verification Failed', 'message': msg, 'is_read': false, 'type': 'doc_rejected'});
       }
       if (mounted) {
@@ -71,7 +71,7 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         _loadRequests();
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ' + e.toString()), backgroundColor: Colors.redAccent));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}'), backgroundColor: Colors.redAccent));
     }
   }
 
@@ -81,7 +81,7 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
   }
 
   String _refNo(Map<String, dynamic> req) =>
-      'MI-' + DateTime.now().year.toString() + '-' + req['id'].toString().padLeft(3, '0');
+      'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
 
   String _formatDate(dynamic v) {
     if (v == null) return '—';
@@ -177,8 +177,8 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         const SizedBox(height: 12),
         Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
         const SizedBox(height: 6),
-        Text('In Market – ' + m.toString(), style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-        Text('In Barangay – ' + b.toString(), style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
+        Text('In Market – ${m.toString()}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+        Text('In Barangay – ${b.toString()}', style: TextStyle(fontSize: 12, color: Colors.grey.shade500, fontWeight: FontWeight.w600)),
       ]),
     );
   }
@@ -212,7 +212,7 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
                   rows: requests.map((req) => DataRow(cells: [
                     DataCell(Text(_refNo(req), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2D6A4F)))),
                     DataCell(Text(req['customer_name'] ?? '—')),
-                    DataCell(Text((req['animal_count'] ?? 0).toString() + ' head(s)\n' + (req['livestock_type'] ?? ''))),
+                    DataCell(Text('${(req['animal_count'] ?? 0)} head(s)\n${(req['livestock_type'] ?? '')}')),
                     DataCell(Text(req['marking'] ?? '—')),
                     DataCell(SizedBox(width: 250, child: _buildDocBadges(req, isBarangay))),
                     DataCell(SizedBox(width: 100, child: Text(_formatDate(req['preferred_date'])))),
@@ -298,18 +298,18 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
     if (url.isEmpty) return;
     final uri = Uri.tryParse(url);
     if (uri == null) return;
-    try { if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (e) { debugPrint('URL launch error: ' + e.toString()); }
+    try { if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (e) { debugPrint('URL launch error: ${e.toString()}'); }
   }
 
   Future<void> _saveRecord() async {
     setState(() => _isSaving = true);
     try {
       final req = widget.request;
-      final refNo = 'MI-' + DateTime.now().year.toString() + '-' + req['id'].toString().padLeft(3, '0');
+      final refNo = 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
       await widget.supabase.from('requests').update({'status': 'doc_verified'}).eq('id', req['id']);
       final userId = req['user_id'];
       if (userId != null) {
-        await widget.supabase.from('notifications').insert({'user_id': userId, 'title': 'Documents Verified', 'message': 'Your documents for request ' + refNo + ' have been verified. Your request is now proceeding to the next stage.', 'is_read': false, 'type': 'doc_verified'});
+        await widget.supabase.from('notifications').insert({'user_id': userId, 'title': 'Documents Verified', 'message': 'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.', 'is_read': false, 'type': 'doc_verified'});
       }
       if (mounted) {
         Navigator.pop(context);
@@ -321,14 +321,14 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
       }
     } catch (e) {
       setState(() => _isSaving = false);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ' + e.toString()), backgroundColor: Colors.redAccent));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}'), backgroundColor: Colors.redAccent));
     }
   }
   @override
   Widget build(BuildContext context) {
     final req = widget.request;
     final isBarangay = req['request_type'] == 'barangay';
-    final refNo = 'MI-' + DateTime.now().year.toString() + '-' + req['id'].toString().padLeft(3, '0');
+    final refNo = 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
     final dateStr = req['preferred_date'] != null ? DateFormat('MM/dd/yyyy').format(DateTime.parse(req['preferred_date'])) : '—';
 
     return Dialog(
@@ -336,10 +336,10 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
       child: Container(
         width: 580, padding: const EdgeInsets.all(28),
         child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Verify Documents — ' + (isBarangay ? 'In Barangay' : 'In Market'),
+          Text('Verify Documents — ${isBarangay ? 'In Barangay' : 'In Market'}',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
           const SizedBox(height: 4),
-          Text('Review and verify all required documents for ' + (req['customer_name'] ?? 'Customer'),
+          Text('Review and verify all required documents for ${req['customer_name'] ?? 'Customer'}',
             style: const TextStyle(fontSize: 13, color: Color(0xFF718096))),
           const SizedBox(height: 20),
 

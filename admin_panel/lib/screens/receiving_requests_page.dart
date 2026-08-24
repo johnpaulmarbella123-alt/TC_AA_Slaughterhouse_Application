@@ -704,23 +704,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
     );
   }
 
-  Widget _buildAntiMortemBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF38A169),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Text(
-        'PASSED',
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
 
   Widget _buildStatusBadge(String status) {
     Color bgColor;
@@ -1088,7 +1071,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                         _buildLabel('Animal Type'),
                         const SizedBox(height: 6),
                         DropdownButtonFormField<String>(
-                          value: _selectedAnimalType,
+                          initialValue: _selectedAnimalType,
                           hint: const Text('Select Type', style: TextStyle(fontSize: 13)),
                           decoration: _dropdownDecoration(),
                           items: _animalTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
@@ -1171,7 +1154,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
             )
           : DropdownButtonFormField<String>(
-              value: _selectedProvince,
+              initialValue: _selectedProvince,
               isExpanded: true,
               hint: const Text('Select Province', style: TextStyle(fontSize: 13)),
               decoration: _dropdownDecoration(),
@@ -1201,7 +1184,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
             )
           : DropdownButtonFormField<String>(
-              value: _selectedMunicipality,
+              initialValue: _selectedMunicipality,
               isExpanded: true,
               hint: const Text('Select Municipality', style: TextStyle(fontSize: 13)),
               decoration: _dropdownDecoration(),
@@ -1233,7 +1216,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
             )
           : DropdownButtonFormField<String>(
-              value: _selectedBarangay,
+              initialValue: _selectedBarangay,
               isExpanded: true,
               hint: const Text('Select Barangay', style: TextStyle(fontSize: 13)),
               decoration: _dropdownDecoration(),

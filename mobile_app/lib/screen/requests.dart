@@ -131,6 +131,8 @@ class _RequestsContentState extends State<RequestsContent> {
             'address': _addressController.text.trim(),
             'market_stall_number':
                 isBarangay ? null : _marketStallController.text.trim(),
+            'market_name':
+                isBarangay ? null : _marketNameController.text.trim(),
             'preferred_date': preferredDateIso,
             'marking': _markingController.text.trim(),
             'special_instruction': _specialInstructionsController.text.trim(),

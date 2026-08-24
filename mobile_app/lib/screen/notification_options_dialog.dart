@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Bottom-sheet shown when the user taps "View options" on
-/// `health_issue` or `operation_failed` notifications.
+/// Dialog shown when the user taps "View Options" on
+/// `anti_mortem_failed` or `operation_failed` notifications.
 ///
-/// [notifType]  — the notification `type` string
-/// [data]       — the notification `data` JSON map
-/// [title]      — the notification title for the header
-/// [onReschedule] — callback that navigates the user to the Requests tab
+/// For **anti_mortem_failed**: Shows a full-screen modal dialog matching the
+/// mockup design with "Take Livestock Back" and "Confine in Slaughterhouse"
+/// options.
+///
+/// For **operation_failed**: Shows the existing bottom-sheet with reschedule
+/// and contact options.
 class NotificationOptionsDialog {
   static void show({
     required BuildContext context,
@@ -15,33 +18,403 @@ class NotificationOptionsDialog {
     required String title,
     required VoidCallback onReschedule,
   }) {
-    final isHealth = notifType == 'health_issue';
+    if (notifType == 'anti_mortem_failed') {
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => _AntiMortemDialog(
+          data: data,
+          title: title,
+          onDone: () {
+            Navigator.pop(ctx);
+          },
+        ),
+      );
+    } else {
+      // operation_failed / health_issue — keep existing bottom-sheet
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => _OperationFailedSheet(
+          data: data,
+          title: title,
+          onReschedule: () {
+            Navigator.pop(ctx);
+            onReschedule();
+          },
+        ),
+      );
+    }
+  }
+}
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => _Sheet(
-        isHealth: isHealth,
-        data: data,
-        title: title,
-        onReschedule: () {
-          Navigator.pop(ctx);
-          onReschedule();
-        },
+// ══════════════════════════════════════════════════════════════
+//  ANTE-MORTEM FAILED DIALOG  (matches the UI mockup)
+// ══════════════════════════════════════════════════════════════
+class _AntiMortemDialog extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final String title;
+  final VoidCallback onDone;
+
+  const _AntiMortemDialog({
+    required this.data,
+    required this.title,
+    required this.onDone,
+  });
+
+  @override
+  State<_AntiMortemDialog> createState() => _AntiMortemDialogState();
+}
+
+class _AntiMortemDialogState extends State<_AntiMortemDialog> {
+  bool _isSubmitting = false;
+
+  String _val(String key, [String fallback = 'N/A']) =>
+      (widget.data[key] ?? fallback).toString();
+
+  Future<void> _submitChoice(String choice) async {
+    setState(() => _isSubmitting = true);
+    try {
+      final supabase = Supabase.instance.client;
+      final requestId = widget.data['request_id'];
+
+      if (requestId != null) {
+        await supabase.from('requests').update({
+          'anti_mortem_response': choice,
+          'anti_mortem_response_at': DateTime.now().toIso8601String(),
+        }).eq('id', requestId);
+      }
+
+      if (mounted) {
+        widget.onDone();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              choice == 'confine'
+                  ? 'Your livestock will be confined. You\'ll be notified of the new schedule.'
+                  : 'Pickup requested. The admin will approve your pickup time.',
+            ),
+            backgroundColor: const Color(0xFF2D6A4F),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final livestockType = _val('livestock_type', 'Livestock');
+    final vetFindings = _val('veterinary_findings',
+        'Animal shows signs of illness. Not suitable for processing per NMIS standards.');
+    final inspector = _val('inspector_name', 'Veterinary Inspector');
+
+    return Dialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── HEADER ──
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Ante-Mortem Inspection Failed',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A202C),
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'What would you like to do?',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // ── RED HEALTH INSPECTION CARD ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFCEAEA),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE8B4B4)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Badge header
+                    Row(
+                      children: [
+                        Container(
+                          width: 22,
+                          height: 22,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFC0392B),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.warning_amber_rounded,
+                              size: 14, color: Colors.white),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Health Inspection Failed',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFC0392B),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$livestockType failed the ante-mortem inspection',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF8B3A3A)),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Veterinary findings
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Veterinarian\'s Findings:',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6B2020),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            vetFindings,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF6B2020),
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Inspector: $inspector',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF8B5E5E),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // ── INFO BANNER ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF9E6),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE8D78A)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Color(0xFF8B7A2B)),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your livestock did not pass the ante-mortem inspection. Please choose one of the following options:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFF6B5E1A),
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // ── CHOOSE AN OPTION LABEL ──
+              const Text(
+                'Choose an option:',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF4A5568),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ── OPTION 1: TAKE LIVESTOCK BACK ──
+              _OptionTile(
+                icon: Icons.undo_rounded,
+                iconBg: const Color(0xFFFFF3E5),
+                iconColor: const Color(0xFFD4820A),
+                title: 'Take Livestock Back',
+                subtitle: 'Take your livestock home. No processing charge will be applied.',
+                isSubmitting: _isSubmitting,
+                onTap: () => _submitChoice('take_back'),
+              ),
+              const SizedBox(height: 10),
+
+              // ── OPTION 2: CONFINE IN SLAUGHTERHOUSE ──
+              _OptionTile(
+                icon: Icons.local_hospital_rounded,
+                iconBg: const Color(0xFFE6F1FB),
+                iconColor: const Color(0xFF185FA5),
+                title: 'Confine in Slaughterhouse',
+                subtitle: 'Leave livestock in facility for quarantine and monitoring.',
+                isSubmitting: _isSubmitting,
+                onTap: () => _submitChoice('confine'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-class _Sheet extends StatelessWidget {
-  final bool isHealth;
+class _OptionTile extends StatelessWidget {
+  final IconData icon;
+  final Color iconBg, iconColor;
+  final String title, subtitle;
+  final bool isSubmitting;
+  final VoidCallback onTap;
+
+  const _OptionTile({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.isSubmitting,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: isSubmitting ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: iconBg,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: iconColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          fontSize: 10, color: Colors.grey, height: 1.3)),
+                ],
+              ),
+            ),
+            isSubmitting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.chevron_right,
+                    color: Colors.grey.shade400, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  OPERATION FAILED SHEET  (preserved from original)
+// ══════════════════════════════════════════════════════════════
+class _OperationFailedSheet extends StatelessWidget {
   final Map<String, dynamic> data;
   final String title;
   final VoidCallback onReschedule;
 
-  const _Sheet({
-    required this.isHealth,
+  const _OperationFailedSheet({
     required this.data,
     required this.title,
     required this.onReschedule,
@@ -78,32 +451,25 @@ class _Sheet extends StatelessWidget {
               Container(
                 width: 40,
                 height: 40,
-                decoration: BoxDecoration(
-                  color: isHealth
-                      ? const Color(0xFFFCEAEA)
-                      : const Color(0xFFFCEAEA),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFCEAEA),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  isHealth ? Icons.health_and_safety : Icons.error_outline,
-                  color: const Color(0xFFC0392B),
-                  size: 20,
-                ),
+                child: const Icon(Icons.error_outline,
+                    color: Color(0xFFC0392B), size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      isHealth ? "Health Issue Detected" : "Operation Failed",
-                      style: const TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600),
-                    ),
+                    const Text("Operation Failed",
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
                     Text(title,
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey),
+                        style:
+                            const TextStyle(fontSize: 11, color: Colors.grey),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis),
                   ],
@@ -129,15 +495,9 @@ class _Sheet extends StatelessWidget {
                     style:
                         TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
-                if (isHealth) ...[
-                  _detailRow("Livestock:", _val('livestock_type')),
-                  _detailRow("Issue:", _val('issue', 'Health issue detected')),
-                  _detailRow("Detected by:", _val('inspector')),
-                ] else ...[
-                  _detailRow("Operation:", _val('operation', 'Slaughter')),
-                  _detailRow("Reason:", _val('reason')),
-                  _detailRow("Reference:", _val('reference_no')),
-                ],
+                _detailRow("Operation:", _val('operation', 'Slaughter')),
+                _detailRow("Reason:", _val('reason')),
+                _detailRow("Reference:", _val('reference_no')),
               ],
             ),
           ),
@@ -212,7 +572,7 @@ class _Sheet extends StatelessWidget {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 18),

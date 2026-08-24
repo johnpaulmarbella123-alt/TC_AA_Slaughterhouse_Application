@@ -13,24 +13,144 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final supabase = Supabase.instance.client;
 
-  int _pendingRequestsCount = 0;
+  int _pendingCount = 0;
+  int _docVerifCount = 0;
+  int _slaughterCount = 0;
+  int _paymentCount = 0;
+  int _releasingCount = 0;
+  int _reportsWeekCount = 0;
   bool _isLoadingCount = true;
+
+  List<Map<String, dynamic>> _recentActivities = [];
 
   @override
   void initState() {
     super.initState();
     _loadPendingCount();
+    _loadRecentActivities();
+  }
+
+  Future<void> _loadRecentActivities() async {
+    try {
+      final reqs = await supabase.from('requests').select('id, created_at, released_at, status').order('created_at', ascending: false).limit(10);
+      final insps = await supabase.from('slaughter_inspection').select('request_id, created_at').order('created_at', ascending: false).limit(10);
+      final payments = await supabase.from('payments').select('request_id, created_at').order('created_at', ascending: false).limit(10);
+
+      final activities = <Map<String, dynamic>>[];
+
+      String refNo(dynamic id) {
+        return 'MI-${DateTime.now().year}-${id.toString().padLeft(3, '0')}';
+      }
+
+      for (var r in reqs) {
+        final dt = DateTime.tryParse(r['created_at'].toString());
+        if (dt != null) {
+          activities.add({
+            'title': 'New Request Received',
+            'subtitle': refNo(r['id']),
+            'time': dt,
+            'color': Colors.blueAccent,
+          });
+        }
+        
+        if (r['released_at'] != null) {
+          final relDt = DateTime.tryParse(r['released_at'].toString());
+          if (relDt != null) {
+            activities.add({
+              'title': 'Meat Released',
+              'subtitle': refNo(r['id']),
+              'time': relDt,
+              'color': Colors.orange,
+            });
+          }
+        }
+      }
+
+      for (var i in insps) {
+        final dt = DateTime.tryParse(i['created_at'].toString());
+        if (dt != null) {
+          activities.add({
+            'title': 'Slaughter & Inspection',
+            'subtitle': refNo(i['request_id']),
+            'time': dt,
+            'color': Colors.green,
+          });
+        }
+      }
+
+      for (var p in payments) {
+        final dt = DateTime.tryParse(p['created_at'].toString());
+        if (dt != null) {
+          activities.add({
+            'title': 'Payment Processed',
+            'subtitle': refNo(p['request_id']),
+            'time': dt,
+            'color': Colors.purpleAccent,
+          });
+        }
+      }
+
+      activities.sort((a, b) => (b['time'] as DateTime).compareTo(a['time'] as DateTime));
+
+      if (mounted) {
+        setState(() {
+          _recentActivities = activities.take(5).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Dashboard: error loading recent activities: $e');
+    }
   }
 
   Future<void> _loadPendingCount() async {
     try {
-      final result = await supabase
+      final data = await supabase
           .from('requests')
-          .select('id')
-          .eq('status', 'pending');
+          .select('status, created_at');
+          
+      int pending = 0;
+      int docVerif = 0;
+      int slaughter = 0;
+      int payment = 0;
+      int releasing = 0;
+      int reportsWeek = 0;
+
+      final now = DateTime.now();
+      final oneWeekAgo = now.subtract(const Duration(days: 7));
+
+      final reqList = List<Map<String, dynamic>>.from(data);
+      for (var req in reqList) {
+        final st = req['status']?.toString() ?? '';
+        
+        if (st == 'pending') {
+          pending++;
+        } else if (st == 'approved') {
+          docVerif++;
+        } else if (st == 'doc_verified') {
+          slaughter++;
+        } else if (st == 'releasable' || st == 'payment_pending') {
+          payment++;
+        } else if (st == 'paid') {
+          releasing++;
+        }
+        
+        try {
+          final dtStr = req['created_at']?.toString() ?? '';
+          if (dtStr.isNotEmpty) {
+            final dt = DateTime.parse(dtStr);
+            if (dt.isAfter(oneWeekAgo)) reportsWeek++;
+          }
+        } catch (_) {}
+      }
+
       if (mounted) {
         setState(() {
-          _pendingRequestsCount = result.length;
+          _pendingCount = pending;
+          _docVerifCount = docVerif;
+          _slaughterCount = slaughter;
+          _paymentCount = payment;
+          _releasingCount = releasing;
+          _reportsWeekCount = reportsWeek;
           _isLoadingCount = false;
         });
       }
@@ -168,20 +288,60 @@ class _DashboardPageState extends State<DashboardPage> {
                   children: [
                     _buildNavigationCard(
                       'Receiving & New Requests',
-                      _pendingRequestsCount > 0
-                          ? '$_pendingRequestsCount new request${_pendingRequestsCount == 1 ? '' : 's'} pending'
+                      _pendingCount > 0
+                          ? '$_pendingCount new request${_pendingCount == 1 ? '' : 's'} pending'
                           : 'No pending requests',
-                      _isLoadingCount ? '…' : '$_pendingRequestsCount',
+                      _isLoadingCount ? '…' : '$_pendingCount',
                       Icons.assignment_outlined,
-                      _pendingRequestsCount > 0 ? Colors.redAccent : Colors.grey,
+                      _pendingCount > 0 ? Colors.redAccent : Colors.grey,
                       1,
-                      hasPendingAlert: _pendingRequestsCount > 0,
+                      hasPendingAlert: _pendingCount > 0,
                     ),
-                    _buildNavigationCard('Document Verification', 'verified', '21', Icons.fact_check_outlined, Colors.blueAccent, 2),
-                    _buildNavigationCard('Slaughter & Inspection', 'Processed', '18', Icons.content_cut, Colors.green, 3),
-                    _buildNavigationCard('Payment & Cashiering', 'Complete', '16', Icons.payment_outlined, Colors.orangeAccent, 4),
-                    _buildNavigationCard('Meat Releasing', 'Released', '15', Icons.inventory_2_outlined, Colors.orange, 5),
-                    _buildNavigationCard('Report & Records', 'This week', '168', Icons.receipt_long_outlined, Colors.pinkAccent, 6),
+                    _buildNavigationCard(
+                      'Document Verification',
+                      _docVerifCount > 0 ? '$_docVerifCount pending verification' : 'verified',
+                      _isLoadingCount ? '…' : '$_docVerifCount',
+                      Icons.fact_check_outlined,
+                      _docVerifCount > 0 ? Colors.blueAccent : Colors.grey,
+                      2,
+                      hasPendingAlert: _docVerifCount > 0,
+                    ),
+                    _buildNavigationCard(
+                      'Slaughter & Inspection',
+                      _slaughterCount > 0 ? '$_slaughterCount awaiting slaughter' : 'Processed',
+                      _isLoadingCount ? '…' : '$_slaughterCount',
+                      Icons.content_cut,
+                      _slaughterCount > 0 ? Colors.green : Colors.grey,
+                      3,
+                      hasPendingAlert: _slaughterCount > 0,
+                    ),
+                    _buildNavigationCard(
+                      'Payment & Cashiering',
+                      _paymentCount > 0 ? '$_paymentCount pending payment' : 'Complete',
+                      _isLoadingCount ? '…' : '$_paymentCount',
+                      Icons.payment_outlined,
+                      _paymentCount > 0 ? Colors.orangeAccent : Colors.grey,
+                      4,
+                      hasPendingAlert: _paymentCount > 0,
+                    ),
+                    _buildNavigationCard(
+                      'Meat Releasing',
+                      _releasingCount > 0 ? '$_releasingCount ready for release' : 'Released',
+                      _isLoadingCount ? '…' : '$_releasingCount',
+                      Icons.inventory_2_outlined,
+                      _releasingCount > 0 ? Colors.orange : Colors.grey,
+                      5,
+                      hasPendingAlert: _releasingCount > 0,
+                    ),
+                    _buildNavigationCard(
+                      'Report & Records',
+                      'This week',
+                      _isLoadingCount ? '…' : '$_reportsWeekCount',
+                      Icons.receipt_long_outlined,
+                      Colors.pinkAccent,
+                      6,
+                      hasPendingAlert: false,
+                    ),
                   ],
                 );
               },
@@ -386,16 +546,37 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
           const SizedBox(height: 24),
-          _buildActivityItem('Livestock received', 'REF-2025-001', '10 mins ago', Colors.green),
-          const Divider(height: 24),
-          _buildActivityItem('Document verified', 'REF-2025-002', '25 mins ago', Colors.green),
-          const Divider(height: 24),
-          _buildActivityItem('Payment processed', 'REF-2025-003', '45 mins ago', Colors.green),
-          const Divider(height: 24),
-          _buildActivityItem('Awaiting inspection', 'REF-2025-004', '1 hour ago', Colors.orange),
+          if (_recentActivities.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: Text('No recent activity', style: TextStyle(color: Colors.grey))),
+            )
+          else
+            ..._recentActivities.asMap().entries.expand((entry) {
+              final idx = entry.key;
+              final act = entry.value;
+              final isLast = idx == _recentActivities.length - 1;
+              return [
+                _buildActivityItem(
+                  act['title'],
+                  act['subtitle'],
+                  _timeAgo(act['time']),
+                  act['color'],
+                ),
+                if (!isLast) const Divider(height: 24),
+              ];
+            }),
         ],
       ),
     );
+  }
+
+  String _timeAgo(DateTime d) {
+    final diff = DateTime.now().difference(d);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
+    return 'Just now';
   }
 
   Widget _buildActivityItem(String title, String subtitle, String time, Color color) {
