@@ -1,0 +1,119 @@
+{
+  "nodes": [
+    {
+      "id": "step1",
+      "x": -600,
+      "y": 0,
+      "width": 220,
+      "height": 140,
+      "type": "text",
+      "text": "### 1. Intake Request\n- Mobile user registers livestock\n- Uploads Vet Cert / Permits\n- Status: `pending`",
+      "color": "4"
+    },
+    {
+      "id": "step2",
+      "x": -320,
+      "y": 0,
+      "width": 220,
+      "height": 140,
+      "type": "text",
+      "text": "### 2. Admin Intake Approval\n- Admin reviews Barangay / Market\n- Validates holding pen capacity\n- Status: `approved`",
+      "color": "2"
+    },
+    {
+      "id": "step3",
+      "x": -40,
+      "y": 0,
+      "width": 220,
+      "height": 140,
+      "type": "text",
+      "text": "### 3. Document Verification\n- Animal physical check vs documents\n- Verification pass / fail\n- Status: `doc_verified`",
+      "color": "2"
+    },
+    {
+      "id": "step4",
+      "x": 240,
+      "y": 0,
+      "width": 220,
+      "height": 180,
+      "type": "text",
+      "text": "### 4. Slaughter & Inspection\n- Ante-Mortem pass/fail\n- Stunning, Bleeding, Scalding\n- Post-Mortem inspection\n- Carcass weight recorded\n- Status: `releasable`",
+      "color": "3"
+    },
+    {
+      "id": "step5",
+      "x": 520,
+      "y": 0,
+      "width": 220,
+      "height": 180,
+      "type": "text",
+      "text": "### 5. Cashiering & Payment\n- Fee breakdown calculated\n- GCash (PayMongo) or Cash\n- Receipt `RCP-YYYY-XXX` generated\n- Status: `paid`",
+      "color": "5"
+    },
+    {
+      "id": "step6",
+      "x": 800,
+      "y": 0,
+      "width": 220,
+      "height": 140,
+      "type": "text",
+      "text": "### 6. Meat Release & Dispatch\n- Gate pass verified\n- Timestamp `released_at` saved\n- Status: `completed`",
+      "color": "1"
+    },
+    {
+      "id": "step_condemn",
+      "x": 100,
+      "y": 240,
+      "width": 260,
+      "height": 160,
+      "type": "text",
+      "text": "### Condemnation Branch\n- Ante-Mortem Failed / Post-Mortem Failed\n- Condemnation reason recorded\n- Condemnation slip generated\n- Meat confiscated / incinerated",
+      "color": "1"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1_2",
+      "fromNode": "step1",
+      "fromSide": "right",
+      "toNode": "step2",
+      "toSide": "left"
+    },
+    {
+      "id": "e2_3",
+      "fromNode": "step2",
+      "fromSide": "right",
+      "toNode": "step3",
+      "toSide": "left"
+    },
+    {
+      "id": "e3_4",
+      "fromNode": "step3",
+      "fromSide": "right",
+      "toNode": "step4",
+      "toSide": "left"
+    },
+    {
+      "id": "e4_5",
+      "fromNode": "step4",
+      "fromSide": "right",
+      "toNode": "step5",
+      "toSide": "left"
+    },
+    {
+      "id": "e5_6",
+      "fromNode": "step5",
+      "fromSide": "right",
+      "toNode": "step6",
+      "toSide": "left"
+    },
+    {
+      "id": "e4_condemn",
+      "fromNode": "step4",
+      "fromSide": "bottom",
+      "toNode": "step_condemn",
+      "toSide": "top",
+      "label": "Condemned"
+    }
+  ]
+}

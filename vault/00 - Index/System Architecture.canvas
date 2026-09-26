@@ -1,0 +1,128 @@
+{
+  "nodes": [
+    {
+      "id": "node_clients",
+      "x": -600,
+      "y": -200,
+      "width": 380,
+      "height": 500,
+      "type": "group",
+      "label": "Client Layer (Flutter Multiplatform)",
+      "color": "4"
+    },
+    {
+      "id": "node_mobile",
+      "x": -560,
+      "y": -140,
+      "width": 300,
+      "height": 180,
+      "type": "text",
+      "text": "### Mobile App (Clients)\n- Animal Booking Intake\n- Document Uploads\n- Status Tracking\n- PayMongo GCash / Cash Checkout\n- Illegal Slaughter Reporting\n\n*Target: Android & iOS*",
+      "color": "4"
+    },
+    {
+      "id": "node_admin",
+      "x": -560,
+      "y": 80,
+      "width": 300,
+      "height": 180,
+      "type": "text",
+      "text": "### Admin Panel (Staff & Meat Control)\n- Intake Approvals (Barangay / Market)\n- Document Verification\n- Ante/Post-Mortem Inspections\n- Fee Cashiering & Receipts\n- Legal PDF Production Reports\n\n*Target: Web / Desktop*",
+      "color": "2"
+    },
+    {
+      "id": "node_backend",
+      "x": 0,
+      "y": -250,
+      "width": 420,
+      "height": 600,
+      "type": "group",
+      "label": "Supabase BaaS Backend (PostgreSQL + Auth + Storage)",
+      "color": "3"
+    },
+    {
+      "id": "node_auth",
+      "x": 40,
+      "y": -190,
+      "width": 340,
+      "height": 100,
+      "type": "text",
+      "text": "### Supabase Auth\n- Email / Password Login\n- Session Management\n- Profiles Table Synchronization",
+      "color": "3"
+    },
+    {
+      "id": "node_db",
+      "x": 40,
+      "y": -60,
+      "width": 340,
+      "height": 220,
+      "type": "text",
+      "text": "### PostgreSQL Database\n- `requests` (Slaughter requests)\n- `slaughter_inspection` (Ante/Post-mortem)\n- `payments` (Fees, Receipts, Methods)\n- `notifications` (Realtime alerts)\n- `reports` (Illegal slaughter whistleblowing)\n- `reviews` (Feedback)",
+      "color": "3"
+    },
+    {
+      "id": "node_storage",
+      "x": 40,
+      "y": 190,
+      "width": 340,
+      "height": 120,
+      "type": "text",
+      "text": "### Supabase Storage Buckets\n- `request-documents` (Permits, Certs)\n- `report-evidence` (Incident Photos)\n- `avatars` (User profile images)",
+      "color": "3"
+    },
+    {
+      "id": "node_edge",
+      "x": 580,
+      "y": -160,
+      "width": 320,
+      "height": 220,
+      "type": "text",
+      "text": "### Edge Functions (Deno Runtime)\n- `create-gcash-payment`\n- PayMongo API Integration\n- Payment Link Generation\n- Link Status Verification",
+      "color": "5"
+    },
+    {
+      "id": "node_paymongo",
+      "x": 580,
+      "y": 140,
+      "width": 320,
+      "height": 180,
+      "type": "text",
+      "text": "### PayMongo Gateway (External)\n- GCash Checkout Links\n- Centavo-based transactions\n- Payment lifecycle (`unpaid`, `paid`, `archived`)",
+      "color": "1"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_mobile_db",
+      "fromNode": "node_mobile",
+      "fromSide": "right",
+      "toNode": "node_db",
+      "toSide": "left",
+      "label": "Queries / Mutations"
+    },
+    {
+      "id": "edge_admin_db",
+      "fromNode": "node_admin",
+      "fromSide": "right",
+      "toNode": "node_db",
+      "toSide": "left",
+      "label": "Audit / Workflow Updates"
+    },
+    {
+      "id": "edge_mobile_edge",
+      "fromNode": "node_mobile",
+      "fromSide": "top",
+      "toNode": "node_edge",
+      "toSide": "left",
+      "label": "Trigger GCash Flow"
+    },
+    {
+      "id": "edge_edge_paymongo",
+      "fromNode": "node_edge",
+      "fromSide": "bottom",
+      "toNode": "node_paymongo",
+      "toSide": "top",
+      "label": "REST API (Auth: Secret Key)"
+    }
+  ]
+}
