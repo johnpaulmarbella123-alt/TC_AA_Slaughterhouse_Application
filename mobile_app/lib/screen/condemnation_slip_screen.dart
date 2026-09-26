@@ -1,232 +1,280 @@
 import 'package:flutter/material.dart';
-import 'dashed_line.dart';
-import 'payment.dart' show kMintHeader;
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 /// Detail screen for post-mortem / condemnation slips.
 ///
+/// Designed to look like the official government document.
 /// All fields come from the notification's `data` JSON map.
-/// Missing keys gracefully fall back to 'N/A'.
 class CondemnationSlipScreen extends StatelessWidget {
   final Map<String, dynamic> data;
 
   const CondemnationSlipScreen({super.key, required this.data});
 
-  String _val(String key, [String fallback = 'N/A']) =>
+  String _val(String key, [String fallback = '']) =>
       (data[key] ?? fallback).toString();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: Column(
-        children: [
-          // ── HEADER ──────────────────────────────────────────
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 50, 16, 20),
-            color: kMintHeader,
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Condemnation Slip",
-                    style:
-                        TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                SizedBox(height: 2),
-                Text("Post-mortem inspection result",
-                    style: TextStyle(fontSize: 11, color: Color(0xFF2C2C2A))),
-              ],
-            ),
+      backgroundColor: Colors.grey.shade200,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 1,
+        title: const Text('Condemnation Slip', style: TextStyle(color: Colors.black, fontSize: 16)),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          onPressed: () => Navigator.pop(context),
+        ),
+        iconTheme: const IconThemeData(color: Colors.black),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Container(
+          // Paper-like styling
+          padding: const EdgeInsets.all(20.0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            ],
           ),
-
-          // ── BODY CARD ───────────────────────────────────────
-          Expanded(
-            child: Transform.translate(
-              offset: const Offset(0, -12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.grey.shade200),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── HEADER WITH LOGOS ──
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Left Logo Placeholder (Dept of Agriculture)
+                  Image.asset('assets/images/logo1.png', width: 45, height: 45,
+                    errorBuilder: (context, error, stackTrace) => _fallbackLogo(Icons.account_balance),
                   ),
-                  child: SingleChildScrollView(
+                  const Expanded(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // Back + title row
-                        Row(
-                          children: [
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              icon: const Icon(Icons.arrow_back, size: 18),
-                              onPressed: () => Navigator.pop(context),
-                            ),
-                            const SizedBox(width: 6),
-                            const Text("Condemnation Details",
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Status badge
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFCEAEA),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.cancel,
-                                    size: 16, color: Color(0xFFC0392B)),
-                                SizedBox(width: 6),
-                                Text("Condemned",
-                                    style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFFA32D2D))),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Reference & date
-                        Center(
-                          child: Column(
-                            children: [
-                              Text("Ref: ${_val('reference_no')}",
-                                  style: const TextStyle(
-                                      fontSize: 11, color: Colors.grey)),
-                              const SizedBox(height: 2),
-                              Text("Date: ${_val('date')}",
-                                  style: const TextStyle(
-                                      fontSize: 11, color: Colors.grey)),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        const DashedLine(),
-                        const SizedBox(height: 14),
-
-                        // Customer & livestock info
-                        const Text("Livestock Information",
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        _kv("Customer:", _val('customer_name')),
-                        _kv("Livestock Type:", _val('livestock_type')),
-                        _kv("Animal Count:", _val('animal_count', '1')),
-                        _kv("Weight:", _val('weight')),
-                        const SizedBox(height: 14),
-                        const DashedLine(),
-                        const SizedBox(height: 14),
-
-                        // Inspection result
-                        const Text("Inspection Result",
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        _kv("Inspector:", _val('inspector')),
-                        _kv("Reason:", _val('reason')),
-                        const SizedBox(height: 8),
-
-                        // Remarks box
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFF3E5),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFFE8C77B)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Row(
-                                children: [
-                                  Icon(Icons.info_outline,
-                                      size: 14, color: Color(0xFF854F0B)),
-                                  SizedBox(width: 6),
-                                  Text("Remarks",
-                                      style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF854F0B))),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _val('remarks',
-                                    'No additional remarks provided.'),
-                                style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Color(0xFF854F0B)),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        const DashedLine(),
-                        const SizedBox(height: 14),
-
-                        // Disposition
-                        const Text("Disposition",
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        _kv("Action Taken:",
-                            _val('disposition', 'Condemned & disposed')),
-                        const SizedBox(height: 16),
-
-                        // Info banner
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFCEAEA),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Center(
-                            child: Text(
-                                "This animal did not pass post-mortem inspection",
-                                style: TextStyle(
-                                    fontSize: 10,
-                                    color: Color(0xFFA32D2D))),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Back button
-                        SizedBox(
-                          height: 46,
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pop(context),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.black87,
-                              side: BorderSide(color: Colors.grey.shade300),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
-                            ),
-                            child: const Text("Back to Notifications",
-                                style:
-                                    TextStyle(fontWeight: FontWeight.w600)),
-                          ),
-                        ),
+                        Text("Republic of the Philippines", style: TextStyle(fontSize: 10)),
+                        Text("Province of Albay", style: TextStyle(fontSize: 10)),
+                        Text("CITY OF TABACO", style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),
+                  // Right Logo Placeholder (City of Tabaco)
+                  Image.asset('assets/images/logo2.png', width: 45, height: 45,
+                    errorBuilder: (context, error, stackTrace) => _fallbackLogo(Icons.location_city),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              
+              // ── ESTABLISHMENT INFO ──
+              _buildFormRow("Name of Establishment:", "Tabaco City Slaughterhouse"),
+              Row(
+                children: [
+                  Expanded(child: _buildFormRow("City:", "Tabaco City")),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildFormRow("Province:", "Albay")),
+                ],
+              ),
+              Row(
+                children: [
+                  Expanded(child: _buildFormRow("Date:", _val('date', DateTime.now().toString().split(' ')[0]))),
+                  const SizedBox(width: 12),
+                  Expanded(child: _buildFormRow("Time:", "")),
+                ],
+              ),
+              const SizedBox(height: 24),
+              
+              // ── TITLE ──
+              const Center(
+                child: Text(
+                  "CONDEMNATION SLIP",
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                 ),
               ),
+              const SizedBox(height: 12),
+              
+              // ── PARAGRAPH ──
+              const Text(
+                "Pursuant to Republic Act No. 7394, otherwise known as the Consumer Act of the Philippines under Article 10 and 17; and Republic Act 9296 \"The Meat Inspection Code of the Philippines\" and the Department of Agriculture Administrative Order No. 7, Rules, and Regulations of RA 9296 series of 2005; and NMIS Administrative Order No. 6 the following meat/meat products/processed meat is hereby condemned.",
+                style: TextStyle(fontSize: 9, height: 1.5, fontWeight: FontWeight.w500),
+                textAlign: TextAlign.justify,
+              ),
+              const SizedBox(height: 16),
+              
+              // ── TABLE ──
+              Table(
+                border: TableBorder.all(color: Colors.black, width: 0.5),
+                columnWidths: const {
+                  0: FlexColumnWidth(1.2),
+                  1: FlexColumnWidth(1.0),
+                  2: FlexColumnWidth(1.2),
+                },
+                children: [
+                  const TableRow(
+                    children: [
+                      Padding(
+                        padding: EdgeInsets.all(6.0),
+                        child: Text("FOOD ANIMAL/MEAT/MEAT PRODUCTS/PROCESS MEAT", style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.all(6.0),
+                        child: Text("QUANTITY/WEIGHT", style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                      ),
+                      Padding(
+                        padding: EdgeInsets.all(6.0),
+                        child: Text("CAUSE OF CONDEMNATION", style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                      ),
+                    ],
+                  ),
+                  TableRow(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Text(_val('livestock_type'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Text("${_val('animal_count', '1')} head(s)", style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(6.0),
+                        child: Text(_val('condemnation_reason', 'Failed Inspection'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                      ),
+                    ],
+                  ),
+                  const TableRow(children: [SizedBox(height: 20), SizedBox(height: 20), SizedBox(height: 20)]),
+                  const TableRow(children: [SizedBox(height: 20), SizedBox(height: 20), SizedBox(height: 20)]),
+                ],
+              ),
+              const SizedBox(height: 24),
+              
+              // ── SIGNATURES ──
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text("Condemned by:", style: TextStyle(fontSize: 9)),
+                        const SizedBox(height: 24),
+                        _buildSignatureLine(_val('inspector_name', '')),
+                        const Text("Veterinarian/Meat Control Officer/Meat Inspector", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                        const Text("(Signature Over Printed Name)", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text("Conforme:", style: TextStyle(fontSize: 9)),
+                        const SizedBox(height: 24),
+                        _buildSignatureLine(_val('customer_name', '')),
+                        const Text("Name of Owner/Representative", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                        const Text("(Signature Over Printed Name)", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text("Disposed by:", style: TextStyle(fontSize: 9)),
+                        const SizedBox(height: 24),
+                        _buildSignatureLine(""),
+                        const Text("Veterinarian/Meat Control Officer/Meat Inspector", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                        const Text("(Signature Over Printed Name)", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text("Witness:", style: TextStyle(fontSize: 9)),
+                        const SizedBox(height: 24),
+                        _buildSignatureLine(""),
+                        const Text("(Signature Over Printed Name)", style: TextStyle(fontSize: 7), textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              
+              // Action Button
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton(
+                  onPressed: () async {
+                    if (data['request_id'] != null) {
+                      try {
+                        await Supabase.instance.client
+                            .from('requests')
+                            .update({'status': 'condemned'})
+                            .eq('id', data['request_id']);
+                      } catch (_) {}
+                    }
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
+                  },
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black,
+                    side: const BorderSide(color: Colors.black54),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  ),
+                  child: const Text("Got it", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fallbackLogo(IconData icon) {
+    return Container(
+      width: 45,
+      height: 45,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.grey.shade400, width: 0.5),
+      ),
+      child: Icon(icon, size: 24, color: Colors.grey.shade400),
+    );
+  }
+
+  Widget _buildFormRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6.0),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(fontSize: 9)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.only(bottom: 2),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Colors.black, width: 0.5)),
+              ),
+              child: Text(value, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w600)),
             ),
           ),
         ],
@@ -234,23 +282,12 @@ class CondemnationSlipScreen extends StatelessWidget {
     );
   }
 
-  static Widget _kv(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 5),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Flexible(
-              child: Text(label,
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(value,
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w500),
-                  textAlign: TextAlign.end),
-            ),
-          ],
-        ),
-      );
+  Widget _buildSignatureLine(String name) {
+    return Column(
+      children: [
+        Text(name, style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+        Container(height: 0.5, color: Colors.black, width: double.infinity, margin: const EdgeInsets.only(top: 2, bottom: 2)),
+      ],
+    );
+  }
 }

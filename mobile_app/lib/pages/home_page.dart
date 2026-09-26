@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../screen/requests.dart';
@@ -16,8 +17,8 @@ class HomeScreen extends StatefulWidget {
 // Global notifier so profile page can update the top-bar avatar instantly
 final ValueNotifier<String?> globalAvatarUrl = ValueNotifier<String?>(null);
 
-// Global notifier for unread notification count — updated by NotifyPage,
-// consumed by the bottom-nav badge. Instant updates, no stream lag.
+// Global notifier for unread notification count — updated by the HomeScreen
+// realtime listener, consumed by the bottom-nav badge. Instant updates.
 final ValueNotifier<int> globalUnreadNotifCount = ValueNotifier<int>(0);
 
 class _HomeScreenState extends State<HomeScreen> {
@@ -30,14 +31,26 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Incremented when user switches to the Notify tab to force a reload.
   final ValueNotifier<int> _notifyRefreshTrigger = ValueNotifier<int>(0);
 
+  /// Realtime subscription for notification count — lives at app level so
+  /// the badge updates immediately regardless of which tab is active.
+  StreamSubscription<List<Map<String, dynamic>>>? _notifStreamSub;
+
   @override
   void initState() {
     super.initState();
     _loadAvatar();
     // Listen for avatar changes from any page
     globalAvatarUrl.addListener(_onAvatarUrlChanged);
-    // Listen for unread count changes from NotifyPage
+    // Listen for unread count changes (drives bottom-nav rebuild)
     globalUnreadNotifCount.addListener(_onUnreadCountChanged);
+
+    // Start the app-level realtime listener for notifications.
+    // This ensures the badge count updates instantly when admin sends
+    // receipts, approvals, etc. — even if the user is on the Home tab.
+    _startNotificationListener();
+
+    // Also do an initial fetch so badge is correct on app launch.
+    _fetchUnreadCount();
 
     // Precache the heavy hero image so it's ready when the Home tab renders
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -47,10 +60,58 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _notifStreamSub?.cancel();
     globalAvatarUrl.removeListener(_onAvatarUrlChanged);
     globalUnreadNotifCount.removeListener(_onUnreadCountChanged);
     _notifyRefreshTrigger.dispose();
     super.dispose();
+  }
+
+  // ── APP-LEVEL NOTIFICATION LISTENER ──────────────────────────────────────
+  // Subscribes to the notifications table via Supabase Realtime so the
+  // unread badge count updates instantly when a new row is inserted or
+  // an existing row is updated (e.g. marked as read).
+
+  void _startNotificationListener() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    _notifStreamSub = Supabase.instance.client
+        .from('notifications')
+        .stream(primaryKey: ['id'])
+        .eq('user_id', user.id)
+        .listen((rows) {
+          // Count unread notifications from the streamed rows.
+          final unread = rows.where((r) {
+            final v = r['is_read'];
+            if (v is bool) return !v;
+            if (v is int) return v == 0;
+            if (v is String) return v.toLowerCase() != 'true' && v != '1';
+            return true; // default to unread if unknown
+          }).length;
+
+          globalUnreadNotifCount.value = unread;
+          debugPrint('HOME: Realtime notif stream → $unread unread');
+        });
+  }
+
+  /// One-shot fetch of the current unread count (for app launch).
+  Future<void> _fetchUnreadCount() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+
+      final data = await Supabase.instance.client
+          .from('notifications')
+          .select('id, is_read')
+          .eq('user_id', user.id)
+          .eq('is_read', false);
+
+      globalUnreadNotifCount.value = (data as List).length;
+      debugPrint('HOME: Initial unread count = ${globalUnreadNotifCount.value}');
+    } catch (e) {
+      debugPrint('HOME: Failed to fetch unread count: $e');
+    }
   }
 
   void _onAvatarUrlChanged() {

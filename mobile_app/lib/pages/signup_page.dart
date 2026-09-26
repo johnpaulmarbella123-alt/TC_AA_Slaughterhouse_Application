@@ -145,6 +145,7 @@ class _SignupScreenState
       backgroundColor: Colors.white,
 
       body: Stack(
+        clipBehavior: Clip.none,
         children: [
 
           // TOP DESIGN
@@ -162,17 +163,17 @@ class _SignupScreenState
               ),
 
               alignment:
-                  const Alignment(-0.2, 0.8),
+                  const Alignment(-0.4, 0.8),
 
               child: const Padding(
                 padding: EdgeInsets.all(30),
 
                 child: Text(
-                  "Create Account!\nSign Up to get started !!",
+                  "Create Account!\nSign Up to get \nstarted !!",
 
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 18,
+                    fontSize: 16,
                     color: Colors.black87,
                   ),
                 ),

@@ -65,6 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: Stack(
+        clipBehavior: Clip.none,
         children: [
           // Background Ornaments
           Positioned(
@@ -77,14 +78,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 color: Color(0xFFE0E0E0),
                 shape: BoxShape.circle,
               ),
-              alignment: const Alignment(-0.5, 0.5),
+              alignment: const Alignment(-1.3, 0.5),
               child: const Padding(
                 padding: EdgeInsets.all(40.0),
                 child: Text(
                   "Hi Welcome!\nGreate to see you again!!",
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 11,
+                    fontSize: 12,
                     color: Colors.black87,
                   ),
                 ),
@@ -92,7 +93,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           Positioned(
-            bottom: -size.width * 0.3,
+            bottom: -size.width * 0.5,
             left: -size.width * 0.2,
             child: Container(
               width: size.width * 0.7,

@@ -134,9 +134,9 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
 
       // Step 3: Open PayMongo checkout page in browser
       final uri = Uri.parse(checkoutUrl);
-      if (await canLaunchUrl(uri)) {
+      try {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
+      } catch (launchError) {
         throw Exception('Could not open payment page. Please try again.');
       }
 
