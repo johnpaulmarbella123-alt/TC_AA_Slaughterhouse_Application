@@ -38,7 +38,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*)')
-          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed'])
+          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed', 'post_mortem_failed'])
           .order('created_at', ascending: false);
       
       final activeRequests = List<Map<String, dynamic>>.from(data).map((r) {
@@ -59,6 +59,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           r['process_notes'] = inspection['process_notes'];
           r['condemnation_reason'] = inspection['condemnation_reason'];
           r['veterinary_findings'] = inspection['veterinary_findings'];
+          r['inspection_created_at'] = inspection['created_at'];
         }
         return r;
       }).toList();
@@ -359,6 +360,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                   final status = req['status'] ?? '';
                   final isDelayed = status == 'delay_error';
                   final isAntiMortemFailed = status == 'anti_mortem_failed';
+                  final isPostMortemFailed = status == 'post_mortem_failed';
                   final isCondemned = req['condemnation_reason'] != null;
                   final customerResponse = req['anti_mortem_response']?.toString();
 
@@ -393,28 +395,29 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                           ],
                         );
                       }
-                      if (isDelayed && req['preferred_date'] != null) {
-                        try {
-                          final preferred = DateTime.parse(req['preferred_date'].toString());
-                          final actual = preferred.add(const Duration(days: 1));
-                          return Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(scheduleDate, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                              Text('Actual: ${_formatDate(actual.toIso8601String())}', style: TextStyle(fontSize: 11, color: Colors.red.shade400)),
-                            ],
-                          );
-                        } catch (_) {
-                          return Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(scheduleDate, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                              Text('Actual: $scheduleDate', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-                            ],
-                          );
+                      if (isDelayed) {
+                        // If delayed due to a technical error, the actual date recorded
+                        // is the date the processing actually took place (today or the recorded delay date),
+                        // not the scheduled date shifted forward.
+                        DateTime actualDate = DateTime.now();
+                        if (req['actual_date'] != null) {
+                          actualDate = DateTime.tryParse(req['actual_date'].toString())?.toLocal() ?? actualDate;
+                        } else {
+                          final match = RegExp(r'Technical delay \((\d{4}-\d{2}-\d{2})\)').firstMatch(req['process_notes']?.toString() ?? '');
+                          if (match != null) {
+                            actualDate = DateTime.tryParse(match.group(1)!) ?? actualDate;
+                          } else if (req['inspection_created_at'] != null) {
+                            actualDate = DateTime.tryParse(req['inspection_created_at'].toString())?.toLocal() ?? actualDate;
+                          }
                         }
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(scheduleDate, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                            Text('Actual: ${_formatDate(actualDate.toIso8601String())}', style: TextStyle(fontSize: 11, color: Colors.red.shade400, fontWeight: FontWeight.w500)),
+                          ],
+                        );
                       }
                       return Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -471,7 +474,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                           : const Text('—', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ),
                     DataCell(
-                      isAntiMortemFailed
+                      isAntiMortemFailed || isPostMortemFailed
                           ? Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.center,
@@ -489,7 +492,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                         border: Border.all(color: Colors.red.shade200),
                                       ),
                                       child: Text(
-                                        'Anti-Mortem Failed',
+                                        isAntiMortemFailed ? 'Anti-Mortem Failed' : 'Post-Mortem Failed',
                                         style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
                                       ),
                                     ),
@@ -655,6 +658,15 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     if (req['delay_reason'] != null) {
       _technicalError = true;
       _delayReasonCtrl.text = req['delay_reason'].toString();
+    } else if (req['status'] == 'delay_error' || req['process_stage'] == 'Technical Error/Delay') {
+      _technicalError = true;
+      final notes = (req['process_notes'] ?? '').toString();
+      final match = RegExp(r'Technical delay\s*(?:\([^)]*\))?:\s*(.*)').firstMatch(notes);
+      if (match != null) {
+        _delayReasonCtrl.text = match.group(1) ?? '';
+      } else if (notes.isNotEmpty) {
+        _delayReasonCtrl.text = notes;
+      }
     }
   }
 
@@ -692,21 +704,83 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         });
       } else if (notifyDelay) {
         newStatus = 'delay_error';
+        _processStage = 'Technical Error/Delay';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final delayReason = _delayReasonCtrl.text.trim();
+        final reasonSuffix = delayReason.isNotEmpty ? ': $delayReason' : '';
         await widget.supabase.from('notifications').insert({
           'user_id': userId,
-          'title': '$livestockType Operation Failed',
-          'message': '$livestockType was not successfully slaughtered due to an error in the process.',
+          'title': '$livestockType Operation Delayed',
+          'message': '$livestockType slaughter was delayed due to a technical error$reasonSuffix.',
           'is_read': false,
           'type': 'operation_failed',
+          'data': {
+            'request_id': reqId,
+            'livestock_type': livestockType,
+            'reason': delayReason,
+            'actual_date': DateTime.now().toLocal().toIso8601String().split('T')[0],
+          },
         });
-      } else if (_processStage == 'Complete' && _postMortem == 'Passed') {
+      } else if (_postMortem == 'Failed') {
+        newStatus = 'post_mortem_failed';
+        _processStage = 'Post-Mortem Inspection'; // Optional: keep it descriptive
+        final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final reason = _healthIssueDetected ? _condemnationCtrl.text : 'Condemned after slaughter';
+        await widget.supabase.from('notifications').insert({
+          'user_id': userId,
+          'title': '$livestockType — Post-Mortem Failed',
+          'message': 'Health issues were found during post-mortem inspection after slaughter. Please review condemnation slip.',
+          'is_read': false,
+          'type': 'post_mortem_failed',
+          'data': {
+            'request_id': reqId,
+            'livestock_type': livestockType,
+            'condemnation_reason': reason,
+            'inspector_name': _inspectorCtrl.text,
+            'animal_count': widget.request['animal_count'],
+            'process_notes': _notesCtrl.text,
+          },
+        });
+      } else if (_processStage == 'Complete' && _postMortem != 'Failed') {
         newStatus = 'releasable';
+        if (userId != null) {
+          final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+          final animalCount = widget.request['animal_count'] ?? 1;
+          final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+          final weight = _carcassCtrl.text.trim();
+          final weightInfo = weight.isNotEmpty ? ' with a carcass weight of $weight kg' : '';
+
+          await widget.supabase.from('notifications').insert({
+            'user_id': userId,
+            'title': 'Slaughter Operation Complete',
+            'message': 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. The meat is now releasable.',
+            'is_read': false,
+            'type': 'slaughter_completed',
+            'data': {
+              'request_id': reqId,
+              'livestock_type': livestockType,
+              'animal_count': animalCount,
+              'carcass_weight': double.tryParse(_carcassCtrl.text),
+              'inspector_name': _inspectorCtrl.text,
+              'post_mortem': _postMortem,
+              'process_stage': _processStage,
+            },
+          });
+        }
       }
 
       await widget.supabase.from('requests').update({
         'status': newStatus,
       }).eq('id', reqId);
+
+      final nowStr = DateTime.now().toLocal().toIso8601String().split('T')[0];
+      final delayReason = _delayReasonCtrl.text.trim();
+      String processNotes = _notesCtrl.text.trim();
+      if (notifyDelay && delayReason.isNotEmpty) {
+        processNotes = processNotes.isEmpty
+            ? 'Technical delay ($nowStr): $delayReason'
+            : '$processNotes | Technical delay ($nowStr): $delayReason';
+      }
 
       final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
       final inspectionData = {
@@ -716,7 +790,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         'post_mortem': _postMortem,
         'carcass_weight': double.tryParse(_carcassCtrl.text),
         'inspector_name': _inspectorCtrl.text,
-        'process_notes': _notesCtrl.text,
+        'process_notes': processNotes,
         'condemnation_reason': _healthIssueDetected ? _condemnationCtrl.text : null,
         'veterinary_findings': _antiMortem == 'Failed' ? _notesCtrl.text : null,
       };
@@ -1079,7 +1153,7 @@ class _MICDialog extends StatelessWidget {
     final refNo = 'MI-${DateTime.now().year}-${request['id'].toString().padLeft(3, '0')}';
     final customerName = request['customer_name']?.toString() ?? '—';
     final livestock = request['livestock_type']?.toString() ?? '—';
-    final slaughterDate = request['preferred_date'];
+    final slaughterDate = request['rescheduled_date'] ?? request['preferred_date'];
     
     final antiMortem = request['anti_mortem']?.toString().toUpperCase() ?? 'PENDING';
     final postMortem = request['post_mortem']?.toString().toUpperCase() ?? 'PENDING';
@@ -1531,6 +1605,7 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
             : '8:00 AM';
 
         await widget.supabase.from('requests').update({
+          'status': 'taken_back',
           'pickup_approved': true,
           'pickup_time': pickupDateTime.toIso8601String(),
         }).eq('id', reqId);

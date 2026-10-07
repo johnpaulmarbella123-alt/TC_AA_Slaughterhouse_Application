@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'receipt_detail_screen.dart';
@@ -5,62 +6,156 @@ import 'receipt_detail_screen.dart';
 const kMintHeader = Color(0xFF8FDCB8);
 
 class PaymentContent extends StatefulWidget {
-  const PaymentContent({super.key});
+  final ValueNotifier<int>? refreshTrigger;
+  const PaymentContent({super.key, this.refreshTrigger});
 
   @override
   State<PaymentContent> createState() => _PaymentContentState();
 }
 
-class _PaymentContentState extends State<PaymentContent> {
+class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObserver {
   final supabase = Supabase.instance.client;
   List<Map<String, dynamic>> _payments = [];
   bool _isLoading = true;
+  RealtimeChannel? _paymentsChannel;
+  RealtimeChannel? _requestsChannel;
+  Timer? _autoSyncTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadPayments();
+    _subscribeRealtime();
+    widget.refreshTrigger?.addListener(_onRefreshTriggered);
+
+    // Auto-sync every 2 seconds in the background so transactions update automatically
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) _loadPayments(silent: true);
+    });
   }
 
-  Future<void> _loadPayments() async {
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _autoSyncTimer?.cancel();
+    widget.refreshTrigger?.removeListener(_onRefreshTriggered);
+    if (_paymentsChannel != null) {
+      supabase.removeChannel(_paymentsChannel!);
+    }
+    if (_requestsChannel != null) {
+      supabase.removeChannel(_requestsChannel!);
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _loadPayments(silent: true);
+    }
+  }
+
+  void _onRefreshTriggered() {
+    _loadPayments(silent: false);
+  }
+
+  void _subscribeRealtime() {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    // Listen to payments changes
+    _paymentsChannel = supabase
+        .channel('public:payments_realtime_${DateTime.now().millisecondsSinceEpoch}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'payments',
+          callback: (_) {
+            if (mounted) _loadPayments(silent: true);
+          },
+        )
+        .subscribe();
+
+    // Listen to requests changes
+    _requestsChannel = supabase
+        .channel('public:requests_realtime_${DateTime.now().millisecondsSinceEpoch}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'requests',
+          callback: (_) {
+            if (mounted) _loadPayments(silent: true);
+          },
+        )
+        .subscribe();
+  }
+
+  Future<void> _loadPayments({bool silent = false}) async {
+    if (!silent && _payments.isEmpty) {
+      if (mounted) setState(() => _isLoading = true);
+    }
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
 
-      // Query payments for the current user, joined with requests
+      // 1. Fetch payments joined with requests
       final data = await supabase
           .from('payments')
-          .select('*, requests!inner(id, customer_name, livestock_type, animal_count, request_type, preferred_date, carcass_weight)')
+          .select('*, requests(id, customer_name, livestock_type, animal_count, request_type, preferred_date, status)')
           .eq('user_id', user.id)
           .order('created_at', ascending: false);
 
-      setState(() {
-        _payments = List<Map<String, dynamic>>.from(data);
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Payment load error: $e');
-      // Fallback: try loading without join if relation not set up
-      try {
-        final user = supabase.auth.currentUser;
-        if (user == null) {
-          setState(() => _isLoading = false);
-          return;
+      final paymentsList = List<Map<String, dynamic>>.from(data);
+
+      // 2. Also check if any completed/released requests don't have a payments record
+      final existingReqIds = paymentsList
+          .map((p) => p['request_id'])
+          .where((id) => id != null)
+          .toSet();
+
+      final completedReqs = await supabase
+          .from('requests')
+          .select('id, customer_name, livestock_type, animal_count, request_type, preferred_date, status, created_at')
+          .eq('user_id', user.id)
+          .inFilter('status', ['paid', 'released', 'completed']);
+
+      final List<Map<String, dynamic>> combined = List<Map<String, dynamic>>.from(paymentsList);
+      for (final req in (completedReqs as List)) {
+        if (!existingReqIds.contains(req['id'])) {
+          combined.add({
+            'id': -req['id'],
+            'request_id': req['id'],
+            'user_id': user.id,
+            'receipt_number': 'RCP-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
+            'payment_method': 'Cash',
+            'total_amount': 0.0,
+            'status': 'paid',
+            'created_at': req['created_at'],
+            'requests': req,
+          });
         }
-        final data = await supabase
-            .from('payments')
-            .select()
-            .eq('user_id', user.id)
-            .order('created_at', ascending: false);
+      }
+
+      // Sort by created_at descending
+      combined.sort((a, b) {
+        final dateA = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(2000);
+        final dateB = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(2000);
+        return dateB.compareTo(dateA);
+      });
+
+      if (mounted) {
         setState(() {
-          _payments = List<Map<String, dynamic>>.from(data);
+          _payments = combined;
           _isLoading = false;
         });
-      } catch (e2) {
-        debugPrint('Payment fallback load error: $e2');
+      }
+    } catch (e) {
+      debugPrint('Payment load error: $e');
+      if (mounted && _payments.isEmpty) {
         setState(() => _isLoading = false);
       }
     }
@@ -157,8 +252,14 @@ class _ReceiptCard extends StatelessWidget {
     final isPaid = status == 'paid';
     final method = payment['payment_method']?.toString() ?? '';
 
-    // Try to get request data from join
-    final requestData = payment['requests'] as Map<String, dynamic>?;
+    // Try to get request data from join (handle Map or List)
+    Map<String, dynamic>? requestData;
+    final reqField = payment['requests'];
+    if (reqField is List && reqField.isNotEmpty) {
+      requestData = reqField.first as Map<String, dynamic>;
+    } else if (reqField is Map) {
+      requestData = reqField as Map<String, dynamic>;
+    }
     final livestockType = requestData?['livestock_type']?.toString() ?? '';
     final scheduleDate = requestData?['preferred_date'];
 

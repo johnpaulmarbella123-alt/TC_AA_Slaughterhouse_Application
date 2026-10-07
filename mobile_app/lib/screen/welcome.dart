@@ -116,7 +116,7 @@ class WelcomeScreen extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 40),
+                  const SizedBox(height: 24),
                   // Watermark Logo
                   Opacity(
                     opacity: 0.3,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../auth/auth_server.dart';
+import '../screen/how_it_works.dart';
+import 'home_page.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -37,6 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         // ignore: avoid_print
         print('Navigating to /HOME');
+        globalAvatarUrl.value = null;
         Navigator.pushNamedAndRemoveUntil(context, '/HOME', (route) => false);
       }
     } catch (e) {
@@ -230,7 +233,41 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 14),
+                    // How It Works Text Link
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const HowItWorksScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          minimumSize: const Size(100, 44),
+                        ),
+                        child: RichText(
+                          text: const TextSpan(
+                            style: TextStyle(color: Colors.black54, fontSize: 14),
+                            children: [
+                              TextSpan(text: "How it works? "),
+                              TextSpan(
+                                text: "Click here",
+                                style: TextStyle(
+                                  color: Color(0xFF218358),
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
                   ],
                 ),
               ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,15 +17,21 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   bool _isLoading = true;
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
+    // Auto-poll every 3 seconds so paid orders appear automatically
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _loadRequests(silent: true);
+    });
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -32,8 +39,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   // ════════════════════════════════════════════
   //  LOAD REQUESTS (paid / released)
   // ════════════════════════════════════════════
-  Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRequests({bool silent = false}) async {
+    if (!silent) setState(() => _isLoading = true);
     try {
       final data = await supabase
           .from('requests')
@@ -60,14 +67,16 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         return r;
       }).toList();
 
-      setState(() {
-        _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
-        _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
+          _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('MeatReleasing load error: $e');
-      setState(() => _isLoading = false);
+      if (mounted && !silent) setState(() => _isLoading = false);
     }
   }
 
@@ -261,7 +270,14 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => _loadRequests(),
+            icon: const Icon(Icons.refresh, size: 20),
+            color: const Color(0xFF2D3748),
+          ),
+          const SizedBox(width: 4),
           IconButton(
             onPressed: () => Navigator.maybePop(context),
             icon: const Icon(Icons.arrow_forward, size: 26),

@@ -7,6 +7,8 @@ import '../screen/payment.dart';
 import '../screen/profile.dart';
 import '../screen/gallery.dart';
 import '../screen/review.dart';
+import '../screen/how_it_works.dart';
+import '../services/livestock_fee_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,23 +23,30 @@ final ValueNotifier<String?> globalAvatarUrl = ValueNotifier<String?>(null);
 // realtime listener, consumed by the bottom-nav badge. Instant updates.
 final ValueNotifier<int> globalUnreadNotifCount = ValueNotifier<int>(0);
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedTab = 0;
   int _bottomNavIndex = 0;
 
   /// Tracks which tabs have been visited so we only build them on first use.
   final Set<int> _visitedTabs = {0}; // Home is always visited
 
-  /// Incremented when user switches to the Notify tab to force a reload.
+  /// Incremented when user switches to the Notify tab or when new notifications arrive.
   final ValueNotifier<int> _notifyRefreshTrigger = ValueNotifier<int>(0);
+  final ValueNotifier<int> _paymentRefreshTrigger = ValueNotifier<int>(0);
+  final ValueNotifier<int> _profileRefreshTrigger = ValueNotifier<int>(0);
 
-  /// Realtime subscription for notification count — lives at app level so
-  /// the badge updates immediately regardless of which tab is active.
-  StreamSubscription<List<Map<String, dynamic>>>? _notifStreamSub;
+  /// Realtime channel for notification changes.
+  RealtimeChannel? _notifChannel;
+
+  /// Periodic polling timer to guarantee badge updates every few seconds even
+  /// if Supabase Realtime replication is disabled or websocket is delayed.
+  Timer? _notifPollingTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    globalAvatarUrl.value = null;
     _loadAvatar();
     // Listen for avatar changes from any page
     globalAvatarUrl.addListener(_onAvatarUrlChanged);
@@ -45,12 +54,16 @@ class _HomeScreenState extends State<HomeScreen> {
     globalUnreadNotifCount.addListener(_onUnreadCountChanged);
 
     // Start the app-level realtime listener for notifications.
-    // This ensures the badge count updates instantly when admin sends
-    // receipts, approvals, etc. — even if the user is on the Home tab.
     _startNotificationListener();
 
-    // Also do an initial fetch so badge is correct on app launch.
+    // Initial fetch so badge is correct on app launch.
     _fetchUnreadCount();
+
+    // Fast polling fallback (every 4 seconds) to ensure new notifications
+    // show up immediately without requiring the user to switch tabs.
+    _notifPollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      _fetchUnreadCount();
+    });
 
     // Precache the heavy hero image so it's ready when the Home tab renders
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -60,11 +73,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _notifStreamSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _notifPollingTimer?.cancel();
+    if (_notifChannel != null) {
+      Supabase.instance.client.removeChannel(_notifChannel!);
+    }
     globalAvatarUrl.removeListener(_onAvatarUrlChanged);
     globalUnreadNotifCount.removeListener(_onUnreadCountChanged);
     _notifyRefreshTrigger.dispose();
+    _paymentRefreshTrigger.dispose();
+    _profileRefreshTrigger.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When user brings app back to foreground, immediately check for new notifications
+    if (state == AppLifecycleState.resumed) {
+      _fetchUnreadCount();
+      _loadAvatar();
+    }
   }
 
   // ── APP-LEVEL NOTIFICATION LISTENER ──────────────────────────────────────
@@ -76,26 +104,40 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
 
-    _notifStreamSub = Supabase.instance.client
-        .from('notifications')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', user.id)
-        .listen((rows) {
-          // Count unread notifications from the streamed rows.
-          final unread = rows.where((r) {
-            final v = r['is_read'];
-            if (v is bool) return !v;
-            if (v is int) return v == 0;
-            if (v is String) return v.toLowerCase() != 'true' && v != '1';
-            return true; // default to unread if unknown
-          }).length;
-
-          globalUnreadNotifCount.value = unread;
-          debugPrint('HOME: Realtime notif stream → $unread unread');
-        });
+    _notifChannel = Supabase.instance.client.channel('notif-badge');
+    _notifChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            debugPrint('HOME: Realtime INSERT detected → refreshing count');
+            _fetchUnreadCount();
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            debugPrint('HOME: Realtime UPDATE detected → refreshing count');
+            _fetchUnreadCount();
+          },
+        )
+        .subscribe();
   }
 
-  /// One-shot fetch of the current unread count (for app launch).
+  /// Fetch current unread count. Also triggers NotifyPage reload if new count > old count.
   Future<void> _fetchUnreadCount() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
@@ -107,8 +149,16 @@ class _HomeScreenState extends State<HomeScreen> {
           .eq('user_id', user.id)
           .eq('is_read', false);
 
-      globalUnreadNotifCount.value = (data as List).length;
-      debugPrint('HOME: Initial unread count = ${globalUnreadNotifCount.value}');
+      final newCount = (data as List).length;
+      final oldCount = globalUnreadNotifCount.value;
+      if (newCount != oldCount) {
+        globalUnreadNotifCount.value = newCount;
+        debugPrint('HOME: Unread count changed: $oldCount → $newCount');
+        if (newCount > oldCount) {
+          // New notification arrived, tell NotifyPage to refresh its list
+          _notifyRefreshTrigger.value++;
+        }
+      }
     } catch (e) {
       debugPrint('HOME: Failed to fetch unread count: $e');
     }
@@ -121,7 +171,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadAvatar() async {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
+    if (user == null) {
+      globalAvatarUrl.value = null;
+      return;
+    }
     try {
       final data = await Supabase.instance.client
           .from('profiles')
@@ -129,12 +182,15 @@ class _HomeScreenState extends State<HomeScreen> {
           .eq('id', user.id)
           .single();
       final url = data['avatar_url'];
-      if (url != null) {
+      if (url != null && url.toString().isNotEmpty) {
         globalAvatarUrl.value = '$url?t=${DateTime.now().millisecondsSinceEpoch}';
+      } else {
+        globalAvatarUrl.value = null;
       }
       debugPrint('TOP-BAR: Loaded avatar from DB = ${globalAvatarUrl.value}');
     } catch (e) {
       debugPrint('TOP-BAR: Error loading avatar: $e');
+      globalAvatarUrl.value = null;
     }
   }
 
@@ -147,9 +203,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _bottomNavIndex = index;
       _visitedTabs.add(index); // mark tab as visited so it gets built
     });
-    // Force NotifyPage to reload when user switches to it
+    // Force tabs to reload when user switches to them
     if (index == 2) {
       _notifyRefreshTrigger.value++;
+    } else if (index == 3) {
+      _paymentRefreshTrigger.value++;
+    } else if (index == 4) {
+      _profileRefreshTrigger.value++;
     }
   }
 
@@ -205,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 fit: BoxFit.cover,
                                 width: 40,
                                 height: 40,
-                                errorBuilder: (_, error, ___) {
+                                errorBuilder: (_, error, stackTrace) {
                                   debugPrint('TOP-BAR: Image.network FAILED: $error');
                                   return const Icon(
                                     Icons.person_outline,
@@ -238,8 +298,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   _navItem(Icons.home, "Home", _bottomNavIndex == 0, () => _onBottomNavTap(0)),
                   _navItem(Icons.description_outlined, "Requests", _bottomNavIndex == 1, request),
-                  _navItem(Icons.notifications_none, "Notify", _bottomNavIndex == 2, notify,
-                      badgeCount: globalUnreadNotifCount.value),
+                  ValueListenableBuilder<int>(
+                    valueListenable: globalUnreadNotifCount,
+                    builder: (context, count, _) => _navItem(
+                      Icons.notifications_none,
+                      "Notify",
+                      _bottomNavIndex == 2,
+                      notify,
+                      badgeCount: count,
+                    ),
+                  ),
                   _navItem(Icons.payment_outlined, "Payment", _bottomNavIndex == 3, payment),
                   _navItem(Icons.person_outline, "Profile", _bottomNavIndex == 4, profile),
                 ],
@@ -261,8 +329,12 @@ class _HomeScreenState extends State<HomeScreen> {
         onNavigateToTab: _onBottomNavTap,
         refreshTrigger: _notifyRefreshTrigger,
       ),
-      const PaymentContent(),                        // 3: Payment
-      const ProfileContent(),                        // 4: Profile
+      PaymentContent(                                // 3: Payment
+        refreshTrigger: _paymentRefreshTrigger,
+      ),
+      ProfileContent(                                // 4: Profile
+        refreshTrigger: _profileRefreshTrigger,
+      ),
     ];
 
     return IndexedStack(
@@ -407,16 +479,16 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 10),
           SizedBox(
-            height: 100,
+            height: 90,
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 10),
               children: [
-                _serviceCard("assets/images/hog.jpg", "Pig/Hog", "Hog Slaughter"),
-                _serviceCard("assets/images/cow.jpg", "Cow", "Cattle Slaughter"),
-                _serviceCard("assets/images/Goat.jpg", "Goat", "Goat Slaughter"),
-                _serviceCard("assets/images/Sheep.jpg", "Sheep", "Sheep Slaughter"),
-                _serviceCard("assets/images/Cara.jpg", "Carabao", "Carabao Slaughter"),
+                _serviceCard("assets/images/hog.jpg", "Pig/Hog", "Hog Slaughter", "hog"),
+                _serviceCard("assets/images/cow.jpg", "Cow", "Cattle Slaughter", "cattle"),
+                _serviceCard("assets/images/Goat.jpg", "Goat", "Goat Slaughter", "goat"),
+                _serviceCard("assets/images/Sheep.jpg", "Sheep", "Sheep Slaughter", "sheep"),
+                _serviceCard("assets/images/Cara.jpg", "Carabao", "Carabao Slaughter", "carabao"),
               ],
             ),
           ),
@@ -503,22 +575,39 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 16),
 
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Row(
-                children: [
-                  const Text("How it works? click ", style: TextStyle(fontSize: 13)),
-                  GestureDetector(
-                    onTap: () {},
-                    child: const Text(
-                      "Here!",
-                      style: TextStyle(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: InkWell(
+                onTap: () {
+                  debugPrint("HOW IT WORKS: Opened from About section");
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const HowItWorksScreen(),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "How it works? click ",
+                        style: TextStyle(fontSize: 13, color: Colors.black87),
+                      ),
+                      Text(
+                        "Here!",
+                        style: TextStyle(
                           fontSize: 13,
                           color: Color(0xFF008000),
                           fontWeight: FontWeight.bold,
-                          decoration: TextDecoration.underline),
-                    ),
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
 
@@ -659,39 +748,484 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _serviceCard(String imageUrl, String animal, String label) {
-    return Container(
-      width: 80,
-      margin: const EdgeInsets.only(right: 8),
-      child: Column(
-        children: [
-          ClipRRect(
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(8),
-              topRight: Radius.circular(8),
+  Widget _serviceCard(String imageUrl, String animal, String label, String animalKey) {
+    return InkWell(
+      onTap: () => _showLivestockFeeSheet(context, animalKey, animal, imageUrl),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 82,
+        margin: const EdgeInsets.only(right: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
             ),
-            child: Stack(
-              children: [
-                Image.asset(imageUrl, width: 80, height: 75, fit: BoxFit.cover),
-                Positioned(
-                  top: 4,
-                  left: 4,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                    color: Colors.black38,
-                    child: Text(animal,
+          ],
+        ),
+        child: Column(
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+              child: Stack(
+                children: [
+                  Image.asset(imageUrl, width: 82, height: 60, fit: BoxFit.cover),
+                  Positioned(
+                    top: 3,
+                    left: 3,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        animal,
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold)),
+                          color: Colors.white,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+              child: Text(
+                label,
+                style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.w600),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showLivestockFeeSheet(BuildContext context, String animalKey, String displayName, String imageUrl) {
+    // Proactively re-fetch latest fees from Supabase so sheet always shows latest admin configuration
+    LivestockFeeService.instance.fetchFeesFromSupabase();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return ListenableBuilder(
+          listenable: LivestockFeeService.instance,
+          builder: (context, _) {
+            final schedule = LivestockFeeService.instance.getFeeSchedule(animalKey);
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                left: 20,
+                right: 20,
+                top: 12,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Drag handle
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Header with image, title & class badge
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.asset(
+                            imageUrl,
+                            width: 58,
+                            height: 58,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      displayName,
+                                      style: const TextStyle(
+                                        fontSize: 16.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1E293B),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFE8F5E9),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFF81C784)),
+                                    ),
+                                    child: const Text(
+                                      'Class AA',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1E855A),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'Official Tabaco City Slaughter Fee Schedule',
+                                style: TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20, color: Colors.grey),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Prominent Total Fixed Fees Banner
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF1E855A), Color(0xFF2E7D32)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF1E855A).withOpacity(0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'TOTAL STANDARD FIXED FEES',
+                                  style: TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  schedule.safeAdditionalFee > 0
+                                      ? 'Required per head (incl. regulatory surcharge)'
+                                      : 'Required per head (Ante-Mortem & Facility)',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '₱${schedule.totalFixedFees.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Itemized Breakdown Title
+                    const Text(
+                      'Itemized Fee Breakdown',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Breakdown List Card
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildFeeRow(
+                            'Facility / Slaughter Fee',
+                            schedule.facilityFee,
+                            'Municipal slaughter & equipment usage fee per head',
+                          ),
+                          const Divider(height: 1),
+                          _buildFeeRow(
+                            'Permit to Slaughter Fee',
+                            schedule.permitToSlaughterFee,
+                            'Official municipal regulatory slaughter permit',
+                          ),
+                          const Divider(height: 1),
+                          _buildFeeRow(
+                            'Veterinary Health Certificate',
+                            schedule.vetHealthCertFee,
+                            'City veterinarian health examination certification',
+                          ),
+                          const Divider(height: 1),
+                          _buildFeeRow(
+                            'Corral / Holding Fee',
+                            schedule.corralFee,
+                            'Ante-mortem holding pen stay fee per head',
+                          ),
+                          const Divider(height: 1),
+                          _buildFeeRow(
+                            'Ante-Mortem Examination',
+                            schedule.anteMortemFee,
+                            'Pre-slaughter clinical health examination fee',
+                          ),
+                          if (schedule.safeAdditionalFee > 0) ...[
+                            const Divider(height: 1),
+                            _buildFeeRow(
+                              schedule.additionalFeeLabel,
+                              schedule.safeAdditionalFee,
+                              'Administrative charge configured for ${schedule.displayName}',
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Post-Mortem and Optional Van section
+                    const Text(
+                      'Post-Slaughter & Distribution Rates',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFBBF7D0)),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.scale, size: 16, color: Color(0xFF1E855A)),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Post-Mortem Meat Inspection Rate',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '₱${schedule.postMortemRatePerKg.toStringAsFixed(2)} / kg',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E855A),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Calculated during payment based on actual carcass dressed weight (kg).',
+                              style: TextStyle(fontSize: 10.5, color: Colors.black54),
+                            ),
+                          ),
+                          const Divider(height: 16),
+                          Row(
+                            children: [
+                              const Icon(Icons.local_shipping_outlined, size: 16, color: Color(0xFF1E855A)),
+                              const SizedBox(width: 8),
+                              const Expanded(
+                                child: Text(
+                                  'Delivery Van Fee (Market Distribution)',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '₱${schedule.deliveryVanFee.toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1E855A),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Applicable only if choosing municipal refrigerated delivery van.',
+                              style: TextStyle(fontSize: 10.5, color: Colors.black54),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Note box
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade200),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Icon(Icons.info_outline, size: 16, color: Color(0xFFD97706)),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'These fees match the rates configured by slaughterhouse administration in real-time. No hidden charges.',
+                              style: TextStyle(fontSize: 10.5, color: Color(0xFF92400E)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // CTA Button to Request
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          request();
+                        },
+                        icon: const Icon(Icons.send, size: 17, color: Colors.white),
+                        label: Text(
+                          'Book $displayName Slaughter Request',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1E855A),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          elevation: 2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFeeRow(String title, dynamic amount, String subtitle) {
+    final double safeAmount = amount is num
+        ? amount.toDouble()
+        : (double.tryParse(amount?.toString() ?? '') ?? 0.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8.5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 10, color: Colors.grey),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(label,
-              style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+          const SizedBox(width: 12),
+          Text(
+            '₱${safeAmount.toStringAsFixed(2)}',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E293B),
+            ),
+          ),
         ],
       ),
     );

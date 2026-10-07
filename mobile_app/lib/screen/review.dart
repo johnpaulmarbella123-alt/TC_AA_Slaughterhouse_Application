@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ReviewContent extends StatefulWidget {
   const ReviewContent({super.key});
@@ -18,10 +19,85 @@ class _ReviewContentState extends State<ReviewContent> {
   int _totalReviews = 0;
   Map<int, int> _ratingCounts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0};
 
+  // Liked / Helpful reviews tracking
+  Set<String> _likedReviewIds = {};
+
   @override
   void initState() {
     super.initState();
     _loadReviews();
+    _loadLikedReviews();
+  }
+
+  String _getLikedReviewsKey() {
+    final user = Supabase.instance.client.auth.currentUser;
+    return user != null ? 'liked_review_ids_${user.id}' : 'liked_review_ids_guest';
+  }
+
+  Future<void> _loadLikedReviews() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getLikedReviewsKey();
+      final list = prefs.getStringList(key) ?? [];
+      if (mounted) {
+        setState(() {
+          _likedReviewIds = list.toSet();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading liked reviews: $e');
+    }
+  }
+
+  Future<void> _toggleLike(String reviewId, int currentCount) async {
+    final idx = _reviews.indexWhere((r) => r['id'].toString() == reviewId);
+    final count = idx >= 0
+        ? ((_reviews[idx]['helpful_count'] as num?)?.toInt() ?? currentCount)
+        : currentCount;
+
+    final isCurrentlyLiked = _likedReviewIds.contains(reviewId);
+    final newCount = isCurrentlyLiked
+        ? (count > 0 ? count - 1 : 0)
+        : count + 1;
+
+    setState(() {
+      if (isCurrentlyLiked) {
+        _likedReviewIds.remove(reviewId);
+      } else {
+        _likedReviewIds.add(reviewId);
+      }
+
+      if (idx >= 0) {
+        _reviews[idx]['helpful_count'] = newCount;
+      }
+    });
+
+    // Save to SharedPreferences per user account
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = _getLikedReviewsKey();
+      await prefs.setStringList(key, _likedReviewIds.toList());
+    } catch (e) {
+      debugPrint('Error saving liked reviews to prefs: $e');
+    }
+
+    // Update in Supabase
+    try {
+      await Supabase.instance.client
+          .from('reviews')
+          .update({'helpful_count': newCount})
+          .eq('id', reviewId);
+    } catch (e) {
+      debugPrint('Direct update note: $e, trying RPC fallback');
+      try {
+        await Supabase.instance.client.rpc('increment_review_helpful', params: {
+          'review_id': reviewId,
+          'delta': isCurrentlyLiked ? -1 : 1,
+        });
+      } catch (err) {
+        debugPrint('RPC update error: $err');
+      }
+    }
   }
 
   Future<void> _loadReviews() async {
@@ -209,7 +285,7 @@ class _ReviewContentState extends State<ReviewContent> {
               ),
             )
           else
-            ...displayedReviews.map((review) => _buildReviewCard(review)).toList(),
+            ...displayedReviews.map((review) => _buildReviewCard(review)),
 
           // See All / Show Less button
           if (_reviews.length > 3)
@@ -297,14 +373,56 @@ class _ReviewContentState extends State<ReviewContent> {
           ),
           const SizedBox(height: 10),
           Text(comment, style: const TextStyle(fontSize: 12, color: Colors.black87)),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.thumb_up_outlined, size: 14, color: Colors.grey),
-              const SizedBox(width: 4),
-              Text('Helpful ($helpful)',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-            ],
+          const SizedBox(height: 12),
+          // ── INTERACTIVE HELPFUL BUTTON ──
+          Builder(
+            builder: (context) {
+              final reviewId = (review['id'] ?? '').toString();
+              final isLiked = _likedReviewIds.contains(reviewId);
+
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: reviewId.isNotEmpty
+                      ? () => _toggleLike(reviewId, helpful)
+                      : null,
+                  borderRadius: BorderRadius.circular(20),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: isLiked ? const Color(0xFFE8F5E9) : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: isLiked
+                            ? const Color(0xFF1E855A).withValues(alpha: 0.4)
+                            : Colors.grey.shade300,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isLiked ? Icons.thumb_up : Icons.thumb_up_outlined,
+                          size: 14,
+                          color: isLiked ? const Color(0xFF1E855A) : Colors.grey.shade600,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Helpful ($helpful)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isLiked ? FontWeight.w600 : FontWeight.normal,
+                            color: isLiked ? const Color(0xFF1E855A) : Colors.grey.shade700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),

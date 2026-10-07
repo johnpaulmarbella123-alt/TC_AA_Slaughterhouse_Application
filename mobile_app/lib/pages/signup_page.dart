@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
+import '../screen/how_it_works.dart';
 
 class SignupPages extends StatefulWidget {
 
@@ -48,69 +48,48 @@ class _SignupScreenState
     setState(() => _isLoading = true);
 
     try {
+      final input = _emailController.text.trim();
+      final name = _nameController.text.trim();
+      final address = _addressController.text.trim();
+      final password = _passwordController.text.trim();
 
-      String input =
-          _emailController.text.trim();
+      if (input.isEmpty || name.isEmpty || address.isEmpty || password.isEmpty) {
+        throw 'Please complete all required fields.';
+      }
+      if (password.length < 6) {
+        throw 'Password must be at least 6 characters.';
+      }
 
-      bool isPhone =
-          input.startsWith('09');
+      bool isPhone = input.startsWith('09') || input.startsWith('+63');
+      String identifier = input;
 
-      // =========================
-      // PHONE SIGNUP
-      // =========================
       if (isPhone) {
-
-        String phone =
-            '+63${input.substring(1)}';
-
-        await _authService.sendOtp(phone);
-
-        if (mounted) {
-
-          Navigator.push(
-            context,
-
-            MaterialPageRoute(
-              builder: (context) =>
-                  OtpScreen(
-                phone: phone,
-                username:
-                    _nameController.text.trim(),
-                address:
-                    _addressController.text.trim(),
-              ),
-            ),
-          );
+        if (input.startsWith('09')) {
+          identifier = '+63${input.substring(1)}';
         }
       } else {
-        // =========================
-        // EMAIL SIGNUP
-        // =========================
-        await _authService.signUp(
-
-          input,
-          _passwordController.text.trim(),
-          _nameController.text.trim(),
-          _addressController.text.trim(),
-        );
-        // DEBUG
-        final user =
-            Supabase.instance.client.auth.currentUser;
-
-        debugPrint(
-          user?.userMetadata.toString(),
-        );
-
-        if (mounted) {
-
-          Navigator.pushNamedAndRemoveUntil(
-            context,
-            '/HOME',
-            (route) => false,
-          );
+        final emailRegex = RegExp(r'^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$');
+        if (!emailRegex.hasMatch(input)) {
+          throw 'Please enter a complete and valid email (e.g. name@gmail.com).';
         }
       }
 
+      // Send OTP via Supabase (Resend SMTP for email, SMS gateway for phone)
+      await _authService.sendOtp(identifier);
+
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OtpScreen(
+              identifier: identifier,
+              password: password,
+              username: name,
+              address: address,
+            ),
+          ),
+        );
+      }
     } catch (e) {
 
       if (mounted) {
@@ -425,7 +404,49 @@ class _SignupScreenState
                       ),
                     ),
 
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 14),
+
+                    // HOW IT WORKS LINK
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const HowItWorksScreen(),
+                            ),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          minimumSize: const Size(100, 44),
+                        ),
+                        child: RichText(
+                          text: const TextSpan(
+                            style: TextStyle(
+                              color: Colors.black54,
+                              fontSize: 14,
+                            ),
+                            children: [
+                              TextSpan(text: "How it works? "),
+                              TextSpan(
+                                text: "Click here",
+                                style: TextStyle(
+                                  color: Color(0xFF218358),
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 30),
                   ],
                 ),
               ),

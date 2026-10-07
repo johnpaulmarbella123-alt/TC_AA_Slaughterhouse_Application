@@ -22,8 +22,14 @@ class AuthService {
 
     } else {
 
+      // Convert local format (09...) to international format (+63...)
+      String phone = emailOrPhone;
+      if (phone.startsWith('09')) {
+        phone = '+63${phone.substring(1)}';
+      }
+
       return await _supabase.auth.signInWithPassword(
-        phone: emailOrPhone,
+        phone: phone,
         password: password,
       );
     }
@@ -73,32 +79,40 @@ Future<AuthResponse> signUp(
 
   if (user != null) {
 
-    await _supabase
-        .from('profiles')
-        .upsert({
+      final isEmail = emailOrPhone.contains('@');
+      final emailValue = isEmail ? emailOrPhone : (user.email ?? '');
+      final phoneValue = isEmail ? (user.phone ?? '') : emailOrPhone;
 
-      'id': user.id,
-
-      'display_name': displayName,
-
-      'phone': emailOrPhone.contains('@')
-          ? ''
-          : emailOrPhone,
-
-      'address': address,
-    });
-  }
+      await _supabase
+          .from('profiles')
+          .upsert({
+        'id': user.id,
+        'display_name': displayName,
+        'email': emailValue.isNotEmpty ? emailValue : null,
+        'phone': phoneValue,
+        'address': address,
+      });
+    }
 
   return response;
 }
   // =========================
-  // SEND OTP
+  // SEND OTP (EMAIL OR PHONE)
   // =========================
-  Future<void> sendOtp(String phone) async {
-
-    await _supabase.auth.signInWithOtp(
-      phone: phone,
-    );
+  Future<void> sendOtp(String emailOrPhone) async {
+    if (emailOrPhone.contains('@')) {
+      await _supabase.auth.signInWithOtp(
+        email: emailOrPhone.trim(),
+      );
+    } else {
+      String phone = emailOrPhone.trim();
+      if (phone.startsWith('09')) {
+        phone = '+63${phone.substring(1)}';
+      }
+      await _supabase.auth.signInWithOtp(
+        phone: phone,
+      );
+    }
   }
 
   // =========================

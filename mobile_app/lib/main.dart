@@ -6,6 +6,8 @@ import 'pages/home_page.dart';
 import 'screen/welcome.dart';
 import 'pages/login_page.dart';
 import 'pages/signup_page.dart';
+import 'screen/how_it_works.dart';
+import 'services/livestock_fee_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +16,7 @@ void main() async {
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
+  await LivestockFeeService.instance.initialize();
   runApp(const MyApp());
 }
 
@@ -37,6 +40,7 @@ class MyApp extends StatelessWidget {
         '/LOGIN': (context) => const LoginScreen(),
         '/SIGNUP': (context) => const SignupPages(),
         '/HOME': (context) => const HomeScreen(),
+        '/HOW_IT_WORKS': (context) => const HowItWorksScreen(),
       },
     );
   }

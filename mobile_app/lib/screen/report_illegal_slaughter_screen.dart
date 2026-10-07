@@ -383,7 +383,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       final report = await supabase
           .from('reports')
           .insert({
-            'user_id': user.id,
+            'user_id': _isAnonymous ? null : user.id,
             'location': _locationCtrl.text.trim(),
             'incident_date': isoDate,
             'description': _descriptionCtrl.text.trim(),
@@ -393,7 +393,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                 _isAnonymous ? 'Anonymous' : _nameCtrl.text.trim(),
             'contact_number':
                 _isAnonymous ? null : _phoneCtrl.text.trim(),
-            'status': 'pending',
+            'status': 'Submitted',
           })
           .select()
           .single();
@@ -408,7 +408,24 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
           .update({'reference_no': refNo})
           .eq('id', report['id']);
 
-      // 6. Create notification
+      // 6. Create notification for user and admin alert
+      final reportPayload = {
+        'reference_no': refNo,
+        'report_id': report['id'],
+        'location': _locationCtrl.text.trim(),
+        'incident_date': isoDate,
+        'description': _descriptionCtrl.text.trim(),
+        'photo_url': photoUrl,
+        'is_anonymous': _isAnonymous,
+        'reporter_name':
+            _isAnonymous ? 'Anonymous' : _nameCtrl.text.trim(),
+        'contact_number':
+            _isAnonymous ? null : _phoneCtrl.text.trim(),
+        'status': 'Submitted',
+        'priority': 'High',
+        'created_at': DateTime.now().toIso8601String(),
+      };
+
       try {
         await supabase.from('notifications').insert({
           'user_id': user.id,
@@ -417,9 +434,26 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
               'Your illegal slaughter report has been submitted.\nRef: $refNo',
           'is_read': false,
           'type': 'report_filed',
+          'reference_no': refNo,
+          'data': reportPayload,
         });
-      } catch (_) {
-        // Don't block on notification failure
+
+        // Insert admin alert notification so admin panel immediately detects the new report
+        await supabase.from('notifications').insert({
+          'user_id': _isAnonymous ? null : user.id,
+          'title': '🚨 Illegal Slaughter Report Filed',
+          'message':
+              'New illegal slaughter report submitted.\nRef: $refNo\nLocation: ${_locationCtrl.text.trim()}',
+          'is_read': false,
+          'type': 'admin_illegal_report',
+          'reference_no': refNo,
+          'data': {
+            ...reportPayload,
+            if (_isAnonymous) 'user_id': null,
+          },
+        });
+      } catch (e) {
+        debugPrint('Notification insert error: $e');
       }
 
       if (!mounted) return;
@@ -685,60 +719,98 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                     height: 20,
                     child: Checkbox(
                       value: _isAnonymous,
-                      onChanged: (v) =>
-                          setState(() => _isAnonymous = v ?? false),
+                      onChanged: (v) {
+                        setState(() {
+                          _isAnonymous = v ?? false;
+                          if (_isAnonymous) {
+                            _nameCtrl.clear();
+                            _phoneCtrl.clear();
+                          }
+                        });
+                      },
                       activeColor: const Color(0xFF1E855A),
                     ),
                   ),
                   const SizedBox(width: 8),
                   const Text("Submit anonymously",
-                      style: TextStyle(fontSize: 13)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                 ],
               ),
               const SizedBox(height: 14),
 
-              // ── NAME ────────────────────────────────────────
-              _label("Your Name", required: !_isAnonymous),
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _nameCtrl,
-                enabled: !_isAnonymous,
-                decoration: _inputDeco(
-                  "Full name",
-                  fillColor: _isAnonymous
-                      ? Colors.grey.shade200
-                      : Colors.grey.shade50,
+              if (_isAnonymous) ...[
+                // Anonymity Protection Card
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFA5D6A7)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.security, size: 22, color: Color(0xFF1E855A)),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Identity Protected (Confidential)",
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0A3D2E)),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              "Your name and contact number will NOT be collected or stored. Slaughterhouse admins will only see 'Anonymous Whistleblower'.",
+                              style: TextStyle(
+                                  fontSize: 11, color: Color(0xFF2D6A4F), height: 1.3),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                validator: (v) {
-                  if (_isAnonymous) return null;
-                  return (v == null || v.trim().isEmpty)
-                      ? 'Required'
-                      : null;
-                },
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 14),
+              ] else ...[
+                // ── NAME ────────────────────────────────────────
+                _label("Your Name", required: true),
+                const SizedBox(height: 6),
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: _inputDeco(
+                    "Full name",
+                    prefixIcon: Icons.person_outline,
+                  ),
+                  validator: (v) {
+                    if (_isAnonymous) return null;
+                    return (v == null || v.trim().isEmpty) ? 'Required' : null;
+                  },
+                ),
+                const SizedBox(height: 14),
 
-              // ── CONTACT NUMBER ──────────────────────────────
-              _label("Contact Number", required: !_isAnonymous),
-              const SizedBox(height: 6),
-              TextFormField(
-                controller: _phoneCtrl,
-                enabled: !_isAnonymous,
-                keyboardType: TextInputType.phone,
-                decoration: _inputDeco(
-                  "+63 XXX XXX XXXX",
-                  fillColor: _isAnonymous
-                      ? Colors.grey.shade200
-                      : Colors.grey.shade50,
+                // ── CONTACT NUMBER ──────────────────────────────
+                _label("Contact Number", required: true),
+                const SizedBox(height: 6),
+                TextFormField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: _inputDeco(
+                    "+63 XXX XXX XXXX",
+                    prefixIcon: Icons.phone_outlined,
+                  ),
+                  validator: (v) {
+                    if (_isAnonymous) return null;
+                    return (v == null || v.trim().isEmpty) ? 'Required' : null;
+                  },
                 ),
-                validator: (v) {
-                  if (_isAnonymous) return null;
-                  return (v == null || v.trim().isEmpty)
-                      ? 'Required'
-                      : null;
-                },
-              ),
-              const SizedBox(height: 14),
+                const SizedBox(height: 14),
+              ],
 
               // ── WARNING NOTE ────────────────────────────────
               Container(

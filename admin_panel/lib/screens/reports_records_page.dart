@@ -1,11 +1,17 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+
+import 'illegal_slaughter_reports_view.dart';
+import '../services/report_pdf_generator.dart';
 
 class ReportsRecordsPage extends StatefulWidget {
-  const ReportsRecordsPage({super.key});
+  final String? initialTab;
+  const ReportsRecordsPage({super.key, this.initialTab});
   @override
   State<ReportsRecordsPage> createState() => _ReportsRecordsPageState();
 }
@@ -20,16 +26,140 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   // Filter state
   String _periodFilter = 'Last 7 days';
   String _reportType = 'Daily Report';
-  String _activeTab = 'Analytics'; // 'Analytics' or 'Report Illegal'
+  late String _activeTab;
 
   // Calendar state
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   DateTime? _selectedDate;
 
+  // Real-time alert polling state for Illegal Slaughter Reports
+  Timer? _alertTimer;
+  int _unreviewedIllegalReports = 0;
+  Map<String, dynamic>? _latestIllegalReport;
+
   @override
   void initState() {
     super.initState();
+    _activeTab = widget.initialTab ?? 'Analytics';
     _loadData();
+    _loadIllegalReportAlerts();
+    // Poll every 3 seconds for instant notifications of citizen reports
+    _alertTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _loadIllegalReportAlerts();
+    });
+  }
+
+  @override
+  void didUpdateWidget(ReportsRecordsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialTab != null && widget.initialTab != oldWidget.initialTab) {
+      setState(() {
+        _activeTab = widget.initialTab!;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _alertTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadIllegalReportAlerts() async {
+    try {
+      final reportsRes = await supabase.from('reports').select();
+      final Map<String, Map<String, dynamic>> reportsMap = {};
+
+      for (var r in (reportsRes as List)) {
+        final idStr = r['id']?.toString() ?? '';
+        final shortId = idStr.length >= 8
+            ? idStr.substring(0, 8).toUpperCase()
+            : idStr.toUpperCase();
+        final ref = r['reference_no']?.toString() ?? (idStr.isNotEmpty ? 'RPT-2026-$shortId' : '');
+        final key = ref.isNotEmpty ? ref : idStr;
+        if (key.isNotEmpty) {
+          reportsMap[key] = {
+            'id': idStr,
+            'reference_no': ref,
+            'status': r['status'] ?? 'Pending Review',
+            'location': r['location'] ?? 'Tabaco City',
+            'reporter_name': r['reporter_name'] ?? 'Citizen',
+            'created_at': r['incident_date'] ?? r['created_at'],
+          };
+        }
+      }
+
+      // Merge notifications to accurately reflect updated statuses (e.g. 'Report Compiled')
+      try {
+        final notifs = await supabase
+            .from('notifications')
+            .select('id, type, reference_no, data, created_at')
+            .inFilter('type', [
+              'admin_illegal_report',
+              'report_filed',
+              'report_status_update',
+              'report_investigating',
+              'report_resolved',
+            ])
+            .order('created_at', ascending: true);
+
+        for (var n in (notifs as List)) {
+          final data = n['data'] is Map ? Map<String, dynamic>.from(n['data']) : <String, dynamic>{};
+          final ref = n['reference_no']?.toString() ?? data['reference_no']?.toString() ?? '';
+          final rId = data['report_id']?.toString() ?? data['id']?.toString() ?? '';
+
+          String? matchKey;
+          for (var k in reportsMap.keys) {
+            final item = reportsMap[k]!;
+            if ((ref.isNotEmpty && (k == ref || item['reference_no'] == ref)) ||
+                (rId.isNotEmpty && (item['id'] == rId || k == rId))) {
+              matchKey = k;
+              break;
+            }
+          }
+
+          if (matchKey != null) {
+            if (data['status'] != null && data['status'].toString().isNotEmpty) {
+              reportsMap[matchKey]!['status'] = data['status'].toString();
+            }
+          } else if (ref.isNotEmpty || rId.isNotEmpty) {
+            final key = ref.isNotEmpty ? ref : rId;
+            reportsMap[key] = {
+              'id': rId,
+              'reference_no': ref,
+              'status': data['status'] ?? 'Pending Review',
+              'location': data['location'] ?? 'Tabaco City',
+              'reporter_name': data['reporter_name'] ?? 'Citizen',
+              'created_at': n['created_at'],
+            };
+          }
+        }
+      } catch (_) {}
+
+      int count = 0;
+      Map<String, dynamic>? latest;
+      for (var rep in reportsMap.values) {
+        final s = (rep['status'] ?? '').toString().trim().toLowerCase();
+        final isPending = s == 'pending' ||
+            s == 'unreviewed' ||
+            s == 'submitted' ||
+            s == 'new' ||
+            s == 'pending review' ||
+            s == 'pending_review' ||
+            s == 'under review';
+        if (isPending) {
+          count++;
+          latest ??= rep;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _unreviewedIllegalReports = count;
+          _latestIllegalReport = latest;
+        });
+      }
+    } catch (_) {}
   }
 
   // ════════════════════════════════════════════
@@ -41,7 +171,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
-          .inFilter('status', ['paid', 'released', 'completed', 'releasable'])
+          .inFilter('status', ['paid', 'released', 'completed', 'releasable', 'taken_back', 'condemned'])
           .order('created_at', ascending: false);
 
       final enriched = List<Map<String, dynamic>>.from(data).map((r) {
@@ -160,12 +290,73 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     return dist;
   }
 
-  String _remarkForRequest(Map<String, dynamic> req) {
+   String _remarkForRequest(Map<String, dynamic> req) {
+    final status = req['status']?.toString();
+    if (status == 'taken_back') return 'Ante-Mortem Failed — Taken Back';
+    if (status == 'condemned') return 'Post-Mortem Failed — Condemned';
     final postMortem = req['post_mortem']?.toString();
     final notes = req['process_notes']?.toString() ?? '';
     if (postMortem == 'Failed') return 'Condemned';
     if (notes.isNotEmpty && notes != 'null') return notes;
     return 'Passed Inspection';
+  }
+
+  // ════════════════════════════════════════════
+  //  PDF ACTIONS
+  // ════════════════════════════════════════════
+  Future<void> _downloadReport(DateTime date, List<Map<String, dynamic>> requests) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating PDF...'), backgroundColor: Color(0xFF2D6A4F), duration: Duration(seconds: 1)),
+      );
+      final pdfBytes = await ReportPdfGenerator.generate(date: date, requests: requests);
+      final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      await Printing.sharePdf(bytes: pdfBytes, filename: 'Slaughter_Report_$dateStr.pdf');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generating PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _printReport(DateTime date, List<Map<String, dynamic>> requests) async {
+    try {
+      final pdfBytes = await ReportPdfGenerator.generate(date: date, requests: requests);
+      await Printing.layoutPdf(onLayout: (_) async => pdfBytes);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error printing report: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportPeriodReport() async {
+    final filtered = _filteredByPeriod();
+    if (filtered.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: const Text('No data to export for the selected period'), backgroundColor: Colors.grey.shade700),
+      );
+      return;
+    }
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating report...'), backgroundColor: Color(0xFF2D6A4F), duration: Duration(seconds: 1)),
+      );
+      final now = DateTime.now();
+      final pdfBytes = await ReportPdfGenerator.generate(date: now, requests: filtered);
+      final dateStr = DateFormat('yyyy-MM-dd').format(now);
+      await Printing.sharePdf(bytes: pdfBytes, filename: 'Slaughter_Report_Export_$dateStr.pdf');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error exporting report: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   // ════════════════════════════════════════════
@@ -191,6 +382,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (_unreviewedIllegalReports > 0) ...[
+                            _buildIllegalReportUrgentAlertBanner(),
+                            const SizedBox(height: 20),
+                          ],
                           _buildFilterBar(),
                           const SizedBox(height: 20),
                           _buildSummaryCards(),
@@ -279,18 +474,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         ),
         const Spacer(),
         ElevatedButton.icon(
-          onPressed: () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Row(children: [
-                  Icon(Icons.info_outline, color: Colors.white, size: 18),
-                  SizedBox(width: 8),
-                  Text('Export feature coming soon'),
-                ]),
-                backgroundColor: Colors.grey.shade700,
-              ),
-            );
-          },
+          onPressed: () => _exportPeriodReport(),
           icon: const Icon(Icons.download, size: 16, color: Colors.white),
           label: const Text('Export Report', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
           style: ElevatedButton.styleFrom(
@@ -439,12 +623,16 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
       children: [
         _tabButton('Analytics', _activeTab == 'Analytics'),
         const SizedBox(width: 8),
-        _tabButton('Report Illegal', _activeTab == 'Report Illegal'),
+        _tabButton(
+          'Report Illegal',
+          _activeTab == 'Report Illegal',
+          badgeCount: _unreviewedIllegalReports,
+        ),
       ],
     );
   }
 
-  Widget _tabButton(String label, bool isActive) {
+  Widget _tabButton(String label, bool isActive, {int badgeCount = 0}) {
     return OutlinedButton(
       onPressed: () => setState(() => _activeTab = label),
       style: OutlinedButton.styleFrom(
@@ -456,7 +644,106 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       ),
-      child: Text(label, style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.w500)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.w500)),
+          if (badgeCount > 0) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFDC2626),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$badgeCount',
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIllegalReportUrgentAlertBanner() {
+    final ref = _latestIllegalReport?['reference_no'] ?? 'Report';
+    final loc = _latestIllegalReport?['location'] ?? 'Location not specified';
+    final reporter = _latestIllegalReport?['reporter_name'] ?? 'Citizen';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFDC2626).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      '🚨 New Illegal Slaughter Whistleblower Report ($_unreviewedIllegalReports Pending)',
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF991B1B),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDC2626),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('ALERT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Ref: $ref • Location: $loc • Reporter: $reporter',
+                  style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+                ),
+              ],
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => setState(() => _activeTab = 'Report Illegal'),
+            icon: const Icon(Icons.arrow_forward, size: 15),
+            label: const Text('Go to Report Illegal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -714,22 +1001,16 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: const Text('Download coming soon'), backgroundColor: Colors.grey.shade700),
-                    );
-                  },
+                  onPressed: () => _downloadReport(_selectedDate!, records),
                   icon: Icon(Icons.download, size: 20, color: Colors.grey.shade600),
                   splashRadius: 20,
+                  tooltip: 'Download PDF',
                 ),
                 IconButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: const Text('Print coming soon'), backgroundColor: Colors.grey.shade700),
-                    );
-                  },
+                  onPressed: () => _printReport(_selectedDate!, records),
                   icon: Icon(Icons.print_outlined, size: 20, color: Colors.grey.shade600),
                   splashRadius: 20,
+                  tooltip: 'Print Report',
                 ),
               ],
             ),
@@ -882,22 +1163,16 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                       ),
                     ),
                     IconButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: const Text('Download coming soon'), backgroundColor: Colors.grey.shade700),
-                        );
-                      },
+                      onPressed: () => _downloadReport(dt, dayReqs),
                       icon: Icon(Icons.download, size: 20, color: Colors.grey.shade600),
                       splashRadius: 20,
+                      tooltip: 'Download PDF',
                     ),
                     IconButton(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: const Text('Print coming soon'), backgroundColor: Colors.grey.shade700),
-                        );
-                      },
+                      onPressed: () => _printReport(dt, dayReqs),
                       icon: Icon(Icons.print_outlined, size: 20, color: Colors.grey.shade600),
                       splashRadius: 20,
+                      tooltip: 'Print Report',
                     ),
                   ],
                 ),
@@ -912,43 +1187,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   //  REPORT ILLEGAL SECTION
   // ════════════════════════════════════════════
   Widget _buildReportIllegalSection() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(40),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Icon(Icons.report_outlined, size: 40, color: Colors.red.shade400),
-          ),
-          const SizedBox(height: 20),
-          const Text('Report Illegal Activity', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-          const SizedBox(height: 8),
-          Text(
-            'Report illegal slaughtering activities or violations',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text('Coming Soon', style: TextStyle(color: Colors.red.shade400, fontWeight: FontWeight.w600, fontSize: 13)),
-          ),
-        ],
-      ),
+    return IllegalSlaughterReportsView(
+      onReportsUpdated: _loadIllegalReportAlerts,
     );
   }
 }

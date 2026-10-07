@@ -1,18 +1,9 @@
+import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
-
-// ═══════════════════════════════════════════════════════════
-//  FEE SCHEDULE (hardcoded per Tabaco City Slaughterhouse)
-// ═══════════════════════════════════════════════════════════
-const double _kVetHealthCertFee = 50.0;
-const double _kPermitToSlaughterFee = 60.0;
-const double _kFacilityFee = 60.0;
-const double _kCorralFee = 40.0;
-const double _kAnteMortemFee = 40.0;
-const double _kPostMortemRatePerKg = 5.0;
-const double _kDeliveryVanFee = 60.0; // market only
+import '../services/app_settings_service.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
   const PaymentCashieringPage({super.key});
@@ -27,15 +18,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   bool _isLoading = true;
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
+    // Auto-poll every 3 seconds so payments made on mobile reflect immediately
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _loadRequests(silent: true);
+    });
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -43,8 +40,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   // ════════════════════════════════════════════
   //  LOAD REQUESTS (releasable / payment_pending / paid)
   // ════════════════════════════════════════════
-  Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRequests({bool silent = false}) async {
+    if (!silent) setState(() => _isLoading = true);
     try {
       final data = await supabase
           .from('requests')
@@ -73,14 +70,16 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         return r;
       }).toList();
 
-      setState(() {
-        _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
-        _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
+          _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('PaymentCashiering load error: $e');
-      setState(() => _isLoading = false);
+      if (mounted && !silent) setState(() => _isLoading = false);
     }
   }
 
@@ -90,28 +89,39 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   String _receiptNo(Map<String, dynamic> req) =>
       'RCP-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
 
-  double _carcassWeight(Map<String, dynamic> req) {
+  static double _carcassWeight(Map<String, dynamic> req) {
     final w = req['carcass_weight'];
     if (w == null) return 0;
     return double.tryParse(w.toString()) ?? 0;
   }
 
-  Map<String, double> _calcFees(Map<String, dynamic> req) {
+  static Map<String, dynamic> _calcFees(Map<String, dynamic> req) {
+    final animalType = (req['livestock_type'] ?? 'hog').toString();
+    final rates = AppSettingsService.instance.getFeeRatesForAnimal(animalType);
     final weight = _carcassWeight(req);
-    final postMortemFee = weight * _kPostMortemRatePerKg;
-    final subtotal = _kVetHealthCertFee + _kPermitToSlaughterFee + _kFacilityFee + _kCorralFee + _kAnteMortemFee + postMortemFee;
+    final postMortemFee = weight * rates.postMortemRatePerKg;
+    final subtotal = rates.vetHealthCertFee +
+        rates.permitToSlaughterFee +
+        rates.facilityFee +
+        rates.corralFee +
+        rates.anteMortemFee +
+        rates.additionalFee +
+        postMortemFee;
     final isBarangay = req['request_type'] == 'barangay';
-    final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
+    final deliveryFee = isBarangay ? 0.0 : rates.deliveryVanFee;
     return {
-      'vet_health_cert': _kVetHealthCertFee,
-      'permit_to_slaughter': _kPermitToSlaughterFee,
-      'facility': _kFacilityFee,
-      'corral': _kCorralFee,
-      'ante_mortem': _kAnteMortemFee,
+      'vet_health_cert': rates.vetHealthCertFee,
+      'permit_to_slaughter': rates.permitToSlaughterFee,
+      'facility': rates.facilityFee,
+      'corral': rates.corralFee,
+      'ante_mortem': rates.anteMortemFee,
       'post_mortem': postMortemFee,
+      'additional_fee': rates.additionalFee,
+      'additional_fee_label': rates.additionalFeeLabel,
       'subtotal': subtotal,
       'delivery_van': deliveryFee,
       'total': subtotal + deliveryFee,
+      'rate_per_kg': rates.postMortemRatePerKg,
     };
   }
 
@@ -132,12 +142,16 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   String _paymentStatus(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
     if (payment != null && payment['status'] == 'paid') return 'Verified';
+    if (req['status'] == 'paid') return 'Verified';
     return 'Pending';
   }
 
   String _paymentMethod(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
-    return payment?['payment_method']?.toString() ?? '—';
+    if (payment != null && payment['payment_method'] != null) {
+      return payment['payment_method'].toString();
+    }
+    return req['payment_method']?.toString() ?? '—';
   }
 
   // ════════════════════════════════════════════
@@ -297,7 +311,14 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () => _loadRequests(),
+            icon: const Icon(Icons.refresh, size: 20),
+            color: const Color(0xFF2D3748),
+          ),
+          const SizedBox(width: 4),
           IconButton(
             onPressed: () => Navigator.maybePop(context),
             icon: const Icon(Icons.arrow_forward, size: 26),
@@ -474,7 +495,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                       DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Weight (kg)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Post-Mortem\n(\u20b15/kg)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                      DataColumn(label: Text('Post-Mortem\nFee', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Payment Method', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -482,7 +503,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     rows: requests.map((req) {
                       final ref = _refNo(req);
                       final weight = _carcassWeight(req);
-                      final postMortemFee = weight * _kPostMortemRatePerKg;
+                      final fees = _calcFees(req);
+                      final postMortemFee = fees['post_mortem']!;
                       final status = _paymentStatus(req);
                       final method = _paymentMethod(req);
 
@@ -629,22 +651,27 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 // Fee Breakdown
                 const Text('Payment Calculation Preview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                _feeRow('Veterinary Health Certificate:', '\u20b1${fees['vet_health_cert']!.toStringAsFixed(2)}'),
-                _feeRow('Permit to Slaughter:', '\u20b1${fees['permit_to_slaughter']!.toStringAsFixed(2)}'),
-                _feeRow('Facility Fee:', '\u20b1${fees['facility']!.toStringAsFixed(2)}'),
-                _feeRow('Corral Fee:', '\u20b1${fees['corral']!.toStringAsFixed(2)}'),
-                _feeRow('Ante-Mortem:', '\u20b1${fees['ante_mortem']!.toStringAsFixed(2)}'),
-                _feeRow('Post-Mortem (${weight.toStringAsFixed(0)} kg \u20b1${_kPostMortemRatePerKg.toStringAsFixed(2)}/kg):', '\u20b1${fees['post_mortem']!.toStringAsFixed(2)}'),
+                _feeRow('Veterinary Health Certificate:', '\u20b1${(fees['vet_health_cert'] as double).toStringAsFixed(2)}'),
+                _feeRow('Permit to Slaughter:', '\u20b1${(fees['permit_to_slaughter'] as double).toStringAsFixed(2)}'),
+                _feeRow('Facility Fee:', '\u20b1${(fees['facility'] as double).toStringAsFixed(2)}'),
+                _feeRow('Corral Fee:', '\u20b1${(fees['corral'] as double).toStringAsFixed(2)}'),
+                _feeRow('Ante-Mortem Fee:', '\u20b1${(fees['ante_mortem'] as double).toStringAsFixed(2)}'),
+                _feeRow('Post-Mortem (${weight.toStringAsFixed(0)} kg @ \u20b1${((fees['rate_per_kg'] as num?)?.toDouble() ?? 5.0).toStringAsFixed(2)}/kg):', '\u20b1${(fees['post_mortem'] as double).toStringAsFixed(2)}'),
+                if (((fees['additional_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _feeRow(
+                    '${fees['additional_fee_label'] ?? 'Additional Surcharge'}:',
+                    '\u20b1${((fees['additional_fee'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
+                  ),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade300),
-                _feeRow('Subtotal:', '\u20b1${fees['subtotal']!.toStringAsFixed(2)}', bold: true),
-                if (!isBarangay) _feeRow('Delivery Van Fee:', '\u20b1${fees['delivery_van']!.toStringAsFixed(2)}'),
+                _feeRow('Subtotal:', '\u20b1${(fees['subtotal'] as double).toStringAsFixed(2)}', bold: true),
+                if (!isBarangay) _feeRow('Delivery Van Fee:', '\u20b1${(fees['delivery_van'] as double).toStringAsFixed(2)}'),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade400),
                 const SizedBox(height: 4),
-                _feeRow('TOTAL AMOUNT:', '\u20b1${fees['total']!.toStringAsFixed(2)}', bold: true, large: true),
+                _feeRow('TOTAL AMOUNT:', '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true, large: true),
                 const SizedBox(height: 12),
-                _feeRow('BALANCE:', status == 'Verified' ? '0' : '\u20b1${fees['total']!.toStringAsFixed(2)}', bold: true),
+                _feeRow('BALANCE:', status == 'Verified' ? '0' : '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
                 const SizedBox(height: 12),
 
                 // Payment Details
@@ -768,7 +795,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   bool _isLoading = false;
   bool _isProcessing = false;
   Map<String, dynamic>? _foundRequest;
-  Map<String, double> _fees = {};
+  Map<String, dynamic> _fees = {};
 
   Future<void> _lookupReference() async {
     final refText = _refCtrl.text.trim();
@@ -815,30 +842,16 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         data['carcass_weight'] = (inspList.first as Map)['carcass_weight'];
       }
 
-      // Calculate fees
-      final weight = double.tryParse((data['carcass_weight'] ?? 0).toString()) ?? 0;
-      final postMortemFee = weight * _kPostMortemRatePerKg;
-      final subtotal = _kVetHealthCertFee + _kPermitToSlaughterFee + _kFacilityFee + _kCorralFee + _kAnteMortemFee + postMortemFee;
-      final isBarangay = data['request_type'] == 'barangay';
-      final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
-      final total = subtotal + deliveryFee;
+      // Calculate fees dynamically based on configured animal rates
+      final fees = _PaymentCashieringPageState._calcFees(data);
+      final total = fees['total']!;
 
       setState(() {
         _foundRequest = data;
         _customerName = data['customer_name']?.toString() ?? '';
         _totalAmount = total;
         _balanceAmount = total;
-        _fees = {
-          'vet_health_cert': _kVetHealthCertFee,
-          'permit_to_slaughter': _kPermitToSlaughterFee,
-          'facility': _kFacilityFee,
-          'corral': _kCorralFee,
-          'ante_mortem': _kAnteMortemFee,
-          'post_mortem': postMortemFee,
-          'subtotal': subtotal,
-          'delivery_van': deliveryFee,
-          'total': total,
-        };
+        _fees = fees;
         _isLoading = false;
       });
     } catch (e) {

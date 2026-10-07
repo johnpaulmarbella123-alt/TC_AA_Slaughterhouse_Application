@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/app_settings_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -55,6 +56,9 @@ class _LoginPageState extends State<LoginPage> {
         // Save the "keep me logged in" preference
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
+
+        // Fetch fresh staff, capacity schedule, and fees from cloud database
+        await AppSettingsService.instance.reloadFromSupabase();
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');

@@ -4,6 +4,7 @@ import '../pages/home_page.dart' show globalUnreadNotifCount;
 import 'condemnation_slip_screen.dart';
 import 'notification_options_dialog.dart';
 import 'receipt_detail_screen.dart';
+import 'view_status_update_screen.dart';
 
 class NotifyPage extends StatefulWidget {
   /// Callback to switch bottom-nav tab (e.g. index 1 = Requests).
@@ -23,13 +24,18 @@ class _NotifyPageState extends State<NotifyPage> {
   final supabase = Supabase.instance.client;
 
   List<Map<String, dynamic>> notifications = [];
+  Map<String, dynamic>? _activeRequest;
   bool isLoading = true;
   bool showUnreadOnly = false;
+  bool _userSwitchedTab = false;
+
+  RealtimeChannel? _notifChannel;
 
   @override
   void initState() {
     super.initState();
     _loadNotifications();
+    _loadActiveRequest();
     _subscribeRealtime();
     widget.refreshTrigger?.addListener(_onRefreshTriggered);
   }
@@ -37,11 +43,55 @@ class _NotifyPageState extends State<NotifyPage> {
   @override
   void dispose() {
     widget.refreshTrigger?.removeListener(_onRefreshTriggered);
+    if (_notifChannel != null) {
+      supabase.removeChannel(_notifChannel!);
+    }
     super.dispose();
   }
 
   void _onRefreshTriggered() {
     _loadNotifications();
+    _loadActiveRequest();
+  }
+
+  // =========================
+  // LOAD ACTIVE REQUEST (FOR STATUS UPDATE BANNER)
+  // Visible once approved, disappears once meat is released or completed
+  // =========================
+  Future<void> _loadActiveRequest() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final reqs = await supabase
+          .from('requests')
+          .select('*, slaughter_inspection(*), payments(*)')
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(5);
+
+      final activeList = (reqs as List).where((r) {
+        final status = (r['status'] ?? '').toString().toLowerCase();
+        // Visible once admin approved, disappears once meat is released/completed or cancelled
+        return [
+          'approved',
+          'doc_verified',
+          'slaughter_started',
+          'in_progress',
+          'releasable',
+          'payment_pending',
+          'paid'
+        ].contains(status);
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          _activeRequest = activeList.isNotEmpty ? activeList.first : null;
+        });
+      }
+    } catch (e) {
+      debugPrint("Active request load error: $e");
+    }
   }
 
   // =========================
@@ -58,21 +108,21 @@ class _NotifyPageState extends State<NotifyPage> {
           .eq('user_id', user.id)
           .order('created_at', ascending: false);
 
-      // DEBUG: print the raw rows so you can see exactly what
-      // Supabase is returning (column names + value types) in your
-      // console. Remove this once things look right.
-      for (final row in data) {
-        debugPrint('NOTIF ROW: $row');
+      if (mounted) {
+        setState(() {
+          notifications = List<Map<String, dynamic>>.from(data);
+          isLoading = false;
+          // New unread notifications go to Unread tab; only switch if user hasn't explicitly selected
+          if (!_userSwitchedTab) {
+            final hasUnread = notifications.any((n) => !_asBool(n['is_read']));
+            showUnreadOnly = hasUnread;
+          }
+        });
+        _syncGlobalUnreadCount();
       }
-
-      setState(() {
-        notifications = List<Map<String, dynamic>>.from(data);
-        isLoading = false;
-      });
-      _syncGlobalUnreadCount();
     } catch (e) {
       debugPrint("Notification load error: $e");
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -83,20 +133,37 @@ class _NotifyPageState extends State<NotifyPage> {
     final user = supabase.auth.currentUser;
     if (user == null) return;
 
-    supabase
-        .from('notifications')
-        .stream(primaryKey: ['id'])
-        .eq('user_id', user.id)
-        .order('created_at', ascending: false)
-        .listen((data) {
-          for (final row in data) {
-            debugPrint('NOTIF STREAM ROW: $row');
-          }
-          if (mounted) {
-            setState(() => notifications = List<Map<String, dynamic>>.from(data));
-            _syncGlobalUnreadCount();
-          }
-        });
+    _notifChannel = supabase.channel('notif-list');
+    _notifChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            debugPrint('NOTIFY: Realtime INSERT → reloading list');
+            _loadNotifications();
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'notifications',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            debugPrint('NOTIFY: Realtime UPDATE → reloading list');
+            _loadNotifications();
+          },
+        )
+        .subscribe();
   }
 
   // =========================
@@ -159,10 +226,12 @@ class _NotifyPageState extends State<NotifyPage> {
 
   // =========================
   // FILTER
+  // "Unread" tab contains new unread notifications.
+  // "All" tab contains everything that has already been read.
   // =========================
   List<Map<String, dynamic>> get _filtered => showUnreadOnly
       ? notifications.where((n) => !_asBool(n['is_read'])).toList()
-      : notifications;
+      : notifications.where((n) => _asBool(n['is_read'])).toList();
 
   int get _unreadCount =>
       notifications.where((n) => !_asBool(n['is_read'])).length;
@@ -172,6 +241,18 @@ class _NotifyPageState extends State<NotifyPage> {
   // =========================
   void _handleAction(String? type, Map<String, dynamic> data, Map<String, dynamic> notif) {
     switch (type) {
+      case 'slaughter_completed':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ViewStatusUpdateScreen(
+              initialRequest: _activeRequest,
+              onNavigateToTab: widget.onNavigateToTab,
+            ),
+          ),
+        );
+        break;
+
       case 'receipt_issued':
         final requestId = data['request_id'];
         Navigator.push(
@@ -509,6 +590,17 @@ class _NotifyPageState extends State<NotifyPage> {
           actionLabel: 'View Details',
           actionColor: const Color(0xFF185FA5),
         );
+      case 'slaughter_completed':
+        return _NotifStyle(
+          icon: Icons.check_circle,
+          iconColor: const Color(0xFF1A8C62),
+          iconBg: const Color(0xFFE4F8F0),
+          badge: 'Operation Complete',
+          badgeBg: const Color(0xFFE4F8F0),
+          badgeText: const Color(0xFF0A3D2E),
+          actionLabel: 'View Status',
+          actionColor: const Color(0xFF0F6E56),
+        );
       case 'receipt_issued':
         return _NotifStyle(
           icon: Icons.check_circle,
@@ -612,9 +704,80 @@ class _NotifyPageState extends State<NotifyPage> {
       body: Column(
         children: [
           _buildHeader(),
+          if (_activeRequest != null) _buildStatusUpdateBanner(),
           _buildTabs(),
           Expanded(child: _buildList()),
         ],
+      ),
+    );
+  }
+
+  Widget _buildStatusUpdateBanner() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ViewStatusUpdateScreen(
+                initialRequest: _activeRequest,
+                onNavigateToTab: widget.onNavigateToTab,
+              ),
+            ),
+          ).then((_) => _loadActiveRequest());
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F8F4), // Light mint green from user's screenshot
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFD6EADA), width: 1.2),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD6EADA),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.find_in_page_outlined,
+                  color: Color(0xFF1E855A),
+                  size: 26,
+                ),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'View Status Update',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Track your request update status.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.black45, size: 20),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -664,14 +827,20 @@ class _NotifyPageState extends State<NotifyPage> {
           _TabChip(
             label: 'All',
             active: !showUnreadOnly,
-            onTap: () => setState(() => showUnreadOnly = false),
+            onTap: () => setState(() {
+              showUnreadOnly = false;
+              _userSwitchedTab = true;
+            }),
           ),
           const SizedBox(width: 8),
           _TabChip(
             label: 'Unread',
             active: showUnreadOnly,
             count: _unreadCount,
-            onTap: () => setState(() => showUnreadOnly = true),
+            onTap: () => setState(() {
+              showUnreadOnly = true;
+              _userSwitchedTab = true;
+            }),
           ),
         ],
       ),
@@ -690,7 +859,7 @@ class _NotifyPageState extends State<NotifyPage> {
             Icon(Icons.notifications_off_outlined, size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
             Text(
-              showUnreadOnly ? 'No unread notifications' : 'No notifications yet',
+              showUnreadOnly ? 'No unread notifications' : 'No read notifications yet',
               style: TextStyle(color: Colors.grey.shade400),
             ),
           ],

@@ -100,20 +100,39 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         final isBarangay = requestData['request_type'] == 'barangay';
         final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
 
+        final totalFromPay = paymentData?['total_amount'] != null
+            ? double.tryParse(paymentData!['total_amount'].toString())
+            : null;
+
         setState(() {
           _request = requestData;
           _payment = paymentData;
-          _fees = {
-            'vet_health_cert': _kVetHealthCertFee,
-            'permit_to_slaughter': _kPermitToSlaughterFee,
-            'facility': _kFacilityFee,
-            'corral': _kCorralFee,
-            'ante_mortem': _kAnteMortemFee,
-            'post_mortem': postMortemFee,
-            'subtotal': subtotal,
-            'delivery_van': deliveryFee,
-            'total': subtotal + deliveryFee,
-          };
+          if (paymentData != null && totalFromPay != null) {
+            final vanFee = double.tryParse((paymentData['delivery_van_fee'] ?? deliveryFee).toString()) ?? deliveryFee;
+            _fees = {
+              'vet_health_cert': double.tryParse((paymentData['vet_health_cert_fee'] ?? _kVetHealthCertFee).toString()) ?? _kVetHealthCertFee,
+              'permit_to_slaughter': double.tryParse((paymentData['permit_fee'] ?? _kPermitToSlaughterFee).toString()) ?? _kPermitToSlaughterFee,
+              'facility': double.tryParse((paymentData['facility_fee'] ?? _kFacilityFee).toString()) ?? _kFacilityFee,
+              'corral': double.tryParse((paymentData['corral_fee'] ?? _kCorralFee).toString()) ?? _kCorralFee,
+              'ante_mortem': double.tryParse((paymentData['ante_mortem_fee'] ?? _kAnteMortemFee).toString()) ?? _kAnteMortemFee,
+              'post_mortem': double.tryParse((paymentData['post_mortem_fee'] ?? postMortemFee).toString()) ?? postMortemFee,
+              'subtotal': totalFromPay - vanFee,
+              'delivery_van': vanFee,
+              'total': totalFromPay,
+            };
+          } else {
+            _fees = {
+              'vet_health_cert': _kVetHealthCertFee,
+              'permit_to_slaughter': _kPermitToSlaughterFee,
+              'facility': _kFacilityFee,
+              'corral': _kCorralFee,
+              'ante_mortem': _kAnteMortemFee,
+              'post_mortem': postMortemFee,
+              'subtotal': subtotal,
+              'delivery_van': deliveryFee,
+              'total': subtotal + deliveryFee,
+            };
+          }
         });
       }
     } catch (e) {
@@ -363,20 +382,25 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
       return;
     }
 
-    final success = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => SelectPaymentScreen(
-          request: _request!,
-          fees: _fees,
-          receiptNo: _receiptNo(),
+    setState(() => _isProcessing = true);
+    try {
+      final success = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SelectPaymentScreen(
+            request: _request!,
+            fees: _fees,
+            receiptNo: _receiptNo(),
+          ),
         ),
-      ),
-    );
+      );
 
-    if (success == true) {
-      // Refresh the receipt data to show the PAID state
-      _loadReceiptData();
+      if (success == true) {
+        // Refresh the receipt data to show the PAID state
+        _loadReceiptData();
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 

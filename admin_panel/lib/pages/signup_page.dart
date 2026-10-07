@@ -52,9 +52,9 @@ class _SignupPageState extends State<SignupPage> {
       if (mounted) {
         if (response.user != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Registration successful! Please log in.'), backgroundColor: Colors.green),
+            const SnackBar(content: Text('Registration successful! Welcome aboard.'), backgroundColor: Colors.green),
           );
-          Navigator.pushReplacementNamed(context, '/login');
+          Navigator.pushReplacementNamed(context, '/dashboard');
         }
       }
     } on AuthException catch (error) {
