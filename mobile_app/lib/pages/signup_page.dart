@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
 import '../screen/how_it_works.dart';
+import 'home_page.dart';
 
 class SignupPages extends StatefulWidget {
 
@@ -74,7 +76,7 @@ class _SignupScreenState
         }
       }
 
-      // Send OTP via Supabase (Resend SMTP for email, SMS gateway for phone)
+      // Send OTP via Supabase
       await _authService.sendOtp(identifier);
 
       if (mounted) {
@@ -91,23 +93,26 @@ class _SignupScreenState
         );
       }
     } catch (e) {
-
       if (mounted) {
-
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-
+        String errorMessage = e.toString();
+        if (e is AuthException) {
+          errorMessage = e.message;
+        } else if (errorMessage.contains('Exception:')) {
+          errorMessage = errorMessage.replaceAll('Exception:', '').trim();
+        }
+        if (errorMessage.contains('Error sending magic link email') || errorMessage.contains('unexpected_failure')) {
+          errorMessage = 'Unable to send OTP email. Please ensure Custom SMTP (Resend) is configured in Supabase.';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString()),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
-
     } finally {
-
       if (mounted) {
-
         setState(() => _isLoading = false);
       }
     }

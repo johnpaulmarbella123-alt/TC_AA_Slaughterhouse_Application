@@ -698,7 +698,7 @@ class _RequestsContentState extends State<RequestsContent> {
                       _buildDateField("Preferred Date"),
                       const SizedBox(height: 16),
                       _buildTextField(
-                        "Special Instructions",
+                        "Special Instructions (Optional)",
                         "Any specific requests or requirements...",
                         maxLines: 3,
                         controller: _specialInstructionsController,

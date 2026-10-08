@@ -11,10 +11,22 @@ import 'theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await dotenv.load(fileName: ".env");
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint("dotenv loading error or file blocked by web server: $e");
+  }
+
+  const defaultUrl = 'https://jacgcceaxblwgdxaeaqk.supabase.co';
+  const defaultAnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphY2djY2VheGJsd2dkeGFlYXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MzE4MDMsImV4cCI6MjA5NDQwNzgwM30.UQZJMdhEKQ2KqOmcvqFg8-JWBuR5b9XtjphzAnKeW6c';
+
+  final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? defaultUrl;
+  final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? defaultAnonKey;
+
   await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    publishableKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    url: supabaseUrl,
+    publishableKey: supabaseKey,
   );
 
   // Initialize App Settings (loads persisted fees, roles, schedule, appearance, theme)
