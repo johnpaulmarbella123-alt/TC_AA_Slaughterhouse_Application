@@ -48,6 +48,7 @@ class _SettingsPageState extends State<SettingsPage>
   late TextEditingController _maxCattleCtrl;
   late TextEditingController _maxCarabaoCtrl;
   late TextEditingController _maxGoatCtrl;
+  late TextEditingController _maxPoultryCtrl;
   late bool _isFacilityOperational;
   late TextEditingController _noticeMsgCtrl;
 
@@ -118,6 +119,8 @@ class _SettingsPageState extends State<SettingsPage>
     _maxCarabaoCtrl =
         TextEditingController(text: sched.maxCarabaoPerDay.toString());
     _maxGoatCtrl = TextEditingController(text: sched.maxGoatPerDay.toString());
+    _maxPoultryCtrl =
+        TextEditingController(text: sched.maxPoultryPerDay.toString());
     _isFacilityOperational = sched.isOperational;
     _noticeMsgCtrl = TextEditingController(text: sched.noticeMessage);
 
@@ -169,6 +172,7 @@ class _SettingsPageState extends State<SettingsPage>
     _maxCattleCtrl.dispose();
     _maxCarabaoCtrl.dispose();
     _maxGoatCtrl.dispose();
+    _maxPoultryCtrl.dispose();
     _noticeMsgCtrl.dispose();
 
     _profileNameCtrl.dispose();
@@ -207,6 +211,7 @@ class _SettingsPageState extends State<SettingsPage>
       _maxCattleCtrl.text = sched.maxCattlePerDay.toString();
       _maxCarabaoCtrl.text = sched.maxCarabaoPerDay.toString();
       _maxGoatCtrl.text = sched.maxGoatPerDay.toString();
+      _maxPoultryCtrl.text = sched.maxPoultryPerDay.toString();
       _isFacilityOperational = sched.isOperational;
       _noticeMsgCtrl.text = sched.noticeMessage;
     });
@@ -429,6 +434,7 @@ class _SettingsPageState extends State<SettingsPage>
       {'key': 'carabao', 'label': 'Carabao (Water Buffalo)', 'icon': '🐃'},
       {'key': 'goat', 'label': 'Goat (Caprine)', 'icon': '🐐'},
       {'key': 'sheep', 'label': 'Sheep (Ovine)', 'icon': '🐑'},
+      {'key': 'poultry', 'label': 'Poultry (Fowl)', 'icon': '🐔'},
     ];
 
     // Compute preview
@@ -1592,7 +1598,17 @@ class _SettingsPageState extends State<SettingsPage>
                           ),
                         ),
                       ),
-                      const Expanded(child: SizedBox()),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextField(
+                          controller: _maxPoultryCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Max Poultry / Day',
+                            prefixText: '🐔 ',
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -1625,6 +1641,7 @@ class _SettingsPageState extends State<SettingsPage>
                   maxCattlePerDay: int.tryParse(_maxCattleCtrl.text) ?? 20,
                   maxCarabaoPerDay: int.tryParse(_maxCarabaoCtrl.text) ?? 10,
                   maxGoatPerDay: int.tryParse(_maxGoatCtrl.text) ?? 10,
+                  maxPoultryPerDay: int.tryParse(_maxPoultryCtrl.text) ?? 50,
                   isOperational: _isFacilityOperational,
                   noticeMessage: _noticeMsgCtrl.text.trim(),
                 );

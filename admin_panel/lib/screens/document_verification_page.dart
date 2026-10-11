@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/notification_service.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
   const DocumentVerificationPage({super.key});
@@ -19,35 +21,70 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
   final ScrollController _barangayScrollCtrl = ScrollController();
   final ScrollController _marketScrollCtrl = ScrollController();
   final TextEditingController _searchController = TextEditingController();
+  RealtimeChannel? _realtimeChannel;
+  Timer? _pollingTimer;
 
   @override
-  void initState() { super.initState(); _loadRequests(); }
+  void initState() {
+    super.initState();
+    _loadRequests();
+    _subscribeRealtime();
+    // Auto-poll every 3 seconds so approved requests appear automatically
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _loadRequests(silent: true);
+    });
+  }
+
+  void _subscribeRealtime() {
+    try {
+      _realtimeChannel = supabase.channel('public:doc_verification_realtime')
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'requests',
+          callback: (payload) {
+            if (mounted) _loadRequests(silent: true);
+          },
+        )
+        ..subscribe();
+    } catch (e) {
+      debugPrint('Realtime subscription error in DocVerification: $e');
+    }
+  }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
+    if (_realtimeChannel != null) {
+      supabase.removeChannel(_realtimeChannel!);
+    }
     _barangayScrollCtrl.dispose();
     _marketScrollCtrl.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRequests({bool silent = false}) async {
+    if (!silent && mounted) setState(() => _isLoading = true);
     try {
       final all = await supabase.from('requests').select().order('created_at', ascending: false);
       final approved = all.where((r) => r['status'] == 'approved').toList();
       final verified = all.where((r) => r['status'] == 'doc_verified').toList();
       final cancelled = all.where((r) => r['status'] == 'cancelled').toList();
-      setState(() {
-        _barangayRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'barangay'));
-        _marketRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'market'));
-        _verifiedRequests = List<Map<String, dynamic>>.from(verified);
-        _cancelledRequests = List<Map<String, dynamic>>.from(cancelled);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _barangayRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'barangay'));
+          _marketRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'market'));
+          _verifiedRequests = List<Map<String, dynamic>>.from(verified);
+          _cancelledRequests = List<Map<String, dynamic>>.from(cancelled);
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('DocVerification load error: ${e.toString()}');
-      setState(() => _isLoading = false);
+      if (mounted && !silent) {
+        setState(() => _isLoading = false);
+      }
     }
   }
   Future<void> _rejectRequest(Map<String, dynamic> req) async {
@@ -56,13 +93,17 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
     try {
       await supabase.from('requests').update({'status': 'cancelled'}).eq('id', req['id']);
       final userId = req['user_id'];
-      if (userId != null) {
-        final refNo = _refNo(req);
-        final msg = reason.isNotEmpty
-            ? 'Your request ($refNo) was cancelled: $reason. Please resubmit with correct documents.'
-            : 'Your request ($refNo) was cancelled due to document issues. Please resubmit with correct documents.';
-        await supabase.from('notifications').insert({'user_id': userId, 'title': 'Document Verification Failed', 'message': msg, 'is_read': false, 'type': 'doc_rejected'});
-      }
+      final refNo = _refNo(req);
+      final msg = reason.isNotEmpty
+          ? 'Your request ($refNo) was cancelled: $reason. Please resubmit with correct documents.'
+          : 'Your request ($refNo) was cancelled due to document issues. Please resubmit with correct documents.';
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: 'Document Verification Failed',
+        message: msg,
+        type: 'doc_rejected',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: const Row(children: [Icon(Icons.info_outline, color: Colors.white, size: 20), SizedBox(width: 8), Text('Request cancelled — customer notified to resubmit')]),
@@ -308,9 +349,13 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
       final refNo = 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
       await widget.supabase.from('requests').update({'status': 'doc_verified'}).eq('id', req['id']);
       final userId = req['user_id'];
-      if (userId != null) {
-        await widget.supabase.from('notifications').insert({'user_id': userId, 'title': 'Documents Verified', 'message': 'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.', 'is_read': false, 'type': 'doc_verified'});
-      }
+      await NotificationService.sendNotificationSafely(
+        widget.supabase,
+        userId: userId,
+        title: 'Documents Verified',
+        message: 'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.',
+        type: 'doc_verified',
+      );
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();

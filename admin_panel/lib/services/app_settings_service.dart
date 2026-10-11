@@ -146,6 +146,7 @@ class SlaughterScheduleCapacity {
   int maxCattlePerDay;
   int maxCarabaoPerDay;
   int maxGoatPerDay;
+  int maxPoultryPerDay;
   bool isOperational;
   String noticeMessage;
 
@@ -159,6 +160,7 @@ class SlaughterScheduleCapacity {
     required this.maxCattlePerDay,
     required this.maxCarabaoPerDay,
     required this.maxGoatPerDay,
+    this.maxPoultryPerDay = 50,
     this.isOperational = true,
     this.noticeMessage = 'Standard operating schedule active.',
   });
@@ -173,6 +175,7 @@ class SlaughterScheduleCapacity {
         'maxCattlePerDay': maxCattlePerDay,
         'maxCarabaoPerDay': maxCarabaoPerDay,
         'maxGoatPerDay': maxGoatPerDay,
+        'maxPoultryPerDay': maxPoultryPerDay,
         'isOperational': isOperational,
         'noticeMessage': noticeMessage,
       };
@@ -191,6 +194,7 @@ class SlaughterScheduleCapacity {
         maxCattlePerDay: (json['maxCattlePerDay'] as num?)?.toInt() ?? 20,
         maxCarabaoPerDay: (json['maxCarabaoPerDay'] as num?)?.toInt() ?? 10,
         maxGoatPerDay: (json['maxGoatPerDay'] as num?)?.toInt() ?? 10,
+        maxPoultryPerDay: (json['maxPoultryPerDay'] as num?)?.toInt() ?? 50,
         isOperational: json['isOperational'] as bool? ?? true,
         noticeMessage: json['noticeMessage']?.toString() ??
             'Standard operating schedule active.',
@@ -265,6 +269,18 @@ class AppSettingsService extends ChangeNotifier {
       additionalFee: 0.0,
       additionalFeeLabel: 'Additional Regulatory Surcharge',
     ),
+    'poultry': AnimalFeeSchedule(
+      animalType: 'poultry',
+      facilityFee: 20.0,
+      permitToSlaughterFee: 20.0,
+      vetHealthCertFee: 15.0,
+      corralFee: 10.0,
+      anteMortemFee: 10.0,
+      postMortemRatePerKg: 2.5,
+      deliveryVanFee: 25.0,
+      additionalFee: 0.0,
+      additionalFeeLabel: 'Additional Regulatory Surcharge',
+    ),
   };
 
   Map<String, AnimalFeeSchedule> get feeSchedules =>
@@ -277,6 +293,13 @@ class AppSettingsService extends ChangeNotifier {
       return _feeSchedules[normalized]!;
     }
     // Partial matches
+    if (normalized.contains('poultry') ||
+        normalized.contains('chicken') ||
+        normalized.contains('duck') ||
+        normalized.contains('turkey') ||
+        normalized.contains('fowl')) {
+      return _feeSchedules['poultry']!;
+    }
     if (normalized.contains('sheep') || normalized.contains('ovine')) {
       return _feeSchedules['sheep'] ?? _feeSchedules['goat']!;
     }
@@ -617,6 +640,7 @@ class AppSettingsService extends ChangeNotifier {
     maxCattlePerDay: 20,
     maxCarabaoPerDay: 10,
     maxGoatPerDay: 10,
+    maxPoultryPerDay: 50,
     isOperational: true,
     noticeMessage: 'Regular slaughter operations on schedule.',
   );
@@ -935,17 +959,23 @@ class AppSettingsService extends ChangeNotifier {
       await prefs.setString('app_fees_json', jsonEncode(map));
 
       // Persist to Supabase system_settings
-      await _ensureAdminAuth();
       final client = Supabase.instance.client;
-      if (client.auth.currentSession != null) {
+      try {
+        await _ensureAdminAuth();
         await client.from('system_settings').upsert({
           'key': 'fee_schedules',
           'value': map,
           'updated_at': DateTime.now().toIso8601String(),
         });
         debugPrint('Saved fee_schedules to Supabase system_settings successfully.');
-      } else {
-        debugPrint('Warning: No Supabase auth session available to save fees.');
+      } catch (authErr) {
+        debugPrint('Admin auth upsert error, attempting fallback: $authErr');
+        await client.from('system_settings').upsert({
+          'key': 'fee_schedules',
+          'value': map,
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+        debugPrint('Saved fee_schedules to Supabase system_settings without admin auth.');
       }
     } catch (e) {
       debugPrint('Error saving fees to Supabase: $e');

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Represents the official fee schedule for an animal type
@@ -141,6 +142,19 @@ class LivestockFeeService extends ChangeNotifier {
       additionalFee: 0.0,
       additionalFeeLabel: 'Additional Administrative Charge',
     ),
+    'poultry': const LivestockFeeSchedule(
+      animalType: 'poultry',
+      displayName: 'Poultry (Chicken / Turkey / Duck)',
+      facilityFee: 20.0,
+      permitToSlaughterFee: 20.0,
+      vetHealthCertFee: 15.0,
+      corralFee: 10.0,
+      anteMortemFee: 10.0,
+      postMortemRatePerKg: 2.5,
+      deliveryVanFee: 25.0,
+      additionalFee: 0.0,
+      additionalFeeLabel: 'Additional Administrative Charge',
+    ),
   };
 
   RealtimeChannel? _realtimeChannel;
@@ -169,14 +183,76 @@ class LivestockFeeService extends ChangeNotifier {
     if (lower.contains('sheep') || lower.contains('ovine')) {
       return _schedules['sheep']!;
     }
+    if (lower.contains('poultry') || lower.contains('chicken') || lower.contains('turkey') || lower.contains('duck') || lower.contains('fowl')) {
+      return _schedules['poultry']!;
+    }
     return _schedules['hog']!;
   }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
     _isInitialized = true;
+
+    // 1. Immediately restore cached fees from SharedPreferences if available
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedJsonStr = prefs.getString('cached_livestock_fees');
+      if (cachedJsonStr != null) {
+        final Map<String, dynamic> val = jsonDecode(cachedJsonStr);
+        _applyFeeMap(val);
+      }
+    } catch (e) {
+      debugPrint('LivestockFeeService cache restore error: $e');
+    }
+
+    // 2. Fetch latest fees from Supabase & listen for realtime changes
     await fetchFeesFromSupabase();
     _subscribeToRealtime();
+  }
+
+  void _applyFeeMap(Map<String, dynamic> val) {
+    val.forEach((key, raw) {
+      if (raw is Map) {
+        final k = key.toLowerCase().trim();
+        String displayName;
+        switch (k) {
+          case 'hog':
+            displayName = 'Pig / Hog';
+            break;
+          case 'cattle':
+            displayName = 'Cow / Cattle';
+            break;
+          case 'carabao':
+            displayName = 'Carabao (Water Buffalo)';
+            break;
+          case 'goat':
+            displayName = 'Goat';
+            break;
+          case 'sheep':
+            displayName = 'Sheep';
+            break;
+          case 'poultry':
+            displayName = 'Poultry (Chicken / Turkey / Duck)';
+            break;
+          default:
+            displayName = k.isNotEmpty ? (k[0].toUpperCase() + k.substring(1)) : 'Livestock';
+        }
+
+        _schedules[k] = LivestockFeeSchedule.fromJson(
+          k,
+          displayName,
+          Map<String, dynamic>.from(raw),
+        );
+      }
+    });
+
+    if (val.containsKey('poultry') && val['poultry'] is Map) {
+      _schedules['poultry'] = LivestockFeeSchedule.fromJson(
+        'poultry',
+        'Poultry (Chicken / Turkey / Duck)',
+        Map<String, dynamic>.from(val['poultry'] as Map),
+      );
+    }
   }
 
   Future<void> _ensureAuth() async {
@@ -195,12 +271,22 @@ class LivestockFeeService extends ChangeNotifier {
 
   Future<void> fetchFeesFromSupabase() async {
     try {
-      await _ensureAuth();
-      final res = await Supabase.instance.client
-          .from('system_settings')
-          .select('value')
-          .eq('key', 'fee_schedules')
-          .maybeSingle();
+      final client = Supabase.instance.client;
+      dynamic res;
+      try {
+        res = await client
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'fee_schedules')
+            .maybeSingle();
+      } catch (_) {
+        await _ensureAuth();
+        res = await client
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'fee_schedules')
+            .maybeSingle();
+      }
 
       if (res != null && res['value'] != null) {
         final rawVal = res['value'];
@@ -208,47 +294,13 @@ class LivestockFeeService extends ChangeNotifier {
             ? jsonDecode(rawVal) as Map<String, dynamic>
             : Map<String, dynamic>.from(rawVal as Map);
 
-        if (val.containsKey('hog')) {
-          _schedules['hog'] = LivestockFeeSchedule.fromJson(
-            'hog',
-            'Pig / Hog',
-            Map<String, dynamic>.from(val['hog'] as Map),
-          );
-        }
-        if (val.containsKey('cattle')) {
-          _schedules['cattle'] = LivestockFeeSchedule.fromJson(
-            'cattle',
-            'Cow / Cattle',
-            Map<String, dynamic>.from(val['cattle'] as Map),
-          );
-        }
-        if (val.containsKey('carabao')) {
-          _schedules['carabao'] = LivestockFeeSchedule.fromJson(
-            'carabao',
-            'Carabao (Water Buffalo)',
-            Map<String, dynamic>.from(val['carabao'] as Map),
-          );
-        }
-        if (val.containsKey('goat')) {
-          _schedules['goat'] = LivestockFeeSchedule.fromJson(
-            'goat',
-            'Goat',
-            Map<String, dynamic>.from(val['goat'] as Map),
-          );
-          // Sheep matches goat schedule if not explicitly defined
-          _schedules['sheep'] = LivestockFeeSchedule.fromJson(
-            'sheep',
-            'Sheep',
-            Map<String, dynamic>.from(val['goat'] as Map),
-          );
-        }
-        if (val.containsKey('sheep')) {
-          _schedules['sheep'] = LivestockFeeSchedule.fromJson(
-            'sheep',
-            'Sheep',
-            Map<String, dynamic>.from(val['sheep'] as Map),
-          );
-        }
+        _applyFeeMap(val);
+
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('cached_livestock_fees', jsonEncode(val));
+        } catch (_) {}
+
         notifyListeners();
       }
     } catch (e) {

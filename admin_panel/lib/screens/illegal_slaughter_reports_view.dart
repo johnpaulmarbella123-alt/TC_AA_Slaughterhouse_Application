@@ -912,8 +912,8 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
             'reference_no': ref,
             'status': newStatus,
             'updated_at': DateTime.now().toIso8601String(),
-            if (findings != null) 'findings': findings,
-            if (endorsedTo != null) 'endorsed_to': endorsedTo,
+            if (findings != null) ...{'findings': findings},
+            if (endorsedTo != null) ...{'endorsed_to': endorsedTo},
           },
         });
       } catch (e) {
@@ -1169,7 +1169,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
             Image.network(
               photoUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => _buildPlaceholderEvidence(),
+              errorBuilder: (context, error, stackTrace) => _buildPlaceholderEvidence(),
             ),
             Positioned(
               top: 10,

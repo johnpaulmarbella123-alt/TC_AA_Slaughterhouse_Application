@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
+import '../services/notification_service.dart';
+import '../services/inspection_documents_pdf_generator.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
   const SlaughterInspectionPage({super.key});
@@ -16,29 +20,62 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
   String _filterStage = 'All';
+  Timer? _pollingTimer;
+  RealtimeChannel? _realtimeChannel;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
+    _subscribeRealtime();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _loadRequests(silent: true);
+    });
+  }
+
+  void _subscribeRealtime() {
+    try {
+      _realtimeChannel = supabase.channel('public:slaughter_inspection_realtime')
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'requests',
+          callback: (payload) {
+            if (mounted) _loadRequests(silent: true);
+          },
+        )
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'slaughter_inspection',
+          callback: (payload) {
+            if (mounted) _loadRequests(silent: true);
+          },
+        )
+        ..subscribe();
+    } catch (e) {
+      debugPrint('Realtime subscription error in SlaughterInspection: $e');
+    }
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
+    if (_realtimeChannel != null) {
+      supabase.removeChannel(_realtimeChannel!);
+    }
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRequests({bool silent = false}) async {
+    if (!silent) setState(() => _isLoading = true);
     try {
       // Fetch requests that are past Document Verification (doc_verified) or in slaughter phases.
-      // E.g., doc_verified, slaughter, releasable, completed, etc.
-      // Adjust the `inFilter` list as per your exact status flow.
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*)')
-          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed', 'post_mortem_failed'])
+          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed', 'post_mortem_failed', 'condemned', 'mic_generated'])
           .order('created_at', ascending: false);
       
       final activeRequests = List<Map<String, dynamic>>.from(data).map((r) {
@@ -64,14 +101,16 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         return r;
       }).toList();
       
-      setState(() {
-        _barangayRequests = activeRequests.where((r) => r['request_type'] == 'barangay').toList();
-        _marketRequests = activeRequests.where((r) => r['request_type'] == 'market').toList();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _barangayRequests = activeRequests.where((r) => r['request_type'] == 'barangay').toList();
+          _marketRequests = activeRequests.where((r) => r['request_type'] == 'market').toList();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('SlaughterInspection load error: $e');
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -251,7 +290,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       } else {
         inProcess++;
       }
-      if ((r['status'] ?? '') == 'mic_generated') micGen++;
+      if ((r['status'] ?? '') == 'mic_generated' || (r['process_notes']?.toString().contains('MIC Generated') ?? false) || r['status'] == 'paid' || r['status'] == 'released') micGen++;
     }
 
     return Row(
@@ -361,7 +400,9 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                   final isDelayed = status == 'delay_error';
                   final isAntiMortemFailed = status == 'anti_mortem_failed';
                   final isPostMortemFailed = status == 'post_mortem_failed';
-                  final isCondemned = req['condemnation_reason'] != null;
+                  final isCondemnedStatus = status == 'condemned';
+                  final isCondemned = req['condemnation_reason'] != null || isCondemnedStatus;
+                  final isCondemnationAcknowledged = req['condemnation_acknowledged'] == true || isCondemnedStatus;
                   final customerResponse = req['anti_mortem_response']?.toString();
 
                   return DataRow(cells: [
@@ -442,65 +483,92 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                     )),
                     // Customer Response column
                     DataCell(
-                      isAntiMortemFailed
-                          ? (customerResponse == null
-                              ? _buildBadge('Awaiting', Colors.orange, light: true)
-                              : customerResponse == 'confine'
-                                  ? GestureDetector(
-                                      onTap: () => _openAntiMortemResponseDialog(req),
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          _buildBadge('Confine', Colors.blue, light: true),
-                                          const SizedBox(height: 2),
-                                          Text('Tap to manage', style: TextStyle(fontSize: 9, color: Colors.blue.shade400)),
-                                        ],
-                                      ),
-                                    )
-                                  : GestureDetector(
-                                      onTap: () => _openAntiMortemResponseDialog(req),
-                                      child: Column(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          _buildBadge('Take Back', Colors.deepOrange, light: true),
-                                          const SizedBox(height: 2),
-                                          if (req['pickup_approved'] == true)
-                                            _buildBadge('Approved', Colors.green, light: true)
-                                          else
-                                            Text('Tap to approve', style: TextStyle(fontSize: 9, color: Colors.deepOrange.shade400)),
-                                        ],
-                                      ),
-                                    ))
-                          : const Text('—', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      (isPostMortemFailed || isCondemnedStatus)
+                          ? (isCondemnationAcknowledged
+                              ? _buildBadge('Slip Received & Concluded', Colors.green, light: true)
+                              : _buildBadge('Awaiting Slip Review', Colors.orange, light: true))
+                          : isAntiMortemFailed
+                              ? (customerResponse == null
+                                  ? _buildBadge('Awaiting', Colors.orange, light: true)
+                                  : customerResponse == 'confine'
+                                      ? GestureDetector(
+                                          onTap: () => _openAntiMortemResponseDialog(req),
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              _buildBadge('Confine', Colors.blue, light: true),
+                                              const SizedBox(height: 2),
+                                              Text('Tap to manage', style: TextStyle(fontSize: 9, color: Colors.blue.shade400)),
+                                            ],
+                                          ),
+                                        )
+                                      : GestureDetector(
+                                          onTap: () => _openAntiMortemResponseDialog(req),
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              _buildBadge('Take Back', Colors.deepOrange, light: true),
+                                              const SizedBox(height: 2),
+                                              if (req['pickup_approved'] == true)
+                                                _buildBadge('Approved', Colors.green, light: true)
+                                              else
+                                                Text('Tap to approve', style: TextStyle(fontSize: 9, color: Colors.deepOrange.shade400)),
+                                            ],
+                                          ),
+                                        ))
+                              : isDelayed
+                                  ? (customerResponse == null
+                                      ? _buildBadge('Awaiting Fee Response', Colors.orange, light: true)
+                                      : customerResponse == 'accept_penalty' || customerResponse == 'confine'
+                                          ? GestureDetector(
+                                              onTap: () => _openAntiMortemResponseDialog(req),
+                                              child: Column(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  _buildBadge('Fee Accepted (₱500)', Colors.green, light: true),
+                                                  const SizedBox(height: 2),
+                                                  Text('Tap to manage', style: TextStyle(fontSize: 9, color: Colors.green.shade600)),
+                                                ],
+                                              ),
+                                            )
+                                          : GestureDetector(
+                                              onTap: () => _openAntiMortemResponseDialog(req),
+                                              child: Column(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  _buildBadge('Take Back', Colors.deepOrange, light: true),
+                                                  const SizedBox(height: 2),
+                                                  if (req['pickup_approved'] == true)
+                                                    _buildBadge('Approved', Colors.green, light: true)
+                                                  else
+                                                    Text('Tap to approve', style: TextStyle(fontSize: 9, color: Colors.deepOrange.shade400)),
+                                                ],
+                                              ),
+                                            ))
+                                  : const Text('—', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ),
                     DataCell(
-                      isAntiMortemFailed || isPostMortemFailed
-                          ? Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.center,
-                              children: [
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.warning_amber_rounded, color: Colors.red.shade600, size: 16),
-                                    const SizedBox(width: 4),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red.shade50,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: Colors.red.shade200),
-                                      ),
-                                      child: Text(
-                                        isAntiMortemFailed ? 'Anti-Mortem Failed' : 'Post-Mortem Failed',
-                                        style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                      isCondemnedStatus
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.blueGrey.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.blueGrey.shade300),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.check_circle_outline, color: Colors.blueGrey.shade700, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Operation Concluded',
+                                    style: TextStyle(fontSize: 10, color: Colors.blueGrey.shade800, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
                             )
-                          : isDelayed
+                          : isAntiMortemFailed || isPostMortemFailed
                               ? Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -518,35 +586,95 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                             border: Border.all(color: Colors.red.shade200),
                                           ),
                                           child: Text(
-                                            'Delay due to technical error',
+                                            isAntiMortemFailed ? 'Anti-Mortem Failed' : 'Post-Mortem Failed',
                                             style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Penalty: ₱${req['penalty_fee'] ?? '500.00'}',
-                                      style: TextStyle(fontSize: 11, color: Colors.red.shade700, fontWeight: FontWeight.bold),
-                                    ),
                                   ],
                                 )
-                              : _buildBadge(status == 'releasable' ? 'Releasable' : (status == 'doc_verified' ? 'SLAUGHTER' : status.toUpperCase()), status == 'releasable' ? Colors.green : Colors.orange, light: true),
+                              : isDelayed
+                                  ? Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.warning_amber_rounded, color: Colors.red.shade600, size: 16),
+                                            const SizedBox(width: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red.shade50,
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border.all(color: Colors.red.shade200),
+                                              ),
+                                              child: Text(
+                                                'Delay due to technical error',
+                                                style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          customerResponse == 'take_back'
+                                              ? 'Penalty: Waived'
+                                              : 'Penalty: ₱${req['penalty_fee'] ?? '500.00'}',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: customerResponse == 'take_back' ? Colors.grey.shade700 : Colors.red.shade700,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : _buildBadge(status == 'releasable' ? 'Releasable' : (status == 'mic_generated' ? 'MIC Generated' : (status == 'doc_verified' ? 'SLAUGHTER' : status.toUpperCase())), (status == 'releasable' || status == 'mic_generated') ? Colors.green : Colors.orange, light: true),
                     ),
                     DataCell(
-                      status == 'releasable'
-                          ? ElevatedButton.icon(
-                              onPressed: () => showDialog(context: context, builder: (_) => _MICDialog(request: req)),
-                              icon: const Icon(Icons.download, size: 14, color: Colors.white),
-                              label: const Text('Generate', style: TextStyle(fontSize: 11, color: Colors.white)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green.shade600,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                minimumSize: const Size(0, 28),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                              ),
-                            )
-                          : _buildBadge('Pending', Colors.blue, light: true),
+                      (isPostMortemFailed || isCondemnedStatus || postMortem.toString().toUpperCase() == 'FAILED' || isAntiMortemFailed)
+                          ? _buildBadge('Failed', Colors.red, light: true)
+                          : (status == 'mic_generated' || (req['process_notes']?.toString().contains('MIC Generated') ?? false) || status == 'paid' || status == 'released')
+                              ? OutlinedButton.icon(
+                                  onPressed: () => showDialog(
+                                    context: context,
+                                    builder: (_) => _MICDialog(
+                                      request: req,
+                                      supabase: supabase,
+                                      onDone: _loadRequests,
+                                    ),
+                                  ),
+                                  icon: const Icon(Icons.print, size: 14, color: Color(0xFF2D6A4F)),
+                                  label: const Text('Printed / View', style: TextStyle(fontSize: 11, color: Color(0xFF2D6A4F), fontWeight: FontWeight.bold)),
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: Colors.green.shade600),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                    minimumSize: const Size(0, 28),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                  ),
+                                )
+                              : status == 'releasable'
+                                  ? ElevatedButton.icon(
+                                      onPressed: () => showDialog(
+                                        context: context,
+                                        builder: (_) => _MICDialog(
+                                          request: req,
+                                          supabase: supabase,
+                                          onDone: _loadRequests,
+                                        ),
+                                      ),
+                                      icon: const Icon(Icons.download, size: 14, color: Colors.white),
+                                      label: const Text('Generate', style: TextStyle(fontSize: 11, color: Colors.white)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.green.shade600,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                        minimumSize: const Size(0, 28),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                      ),
+                                    )
+                                  : _buildBadge('Pending', Colors.blue, light: true),
                     ),
                     DataCell(
                       Row(
@@ -561,7 +689,29 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                             ),
                             child: const Text('Update', style: TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
                           ),
-                          if (isAntiMortemFailed && customerResponse != null) ...[
+                          if (isPostMortemFailed || isCondemnedStatus || isCondemned) ...[
+                            const SizedBox(width: 6),
+                            OutlinedButton(
+                              onPressed: () => showDialog(
+                                context: context,
+                                builder: (_) => _CondemnationSlipDialog(
+                                  request: req,
+                                  condemnationReason: req['condemnation_reason']?.toString() ?? 'Condemned after post-mortem inspection',
+                                  inspectorName: req['inspector_name']?.toString() ?? 'Meat Inspector',
+                                  carcassWeight: req['carcass_weight']?.toString() ?? '',
+                                  supabase: supabase,
+                                  onDone: _loadRequests,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                minimumSize: const Size(0, 32),
+                                side: BorderSide(color: Colors.red.shade300),
+                              ),
+                              child: Text('Slip', style: TextStyle(fontSize: 12, color: Colors.red.shade700)),
+                            ),
+                          ],
+                          if ((isAntiMortemFailed || isDelayed) && customerResponse != null) ...[
                             const SizedBox(width: 6),
                             OutlinedButton(
                               onPressed: () => _openAntiMortemResponseDialog(req),
@@ -656,18 +806,15 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       _condemnationCtrl.text = req['condemnation_reason'].toString();
     }
     if (req['delay_reason'] != null) {
-      _technicalError = true;
       _delayReasonCtrl.text = req['delay_reason'].toString();
-    } else if (req['status'] == 'delay_error' || req['process_stage'] == 'Technical Error/Delay') {
-      _technicalError = true;
+    } else {
       final notes = (req['process_notes'] ?? '').toString();
       final match = RegExp(r'Technical delay\s*(?:\([^)]*\))?:\s*(.*)').firstMatch(notes);
       if (match != null) {
         _delayReasonCtrl.text = match.group(1) ?? '';
-      } else if (notes.isNotEmpty) {
-        _delayReasonCtrl.text = notes;
       }
     }
+    _technicalError = _processStage == 'Technical Error/Delay';
   }
 
   Future<void> _updateProcess({bool notifyDelay = false}) async {
@@ -681,6 +828,10 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       // Validate inputs if needed...
       
       String newStatus = widget.request['status'];
+      String? notifTitle;
+      String? notifMessage;
+      String? notifType;
+      Map<String, dynamic>? notifData;
 
       // If anti-mortem failed, set to anti_mortem_failed and notify with options
       if (_antiMortem == 'Failed') {
@@ -688,89 +839,79 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         _processStage = 'Anti-Mortem';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
         final vetFindings = _notesCtrl.text.isNotEmpty ? _notesCtrl.text : 'Health issue detected during ante-mortem inspection';
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': '$livestockType — Health Issue Detected',
-          'message': 'Ante-mortem inspection failed. Your livestock did not pass health inspection.',
-          'is_read': false,
-          'type': 'anti_mortem_failed',
-          'data': {
-            'request_id': reqId,
-            'livestock_type': livestockType,
-            'veterinary_findings': vetFindings,
-            'inspector_name': _inspectorCtrl.text,
-            'animal_count': widget.request['animal_count'],
-          },
-        });
+        notifTitle = '$livestockType — Health Issue Detected';
+        notifMessage = 'Ante-mortem inspection failed. Your livestock did not pass health inspection.';
+        notifType = 'anti_mortem_failed';
+        notifData = {
+          'request_id': reqId,
+          'livestock_type': livestockType,
+          'veterinary_findings': vetFindings,
+          'inspector_name': _inspectorCtrl.text,
+          'animal_count': widget.request['animal_count'],
+        };
       } else if (notifyDelay) {
         newStatus = 'delay_error';
         _processStage = 'Technical Error/Delay';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
         final delayReason = _delayReasonCtrl.text.trim();
         final reasonSuffix = delayReason.isNotEmpty ? ': $delayReason' : '';
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': '$livestockType Operation Delayed',
-          'message': '$livestockType slaughter was delayed due to a technical error$reasonSuffix.',
-          'is_read': false,
-          'type': 'operation_failed',
-          'data': {
-            'request_id': reqId,
-            'livestock_type': livestockType,
-            'reason': delayReason,
-            'actual_date': DateTime.now().toLocal().toIso8601String().split('T')[0],
-          },
-        });
+        notifTitle = '$livestockType Operation Delayed';
+        notifMessage = '$livestockType slaughter was delayed due to a technical error$reasonSuffix. A legal finality fee of ₱500.00 will be applied. Please review and respond in your app.';
+        notifType = 'operation_failed';
+        notifData = {
+          'request_id': reqId,
+          'livestock_type': livestockType,
+          'reason': delayReason,
+          'penalty_fee': 500.0,
+          'is_delayed': true,
+          'actual_date': DateTime.now().toLocal().toIso8601String().split('T')[0],
+        };
       } else if (_postMortem == 'Failed') {
         newStatus = 'post_mortem_failed';
         _processStage = 'Post-Mortem Inspection'; // Optional: keep it descriptive
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
         final reason = _healthIssueDetected ? _condemnationCtrl.text : 'Condemned after slaughter';
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': '$livestockType — Post-Mortem Failed',
-          'message': 'Health issues were found during post-mortem inspection after slaughter. Please review condemnation slip.',
-          'is_read': false,
-          'type': 'post_mortem_failed',
-          'data': {
-            'request_id': reqId,
-            'livestock_type': livestockType,
-            'condemnation_reason': reason,
-            'inspector_name': _inspectorCtrl.text,
-            'animal_count': widget.request['animal_count'],
-            'process_notes': _notesCtrl.text,
-          },
-        });
+        notifTitle = '$livestockType — Post-Mortem Failed';
+        notifMessage = 'Health issues were found during post-mortem inspection after slaughter. Please review condemnation slip.';
+        notifType = 'post_mortem_failed';
+        notifData = {
+          'request_id': reqId,
+          'customer_name': widget.request['customer_name'],
+          'livestock_type': livestockType,
+          'condemnation_reason': reason,
+          'inspector_name': _inspectorCtrl.text,
+          'animal_count': widget.request['animal_count'],
+          'carcass_weight': _carcassCtrl.text,
+          'process_notes': _notesCtrl.text,
+        };
       } else if (_processStage == 'Complete' && _postMortem != 'Failed') {
         newStatus = 'releasable';
-        if (userId != null) {
-          final livestockType = widget.request['livestock_type'] ?? 'Livestock';
-          final animalCount = widget.request['animal_count'] ?? 1;
-          final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
-          final weight = _carcassCtrl.text.trim();
-          final weightInfo = weight.isNotEmpty ? ' with a carcass weight of $weight kg' : '';
+        final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final animalCount = widget.request['animal_count'] ?? 1;
+        final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+        final weight = _carcassCtrl.text.trim();
+        final weightInfo = weight.isNotEmpty ? ' with a carcass weight of $weight kg' : '';
 
-          await widget.supabase.from('notifications').insert({
-            'user_id': userId,
-            'title': 'Slaughter Operation Complete',
-            'message': 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. The meat is now releasable.',
-            'is_read': false,
-            'type': 'slaughter_completed',
-            'data': {
-              'request_id': reqId,
-              'livestock_type': livestockType,
-              'animal_count': animalCount,
-              'carcass_weight': double.tryParse(_carcassCtrl.text),
-              'inspector_name': _inspectorCtrl.text,
-              'post_mortem': _postMortem,
-              'process_stage': _processStage,
-            },
-          });
-        }
+        notifTitle = 'Slaughter Operation Complete';
+        notifMessage = 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. The meat is now releasable.';
+        notifType = 'slaughter_completed';
+        notifData = {
+          'request_id': reqId,
+          'livestock_type': livestockType,
+          'animal_count': animalCount,
+          'carcass_weight': double.tryParse(_carcassCtrl.text),
+          'inspector_name': _inspectorCtrl.text,
+          'post_mortem': _postMortem,
+          'process_stage': _processStage,
+        };
       }
 
       await widget.supabase.from('requests').update({
         'status': newStatus,
+        if (notifyDelay) ...{
+          'anti_mortem_response': null,
+          'anti_mortem_response_at': null,
+        },
       }).eq('id', reqId);
 
       final nowStr = DateTime.now().toLocal().toIso8601String().split('T')[0];
@@ -801,6 +942,18 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         await widget.supabase.from('slaughter_inspection').insert(inspectionData);
       }
 
+      // Safely dispatch customer notification without blocking the update
+      if (notifTitle != null && notifMessage != null && notifType != null) {
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: notifTitle,
+          message: notifMessage,
+          type: notifType,
+          data: notifData,
+        );
+      }
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
@@ -819,6 +972,8 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                   condemnationReason: _condemnationCtrl.text,
                   inspectorName: _inspectorCtrl.text,
                   carcassWeight: _carcassCtrl.text,
+                  supabase: widget.supabase,
+                  onDone: widget.onDone,
                 ),
               );
             }
@@ -913,6 +1068,11 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                                 _processStage = v!;
                                 if (_processStage == 'Technical Error/Delay') {
                                   _technicalError = true;
+                                } else {
+                                  _technicalError = false;
+                                }
+                                if (_processStage == 'Complete' && _postMortem == 'Pending') {
+                                  _postMortem = 'Passed';
                                 }
                               }),
                             ),
@@ -1054,7 +1214,14 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
 
               // Technical Error Section
               GestureDetector(
-                onTap: () => setState(() => _technicalError = !_technicalError),
+                onTap: () => setState(() {
+                  _technicalError = !_technicalError;
+                  if (_technicalError) {
+                    _processStage = 'Technical Error/Delay';
+                  } else if (_processStage == 'Technical Error/Delay') {
+                    _processStage = 'Preparation';
+                  }
+                }),
                 child: Row(
                   children: [
                     SizedBox(
@@ -1143,21 +1310,111 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   }
 }
 
-class _MICDialog extends StatelessWidget {
+class _MICDialog extends StatefulWidget {
   final Map<String, dynamic> request;
-  const _MICDialog({required this.request});
+  final SupabaseClient supabase;
+  final VoidCallback onDone;
+
+  const _MICDialog({
+    required this.request,
+    required this.supabase,
+    required this.onDone,
+  });
+
+  @override
+  State<_MICDialog> createState() => _MICDialogState();
+}
+
+class _MICDialogState extends State<_MICDialog> {
+  bool _isPrinting = false;
+
+  Future<void> _printAndProcessMIC() async {
+    setState(() => _isPrinting = true);
+    try {
+      final pdfBytes = await InspectionDocumentsPdfGenerator.generateMIC(
+        request: widget.request,
+      );
+      final reqId = widget.request['id'];
+      final certNo = 'MIC-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+      // 1. Open print page
+      await Printing.layoutPdf(
+        name: 'MIC_$certNo.pdf',
+        onLayout: (format) async => pdfBytes,
+      );
+
+      // 2. Automatically update database status to mic_generated if not already paid or released
+      final currentStatus = widget.request['status']?.toString();
+      final isAlreadyReleased = currentStatus == 'released' || widget.request['released_at'] != null;
+      final isAlreadyPaid = currentStatus == 'paid';
+
+      if (!isAlreadyReleased && !isAlreadyPaid) {
+        await widget.supabase.from('requests').update({
+          'status': 'mic_generated',
+        }).eq('id', reqId);
+      }
+
+      final existing = await widget.supabase.from('slaughter_inspection').select('id, process_notes').eq('request_id', reqId).maybeSingle();
+      if (existing != null) {
+        String notes = (existing['process_notes'] ?? '').toString();
+        if (!notes.contains('MIC Generated')) {
+          notes = notes.isEmpty ? 'MIC Generated' : '$notes | MIC Generated';
+        }
+        await widget.supabase.from('slaughter_inspection').update({
+          'process_stage': 'Complete',
+          'process_notes': notes,
+        }).eq('request_id', reqId);
+      }
+
+      // 3. Notify customer safely
+      final userId = widget.request['user_id']?.toString() ?? widget.request['customer_id']?.toString();
+      if (userId != null && userId.isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: 'Meat Inspection Certificate Ready',
+          message: 'Your Meat Inspection Certificate ($certNo) has been issued and printed. Meat is ready for releasing.',
+          type: 'mic_generated',
+          data: {
+            'request_id': reqId,
+            'certificate_number': certNo,
+            'status': 'mic_generated',
+          },
+        );
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onDone();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Meat Inspection Certificate ($certNo) printed and marked as processed!'),
+            backgroundColor: const Color(0xFF2D6A4F),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error printing MIC: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final certNo = 'MIC-${DateTime.now().year}-${request['id'].toString().padLeft(3, '0')}';
-    final refNo = 'MI-${DateTime.now().year}-${request['id'].toString().padLeft(3, '0')}';
-    final customerName = request['customer_name']?.toString() ?? '—';
-    final livestock = request['livestock_type']?.toString() ?? '—';
-    final slaughterDate = request['rescheduled_date'] ?? request['preferred_date'];
+    final certNo = 'MIC-${DateTime.now().year}-${widget.request['id'].toString().padLeft(3, '0')}';
+    final refNo = 'MI-${DateTime.now().year}-${widget.request['id'].toString().padLeft(3, '0')}';
+    final customerName = widget.request['customer_name']?.toString() ?? '—';
+    final livestock = widget.request['livestock_type']?.toString() ?? '—';
+    final slaughterDate = widget.request['rescheduled_date'] ?? widget.request['preferred_date'];
     
-    final antiMortem = request['anti_mortem']?.toString().toUpperCase() ?? 'PENDING';
-    final postMortem = request['post_mortem']?.toString().toUpperCase() ?? 'PENDING';
-    final inspector = request['inspector_name']?.toString() ?? '—';
+    final antiMortem = widget.request['anti_mortem']?.toString().toUpperCase() ?? 'PENDING';
+    final postMortem = widget.request['post_mortem']?.toString().toUpperCase() ?? 'PENDING';
+    final inspector = widget.request['inspector_name']?.toString() ?? '—';
 
     String formatDate(dynamic v) {
       if (v == null) return '—';
@@ -1179,85 +1436,177 @@ class _MICDialog extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Image.asset('assets/images/logo1.png', width: 70, height: 70, errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 70)),
-                const Text('MEAT INSPECTION CERTIFICATE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                Image.asset('assets/images/logo2.png', width: 70, height: 70, errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 70)),
-              ],
-            ),
-            const SizedBox(height: 32),
-            Text('Certificated Number: $certNo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 24),
-            Text('Customer: $customerName', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('Reference Number: $refNo', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('Livestock Type: $livestock', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('Slaughter Date: ${formatDate(slaughterDate)}', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 32),
-            Text('ANTI-MORTEM INSPECTION: $antiMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('POST-MORTEM INSPECTION: $postMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 4),
-            Text('Inspector: $inspector', style: const TextStyle(fontSize: 14)),
-            const SizedBox(height: 32),
-            const Text(
-              'This Certificate of Inspection and Approval verifies that the meat '
-              'product has undergone a comprehensive and systematic examination. '
-              'The findings confirm that the product fully adheres to all prescribed '
-              'health and sanitation standards, food safety regulations, and quality '
-              'controls currently in effect. Consequently, this approval is granted, '
-              'certifying the meat as fit for consumption by the general public.',
-              style: TextStyle(height: 1.6, fontSize: 14),
-              textAlign: TextAlign.justify,
-            ),
-            const SizedBox(height: 32),
-            const Text('Facility: Tabaco City Slaughterhouse', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            const SizedBox(height: 40),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton(
-                onPressed: () => Navigator.pop(context),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                  side: const BorderSide(color: Colors.black87),
-                ),
-                child: const Text('Print', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 16)),
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Image.asset('assets/images/logo1.png', width: 70, height: 70, errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 70)),
+                  const Text('MEAT INSPECTION CERTIFICATE', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Image.asset('assets/images/logo2.png', width: 70, height: 70, errorBuilder: (_, _, _) => const Icon(Icons.broken_image, size: 70)),
+                ],
               ),
-            ),
-          ],
-        ),
+              const SizedBox(height: 32),
+              Text('Certificated Number: $certNo', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 24),
+              Text('Customer: $customerName', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Reference Number: $refNo', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Livestock Type: $livestock', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Slaughter Date: ${formatDate(slaughterDate)}', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 32),
+              Text('ANTI-MORTEM INSPECTION: $antiMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('POST-MORTEM INSPECTION: $postMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('Inspector: $inspector', style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 32),
+              const Text(
+                'This Certificate of Inspection and Approval verifies that the meat '
+                'product has undergone a comprehensive and systematic examination. '
+                'The findings confirm that the product fully adheres to all prescribed '
+                'health and sanitation standards, food safety regulations, and quality '
+                'controls currently in effect. Consequently, this approval is granted, '
+                'certifying the meat as fit for consumption by the general public.',
+                style: TextStyle(height: 1.6, fontSize: 14),
+                textAlign: TextAlign.justify,
+              ),
+              const SizedBox(height: 32),
+              const Text('Facility: Tabaco City Slaughterhouse', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 40),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton.icon(
+                  onPressed: _isPrinting ? null : _printAndProcessMIC,
+                  icon: _isPrinting
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.print, size: 18, color: Colors.white),
+                  label: Text(_isPrinting ? 'Printing...' : 'Print', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _CondemnationSlipDialog extends StatelessWidget {
+class _CondemnationSlipDialog extends StatefulWidget {
   final Map<String, dynamic> request;
   final String condemnationReason;
   final String inspectorName;
   final String carcassWeight;
+  final SupabaseClient supabase;
+  final VoidCallback onDone;
 
   const _CondemnationSlipDialog({
     required this.request,
     required this.condemnationReason,
     required this.inspectorName,
     required this.carcassWeight,
+    required this.supabase,
+    required this.onDone,
   });
 
   @override
+  State<_CondemnationSlipDialog> createState() => _CondemnationSlipDialogState();
+}
+
+class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
+  bool _isPrinting = false;
+
+  Future<void> _printAndProcessCondemnationSlip() async {
+    setState(() => _isPrinting = true);
+    try {
+      final pdfBytes = await InspectionDocumentsPdfGenerator.generateCondemnationSlip(
+        request: widget.request,
+        condemnationReason: widget.condemnationReason,
+        inspectorName: widget.inspectorName,
+        carcassWeight: widget.carcassWeight,
+      );
+      final reqId = widget.request['id'];
+      final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+      // 1. Open print page
+      await Printing.layoutPdf(
+        name: 'Condemnation_Slip_$refNo.pdf',
+        onLayout: (format) async => pdfBytes,
+      );
+
+      // 2. Automatically update database status to condemned and concluded
+      await widget.supabase.from('requests').update({
+        'status': 'condemned',
+      }).eq('id', reqId);
+
+      final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      if (existing != null) {
+        await widget.supabase.from('slaughter_inspection').update({
+          'post_mortem': 'Failed',
+          'process_stage': 'Post-Mortem Inspection',
+          'condemnation_reason': widget.condemnationReason,
+        }).eq('request_id', reqId);
+      } else {
+        await widget.supabase.from('slaughter_inspection').insert({
+          'request_id': reqId,
+          'post_mortem': 'Failed',
+          'process_stage': 'Post-Mortem Inspection',
+          'condemnation_reason': widget.condemnationReason,
+        });
+      }
+
+      // 3. Notify customer safely
+      final userId = widget.request['user_id']?.toString() ?? widget.request['customer_id']?.toString();
+      if (userId != null && userId.isNotEmpty) {
+        final livestock = widget.request['livestock_type'] ?? 'Livestock';
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: 'Slaughter Condemned — Condemnation Slip Issued',
+          message: 'A condemnation slip has been issued for your livestock ($livestock). The slaughter operation has been concluded.',
+          type: 'condemnation_slip',
+          data: {
+            'request_id': reqId,
+            'condemnation_reason': widget.condemnationReason,
+            'status': 'condemned',
+          },
+        );
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onDone();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Condemnation slip printed and operation marked concluded!'),
+            backgroundColor: Color(0xFF2D6A4F),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error printing slip: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final customerName = request['customer_name']?.toString() ?? '—';
-    final livestock = request['livestock_type']?.toString() ?? '—';
-    final animalCount = request['animal_count']?.toString() ?? '—';
+    final customerName = widget.request['customer_name']?.toString() ?? '—';
+    final livestock = widget.request['livestock_type']?.toString() ?? '—';
+    final animalCount = widget.request['animal_count']?.toString() ?? '—';
     final dateNow = DateFormat('dd/MM/yyyy').format(DateTime.now());
     final timeNow = DateFormat('hh:mm a').format(DateTime.now());
 
@@ -1357,8 +1706,8 @@ class _CondemnationSlipDialog extends StatelessWidget {
                   TableRow(
                     children: [
                       _tableCell(livestock),
-                      _tableCell('$animalCount head(s)${carcassWeight.isNotEmpty ? '\n${carcassWeight}kg' : ''}'),
-                      _tableCell(condemnationReason.isNotEmpty ? condemnationReason : '—'),
+                      _tableCell('$animalCount head(s)${widget.carcassWeight.isNotEmpty ? '\n${widget.carcassWeight}kg' : ''}'),
+                      _tableCell(widget.condemnationReason.isNotEmpty ? widget.condemnationReason : '—'),
                     ],
                   ),
                   // Empty rows for additional entries
@@ -1382,7 +1731,7 @@ class _CondemnationSlipDialog extends StatelessWidget {
                           width: 200,
                           decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.black54))),
                           padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(inspectorName.isNotEmpty ? inspectorName : '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          child: Text(widget.inspectorName.isNotEmpty ? widget.inspectorName : '', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                         ),
                         const Text('Veterinarian/Meat Control Officer/Meat Inspector', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w500)),
                         const Text('(Signature Over Printed Name)', style: TextStyle(fontSize: 9, fontStyle: FontStyle.italic)),
@@ -1455,9 +1804,11 @@ class _CondemnationSlipDialog extends StatelessWidget {
               Align(
                 alignment: Alignment.centerRight,
                 child: ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.print, size: 18, color: Colors.white),
-                  label: const Text('Print', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  onPressed: _isPrinting ? null : _printAndProcessCondemnationSlip,
+                  icon: _isPrinting
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.print, size: 18, color: Colors.white),
+                  label: Text(_isPrinting ? 'Printing...' : 'Print', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2D6A4F),
                     padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
@@ -1529,7 +1880,8 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
   final _notesCtrl = TextEditingController();
 
   String get _response => widget.request['anti_mortem_response']?.toString() ?? '';
-  bool get _isConfine => _response == 'confine';
+  bool get _isPenaltyAccepted => _response == 'accept_penalty';
+  bool get _isConfine => _response == 'confine' || _isPenaltyAccepted;
   bool get _isTakeBack => _response == 'take_back';
 
   Future<void> _pickDate() async {
@@ -1550,6 +1902,73 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
     if (time != null) setState(() => _selectedTime = time);
   }
 
+  Future<void> _markDelayResolvedAndReleasable() async {
+    setState(() => _isLoading = true);
+    try {
+      final reqId = widget.request['id'];
+      final userId = widget.request['user_id'];
+      final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+      final animalCount = widget.request['animal_count'] ?? 1;
+      final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+      // 1. Update request status to releasable
+      await widget.supabase.from('requests').update({
+        'status': 'releasable',
+      }).eq('id', reqId);
+
+      // 2. Update slaughter_inspection to Complete & Passed
+      final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      final inspectionData = {
+        'request_id': reqId,
+        'anti_mortem': 'Passed',
+        'process_stage': 'Complete',
+        'post_mortem': 'Passed',
+        'inspector_name': 'Admin Inspector',
+        'process_notes': _notesCtrl.text.isNotEmpty
+            ? _notesCtrl.text
+            : 'Technical delay resolved. Resumed slaughter completed successfully.',
+      };
+      if (existing != null) {
+        await widget.supabase.from('slaughter_inspection').update(inspectionData).eq('request_id', reqId);
+      } else {
+        await widget.supabase.from('slaughter_inspection').insert(inspectionData);
+      }
+
+      // 3. Notify customer
+      await NotificationService.sendNotificationSafely(
+        widget.supabase,
+        userId: userId,
+        title: '$livestockType — Slaughter Complete & Releasable',
+        message: 'Your $animalCount head(s) of $livestockType ($refNo) slaughter has resumed and completed successfully. The meat is now releasable. Penalty fee of ₱500.00 is reflected on your receipt.',
+        type: 'slaughter_completed',
+        data: {
+          'request_id': reqId,
+          'livestock_type': livestockType,
+          'penalty_fee': 500.0,
+        },
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onDone();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Operation delay resolved! Status set to Releasable.'),
+            backgroundColor: Colors.green.shade600,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _submit() async {
     if (_selectedDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1566,28 +1985,38 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
       final dateStr = DateFormat('MMMM d, yyyy').format(_selectedDate!);
 
       if (_isConfine) {
-        // Admin sets new slaughter date for confined livestock
+        // Admin sets new slaughter date for confined or penalty-accepted livestock
         await widget.supabase.from('requests').update({
           'rescheduled_date': _selectedDate!.toIso8601String().split('T')[0],
         }).eq('id', reqId);
 
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': '$livestockType — Confinement Confirmed',
-          'message': 'Your livestock has been confined at the slaughterhouse. New slaughter schedule: $dateStr.',
-          'is_read': false,
-          'type': 'confine_confirmed',
-          'data': {
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: _isPenaltyAccepted
+              ? '$livestockType — Rescheduled Slaughter Confirmed'
+              : '$livestockType — Confinement Confirmed',
+          message: _isPenaltyAccepted
+              ? 'Your slaughter operation has been rescheduled for $dateStr following the technical delay. Legal finality fee of ₱500.00 will be added to your payment.'
+              : 'Your livestock has been confined at the slaughterhouse. New slaughter schedule: $dateStr.',
+          type: 'confine_confirmed',
+          data: {
             'request_id': reqId,
             'livestock_type': livestockType,
             'new_date': _selectedDate!.toIso8601String(),
             'admin_notes': _notesCtrl.text,
+            'penalty_fee': _isPenaltyAccepted ? 500.0 : null,
           },
-        });
+        );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('New slaughter date set to $dateStr. Customer notified.'), backgroundColor: Colors.green.shade600),
+            SnackBar(
+              content: Text(_isPenaltyAccepted
+                  ? 'Resumed slaughter date set to $dateStr. Customer notified.'
+                  : 'New slaughter date set to $dateStr. Customer notified.'),
+              backgroundColor: Colors.green.shade600,
+            ),
           );
         }
       } else if (_isTakeBack) {
@@ -1610,21 +2039,20 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
           'pickup_time': pickupDateTime.toIso8601String(),
         }).eq('id', reqId);
 
-
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': '$livestockType — Pickup Approved',
-          'message': 'Your livestock pickup has been approved. Please pick up on $dateStr at $timeStr at Tabaco City Slaughterhouse.',
-          'is_read': false,
-          'type': 'pickup_approved',
-          'data': {
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: '$livestockType — Pickup Approved',
+          message: 'Your livestock pickup has been approved. Please pick up on $dateStr at $timeStr at Tabaco City Slaughterhouse.',
+          type: 'pickup_approved',
+          data: {
             'request_id': reqId,
             'livestock_type': livestockType,
             'pickup_date': _selectedDate!.toIso8601String(),
             'pickup_time': timeStr,
             'admin_notes': _notesCtrl.text,
           },
-        });
+        );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1658,7 +2086,7 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 550,
+        width: 600,
         padding: const EdgeInsets.all(24),
         child: SingleChildScrollView(
           child: Column(
@@ -1687,7 +2115,11 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isConfine ? 'Customer Chose: Confine' : 'Customer Chose: Take Back',
+                          _isPenaltyAccepted
+                              ? 'Customer Chose: Accept Penalty (₱500)'
+                              : _isConfine
+                                  ? 'Customer Chose: Confine'
+                                  : 'Customer Chose: Take Back',
                           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 2),
@@ -1708,9 +2140,19 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: _isConfine ? Colors.blue.shade50 : Colors.deepOrange.shade50,
+                  color: _isPenaltyAccepted
+                      ? Colors.green.shade50
+                      : _isConfine
+                          ? Colors.blue.shade50
+                          : Colors.deepOrange.shade50,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _isConfine ? Colors.blue.shade200 : Colors.deepOrange.shade200),
+                  border: Border.all(
+                    color: _isPenaltyAccepted
+                        ? Colors.green.shade200
+                        : _isConfine
+                            ? Colors.blue.shade200
+                            : Colors.deepOrange.shade200,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1718,17 +2160,33 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     Row(
                       children: [
                         Icon(
-                          _isConfine ? Icons.local_hospital : Icons.undo,
+                          _isPenaltyAccepted
+                              ? Icons.receipt_long
+                              : _isConfine
+                                  ? Icons.local_hospital
+                                  : Icons.undo,
                           size: 18,
-                          color: _isConfine ? Colors.blue.shade700 : Colors.deepOrange.shade700,
+                          color: _isPenaltyAccepted
+                              ? Colors.green.shade700
+                              : _isConfine
+                                  ? Colors.blue.shade700
+                                  : Colors.deepOrange.shade700,
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _isConfine ? 'Confine in Slaughterhouse' : 'Take Livestock Back',
+                          _isPenaltyAccepted
+                              ? 'Penalty Fee Accepted (₱500.00)'
+                              : _isConfine
+                                  ? 'Confine in Slaughterhouse'
+                                  : 'Take Livestock Back',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: _isConfine ? Colors.blue.shade700 : Colors.deepOrange.shade700,
+                            color: _isPenaltyAccepted
+                                ? Colors.green.shade700
+                                : _isConfine
+                                    ? Colors.blue.shade700
+                                    : Colors.deepOrange.shade700,
                           ),
                         ),
                       ],
@@ -1736,6 +2194,8 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     const SizedBox(height: 8),
                     _detailRow('Livestock:', livestock),
                     _detailRow('Customer:', cust),
+                    if (_isPenaltyAccepted)
+                      _detailRow('Terms:', 'Agreed to ₱500 legal finality fee to keep animal in facility'),
                     if (respondedAt != null)
                       _detailRow('Responded:', DateFormat('MMM d, yyyy h:mm a').format(DateTime.parse(respondedAt.toString()))),
                   ],
@@ -1745,16 +2205,20 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
 
               // Action section
               Text(
-                _isConfine
-                    ? 'Set New Slaughter Date'
-                    : 'Approve Pickup Time',
+                _isPenaltyAccepted
+                    ? 'Set Resumption Slaughter Date'
+                    : _isConfine
+                        ? 'Set New Slaughter Date'
+                        : 'Approve Pickup Time',
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF4A5568)),
               ),
               const SizedBox(height: 4),
               Text(
-                _isConfine
-                    ? 'Select a new date for when this confined livestock can be slaughtered. The customer will be notified.'
-                    : 'Approve a date and time for the customer to pick up their livestock. They will be notified.',
+                _isPenaltyAccepted
+                    ? 'Select the date when this livestock slaughter will resume. The customer accepted the ₱500 fee and will be notified of the schedule.'
+                    : _isConfine
+                        ? 'Select a new date for when this confined livestock can be slaughtered. The customer will be notified.'
+                        : 'Approve a date and time for the customer to pick up their livestock. They will be notified.',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 12),
@@ -1836,27 +2300,40 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
               ),
 
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   TextButton(
                     onPressed: _isLoading ? null : () => Navigator.pop(context),
-                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14)),
+                    style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
                     child: const Text('Cancel', style: TextStyle(color: Colors.black87)),
                   ),
-                  const SizedBox(width: 12),
+                  if (_isPenaltyAccepted)
+                    ElevatedButton.icon(
+                      onPressed: _isLoading ? null : _markDelayResolvedAndReleasable,
+                      icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                      label: const Text('Resolve & Set Releasable', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2D6A4F),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
                   ElevatedButton.icon(
                     onPressed: _isLoading ? null : _submit,
                     icon: _isLoading
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Icon(_isConfine ? Icons.event_available : Icons.check_circle_outline, size: 18, color: Colors.white),
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : Icon(_isConfine ? Icons.event_available : Icons.check_circle_outline, size: 16, color: Colors.white),
                     label: Text(
                       _isConfine ? 'Set Date & Notify' : 'Approve & Notify',
-                      style: const TextStyle(color: Colors.white),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _isConfine ? Colors.blue.shade600 : Colors.green.shade600,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                   ),

@@ -489,6 +489,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _serviceCard("assets/images/Goat.jpg", "Goat", "Goat Slaughter", "goat"),
                 _serviceCard("assets/images/Sheep.jpg", "Sheep", "Sheep Slaughter", "sheep"),
                 _serviceCard("assets/images/Cara.jpg", "Carabao", "Carabao Slaughter", "carabao"),
+                _serviceCard("assets/images/poultry.jpg", "Poultry", "Poultry Fowl", "poultry"),
               ],
             ),
           ),

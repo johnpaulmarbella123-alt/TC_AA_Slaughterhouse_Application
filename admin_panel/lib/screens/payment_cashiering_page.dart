@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/app_settings_service.dart';
+import '../services/notification_service.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
   const PaymentCashieringPage({super.key});
@@ -46,7 +47,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
-          .inFilter('status', ['releasable', 'payment_pending', 'paid'])
+          .inFilter('status', ['releasable', 'mic_generated', 'payment_pending', 'paid'])
           .order('created_at', ascending: false);
 
       final enriched = List<Map<String, dynamic>>.from(data).map((r) {
@@ -95,18 +96,43 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     return double.tryParse(w.toString()) ?? 0;
   }
 
+  static bool hasTechnicalDelay(Map<String, dynamic> req) {
+    if (req['anti_mortem_response'] == 'accept_penalty') return true;
+    if (req['status'] == 'delay_error') return true;
+    if (req['delay_reason'] != null && req['delay_reason'].toString().trim().isNotEmpty) return true;
+    final notes = (req['process_notes'] ?? '').toString();
+    if (notes.contains('Technical delay') || notes.toLowerCase().contains('penalty')) return true;
+    final insp = req['slaughter_inspection'];
+    if (insp is Map) {
+      if (insp['process_stage'] == 'Technical Error/Delay') return true;
+      final inspNotes = (insp['process_notes'] ?? '').toString();
+      if (inspNotes.contains('Technical delay') || inspNotes.toLowerCase().contains('penalty')) return true;
+    } else if (insp is List && insp.isNotEmpty) {
+      final first = insp.first;
+      if (first is Map) {
+        if (first['process_stage'] == 'Technical Error/Delay') return true;
+        final inspNotes = (first['process_notes'] ?? '').toString();
+        if (inspNotes.contains('Technical delay') || inspNotes.toLowerCase().contains('penalty')) return true;
+      }
+    }
+    return false;
+  }
+
   static Map<String, dynamic> _calcFees(Map<String, dynamic> req) {
     final animalType = (req['livestock_type'] ?? 'hog').toString();
     final rates = AppSettingsService.instance.getFeeRatesForAnimal(animalType);
     final weight = _carcassWeight(req);
     final postMortemFee = weight * rates.postMortemRatePerKg;
+    final isDelayed = hasTechnicalDelay(req);
+    final penaltyFee = isDelayed ? 500.0 : 0.0;
     final subtotal = rates.vetHealthCertFee +
         rates.permitToSlaughterFee +
         rates.facilityFee +
         rates.corralFee +
         rates.anteMortemFee +
         rates.additionalFee +
-        postMortemFee;
+        postMortemFee +
+        penaltyFee;
     final isBarangay = req['request_type'] == 'barangay';
     final deliveryFee = isBarangay ? 0.0 : rates.deliveryVanFee;
     return {
@@ -118,6 +144,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       'post_mortem': postMortemFee,
       'additional_fee': rates.additionalFee,
       'additional_fee_label': rates.additionalFeeLabel,
+      'penalty_fee': penaltyFee,
+      'is_delayed': isDelayed,
       'subtotal': subtotal,
       'delivery_van': deliveryFee,
       'total': subtotal + deliveryFee,
@@ -193,22 +221,20 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       // Update request status
       await supabase.from('requests').update({'status': 'payment_pending'}).eq('id', reqId);
 
-      // Send notification to customer
-      if (userId != null) {
-        await supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': 'Slaughter Request Receipt Issued',
-          'message': 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
-          'is_read': false,
-          'type': 'receipt_issued',
-          'data': {
-            'receipt_no': receiptNo,
-            'reference_no': refNo,
-            'amount': fees['total'],
-            'request_id': reqId,
-          },
-        });
-      }
+      // Send notification to customer safely
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: 'Slaughter Request Receipt Issued',
+        message: 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
+        type: 'receipt_issued',
+        data: {
+          'receipt_no': receiptNo,
+          'reference_no': refNo,
+          'amount': fees['total'],
+          'request_id': reqId,
+        },
+      );
 
       _loadRequests();
       if (mounted) {
@@ -662,6 +688,12 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     '${fees['additional_fee_label'] ?? 'Additional Surcharge'}:',
                     '\u20b1${((fees['additional_fee'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                   ),
+                if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _feeRow(
+                    'Legal Finality / Penalty Fee (Delayed Operation):',
+                    '\u20b1${((fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}',
+                    bold: true,
+                  ),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade300),
                 _feeRow('Subtotal:', '\u20b1${(fees['subtotal'] as double).toStringAsFixed(2)}', bold: true),
@@ -898,22 +930,20 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
       await widget.supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
 
-      // Send notification
-      if (userId != null) {
-        await widget.supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': 'Slaughter Request Receipt Issued',
-          'message': 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
-          'is_read': false,
-          'type': 'receipt_issued',
-          'data': {
-            'receipt_no': receiptNo,
-            'reference_no': refNo,
-            'amount': _fees['total'],
-            'request_id': reqId,
-          },
-        });
-      }
+      // Send notification safely
+      await NotificationService.sendNotificationSafely(
+        widget.supabase,
+        userId: userId,
+        title: 'Slaughter Request Receipt Issued',
+        message: 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
+        type: 'receipt_issued',
+        data: {
+          'receipt_no': receiptNo,
+          'reference_no': refNo,
+          'amount': _fees['total'],
+          'request_id': reqId,
+        },
+      );
 
       if (mounted) {
         Navigator.pop(context);

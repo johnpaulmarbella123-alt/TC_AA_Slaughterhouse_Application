@@ -106,9 +106,13 @@ class _OtpScreenState extends State<OtpScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
+          msg = 'No internet connection. Please check your Wi-Fi or mobile data.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Verification failed: ${e.toString()}'),
+            content: Text('Verification failed: $msg'),
             backgroundColor: Colors.red,
           ),
         );
@@ -138,9 +142,13 @@ class _OtpScreenState extends State<OtpScreen> {
       }
     } catch (e) {
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
+          msg = 'No internet connection. Please check your Wi-Fi or mobile data.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to resend code: $e'),
+            content: Text('Failed to resend code: $msg'),
             backgroundColor: Colors.red,
           ),
         );

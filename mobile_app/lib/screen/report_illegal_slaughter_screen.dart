@@ -427,18 +427,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       };
 
       try {
-        await supabase.from('notifications').insert({
-          'user_id': user.id,
-          'title': 'Report filed successfully',
-          'message':
-              'Your illegal slaughter report has been submitted.\nRef: $refNo',
-          'is_read': false,
-          'type': 'report_filed',
-          'reference_no': refNo,
-          'data': reportPayload,
-        });
-
-        // Insert admin alert notification so admin panel immediately detects the new report
+        // Insert alert notification so mobile user and admin panel immediately detect the new report
         await supabase.from('notifications').insert({
           'user_id': _isAnonymous ? null : user.id,
           'title': '🚨 Illegal Slaughter Report Filed',

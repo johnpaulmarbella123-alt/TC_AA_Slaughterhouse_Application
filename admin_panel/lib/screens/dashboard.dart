@@ -78,7 +78,7 @@ class _DashboardPageState extends State<DashboardPage> {
   // ═══════════════════════════════════════════════════════════
   Future<void> _loadPendingCounts() async {
     try {
-      final data = await supabase.from('requests').select('status, created_at');
+      final data = await supabase.from('requests').select('status, created_at, released_at, payments(status)');
 
       int pending = 0;
       int docVerif = 0;
@@ -89,16 +89,34 @@ class _DashboardPageState extends State<DashboardPage> {
       final reqList = List<Map<String, dynamic>>.from(data);
       for (var req in reqList) {
         final st = req['status']?.toString().toLowerCase() ?? '';
+        final releasedAt = req['released_at'];
+
+        // If already released, it is fully completed and not in active workflow
+        if (st == 'released' || releasedAt != null) {
+          continue;
+        }
+
+        // Check if payment was already completed
+        bool isPaid = st == 'paid';
+        final payments = req['payments'];
+        if (!isPaid && payments != null) {
+          if (payments is List && payments.isNotEmpty) {
+            isPaid = payments.any((p) => (p as Map)['status'] == 'paid');
+          } else if (payments is Map) {
+            isPaid = payments['status'] == 'paid';
+          }
+        }
+
         if (st == 'pending') {
           pending++;
         } else if (st == 'approved') {
           docVerif++;
-        } else if (st == 'doc_verified') {
+        } else if (st == 'doc_verified' || st == 'slaughter_started') {
           slaughter++;
-        } else if (st == 'releasable' || st == 'payment_pending') {
-          payment++;
-        } else if (st == 'paid') {
+        } else if (isPaid) {
           releasing++;
+        } else if (st == 'releasable' || st == 'mic_generated' || st == 'payment_pending') {
+          payment++;
         }
       }
 
@@ -143,6 +161,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final processedStatuses = [
           'doc_verified',
           'releasable',
+          'mic_generated',
           'payment_pending',
           'paid',
           'released',
@@ -502,7 +521,7 @@ class _DashboardPageState extends State<DashboardPage> {
           int module = 1;
           if (status == 'approved') module = 2;
           if (status == 'doc_verified') module = 3;
-          if (status == 'releasable' || status == 'payment_pending') module = 4;
+          if (status == 'releasable' || status == 'mic_generated' || status == 'payment_pending') module = 4;
           if (status == 'paid') module = 5;
 
           _showSearchResultDialog(
@@ -797,7 +816,7 @@ class _DashboardPageState extends State<DashboardPage> {
         final card2 = _buildKpiCard(
           iconWidget: const Text('🐷', style: TextStyle(fontSize: 16)),
           iconBgColor: const Color(0xFFFCE7F3),
-          title: 'Animals Processed',
+          title: 'Livestock Processed',
           value: '$_animalsProcessed',
           subtitleText: _animalsProcessed > 0 ? 'Livestock completed' : 'None processed yet',
           subtitleColor: const Color(0xFF16A34A),
@@ -975,6 +994,9 @@ class _DashboardPageState extends State<DashboardPage> {
                       label: 'Receiving & new',
                       isHighlighted: _pendingCount > 0,
                       onTap: () => widget.onNavigate?.call(1),
+                      highlightBgColor: const Color(0xFFFEF2F2),
+                      highlightBorderColor: const Color(0xFFFECACA),
+                      highlightTextColor: const Color(0xFFDC2626),
                     ),
                   ),
                   _buildChevron(),
@@ -982,7 +1004,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: _buildStageBox(
                       count: _docVerifCount,
                       label: 'Document verification',
+                      isHighlighted: _docVerifCount > 0,
                       onTap: () => widget.onNavigate?.call(2),
+                      highlightBgColor: const Color(0xFFEFF6FF),
+                      highlightBorderColor: const Color(0xFFBFDBFE),
+                      highlightTextColor: const Color(0xFF2563EB),
                     ),
                   ),
                   _buildChevron(),
@@ -990,7 +1016,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: _buildStageBox(
                       count: _slaughterCount,
                       label: 'Slaughter & inspection',
+                      isHighlighted: _slaughterCount > 0,
                       onTap: () => widget.onNavigate?.call(3),
+                      highlightBgColor: const Color(0xFFF0FDF4),
+                      highlightBorderColor: const Color(0xFFBBF7D0),
+                      highlightTextColor: const Color(0xFF16A34A),
                     ),
                   ),
                   _buildChevron(),
@@ -998,7 +1028,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: _buildStageBox(
                       count: _paymentCount,
                       label: 'Payment',
+                      isHighlighted: _paymentCount > 0,
                       onTap: () => widget.onNavigate?.call(4),
+                      highlightBgColor: const Color(0xFFFFFBEB),
+                      highlightBorderColor: const Color(0xFFFDE68A),
+                      highlightTextColor: const Color(0xFFD97706),
                     ),
                   ),
                   _buildChevron(),
@@ -1006,7 +1040,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     child: _buildStageBox(
                       count: _releasingCount,
                       label: 'Meat releasing',
+                      isHighlighted: _releasingCount > 0,
                       onTap: () => widget.onNavigate?.call(5),
+                      highlightBgColor: const Color(0xFFFAF5FF),
+                      highlightBorderColor: const Color(0xFFE9D5FF),
+                      highlightTextColor: const Color(0xFF9333EA),
                     ),
                   ),
                 ],
@@ -1030,6 +1068,9 @@ class _DashboardPageState extends State<DashboardPage> {
     required String label,
     bool isHighlighted = false,
     required VoidCallback onTap,
+    Color highlightBgColor = const Color(0xFFFFFBEB),
+    Color highlightBorderColor = const Color(0xFFFDE68A),
+    Color highlightTextColor = const Color(0xFFD97706),
   }) {
     return InkWell(
       onTap: onTap,
@@ -1037,10 +1078,10 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          color: isHighlighted ? const Color(0xFFFFFBEB) : Colors.white,
+          color: isHighlighted ? highlightBgColor : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isHighlighted ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0),
+            color: isHighlighted ? highlightBorderColor : const Color(0xFFE2E8F0),
             width: 1,
           ),
         ),
@@ -1052,7 +1093,7 @@ class _DashboardPageState extends State<DashboardPage> {
               style: TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
-                color: isHighlighted ? const Color(0xFFD97706) : const Color(0xFF0F172A),
+                color: isHighlighted ? highlightTextColor : const Color(0xFF0F172A),
               ),
             ),
             const SizedBox(height: 6),
@@ -1404,64 +1445,66 @@ class _DashboardPageState extends State<DashboardPage> {
           children: [
             // 1. Receiving & New Requests
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.assignment_outlined, size: 20, color: Color(0xFF166534)),
-              iconBgColor: const Color(0xFFDCFCE7),
+              imageAssetPath: 'assets/images/receiving_new_request.png',
               badgeCount: _pendingCount,
               title: 'Receiving & New Requests',
               subtitle: _pendingCount > 0 ? '$_pendingCount pending requests' : 'No pending requests',
+              buttonLabel: 'View Requests',
               onTap: () => widget.onNavigate?.call(1),
             ),
 
             // 2. Document Verification
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.check, size: 20, color: Color(0xFF0284C7)),
-              iconBgColor: const Color(0xFFE0F2FE),
+              imageAssetPath: 'assets/images/document_verification.png',
               badgeCount: _docVerifCount,
               title: 'Document Verification',
               subtitle: _docVerifCount > 0 ? '$_docVerifCount pending verification' : 'Verify uploaded documents',
+              buttonLabel: 'Verify Documents',
               onTap: () => widget.onNavigate?.call(2),
             ),
 
             // 3. Slaughter & Inspection
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.content_cut_outlined, size: 20, color: Color(0xFF15803D)),
-              iconBgColor: const Color(0xFFDCFCE7),
+              imageAssetPath: 'assets/images/slaughter_inspection.png',
               badgeCount: _slaughterCount,
               title: 'Slaughter & Inspection',
               subtitle: _slaughterCount > 0 ? '$_slaughterCount in processing' : 'Processing and inspection',
+              buttonLabel: 'Start Inspection',
               onTap: () => widget.onNavigate?.call(3),
             ),
 
             // 4. Payment & Cashiering
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.credit_card_outlined, size: 20, color: Color(0xFFB45309)),
-              iconBgColor: const Color(0xFFFEF3C7),
+              imageAssetPath: 'assets/images/payment_cashiering.png',
               badgeCount: _paymentCount,
               title: 'Payment & Cashiering',
               subtitle: _paymentCount > 0 ? '$_paymentCount awaiting payment' : 'Awaiting payment',
+              buttonLabel: 'Collect Payments',
               onTap: () => widget.onNavigate?.call(4),
             ),
 
             // 5. Meat Releasing
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.inventory_2_outlined, size: 20, color: Color(0xFFC2410C)),
-              iconBgColor: const Color(0xFFFFEDD5),
+              imageAssetPath: 'assets/images/meat_releasing.png',
               badgeCount: _releasingCount,
               title: 'Meat Releasing',
               subtitle: _releasingCount > 0 ? '$_releasingCount ready for release' : 'Ready for release',
+              buttonLabel: 'Manage Releasing',
               onTap: () => widget.onNavigate?.call(5),
             ),
 
-            // 6. Illegal Slaughter Reports (Special Card with Red Outline & Red Badge ONLY IF > 0)
+            // 6. Reports & Records
             _buildModuleNavCard(
-              iconWidget: const Icon(Icons.warning_amber_rounded, size: 20, color: Color(0xFFDC2626)),
-              iconBgColor: const Color(0xFFFEE2E2),
+              imageAssetPath: 'assets/images/reports_records.png',
               badgeCount: _unreviewedIllegalReports,
-              title: 'Illegal Slaughter Reports',
-              subtitle: _unreviewedIllegalReports > 0 ? '$_unreviewedIllegalReports new reports to review' : 'No reports to review',
+              title: 'Reports & Records',
+              subtitle: _unreviewedIllegalReports > 0
+                  ? '$_unreviewedIllegalReports new reports to review'
+                  : 'Daily, weekly, monthly reports',
               hasRedBorder: _unreviewedIllegalReports > 0,
               isRedBadge: _unreviewedIllegalReports > 0,
-              onTap: () => widget.onNavigate?.call(6, 'Report Illegal'),
+              buttonLabel: 'View Reports',
+              onTap: () => widget.onNavigate?.call(6, _unreviewedIllegalReports > 0 ? 'Report Illegal' : 'Analytics'),
             ),
           ],
         );
@@ -1470,13 +1513,15 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildModuleNavCard({
-    required Widget iconWidget,
-    required Color iconBgColor,
+    Widget? iconWidget,
+    String? imageAssetPath,
+    Color iconBgColor = Colors.transparent,
     required int badgeCount,
     required String title,
     required String subtitle,
     bool hasRedBorder = false,
     bool isRedBadge = false,
+    String buttonLabel = 'Open module',
     required VoidCallback onTap,
   }) {
     return Container(
@@ -1503,16 +1548,37 @@ class _DashboardPageState extends State<DashboardPage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: iconBgColor,
+              if (imageAssetPath != null)
+                ClipRRect(
                   borderRadius: BorderRadius.circular(8),
+                  child: Image.asset(
+                    imageAssetPath,
+                    width: 36,
+                    height: 36,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: iconBgColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      alignment: Alignment.center,
+                      child: iconWidget ?? const Icon(Icons.dashboard_outlined, size: 20, color: Colors.grey),
+                    ),
+                  ),
+                )
+              else
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: iconBgColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: iconWidget,
                 ),
-                alignment: Alignment.center,
-                child: iconWidget,
-              ),
               if (badgeCount > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
@@ -1576,9 +1642,9 @@ class _DashboardPageState extends State<DashboardPage> {
                 padding: EdgeInsets.zero,
               ),
               onPressed: onTap,
-              child: const Text(
-                'Open module',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              child: Text(
+                buttonLabel,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
               ),
             ),
           ),

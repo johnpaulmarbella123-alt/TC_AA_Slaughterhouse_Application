@@ -46,9 +46,15 @@ class _LoginScreenState extends State<LoginScreen> {
       // ignore: avoid_print
       print('Login error: $e');
       if (mounted) {
+        String msg = e.toString();
+        if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
+          msg = 'No internet connection. Please check your Wi-Fi or mobile data.';
+        } else if (msg.contains('Invalid login credentials')) {
+          msg = 'Invalid credentials. Please check your email/phone and password.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: ${e.toString()}'),
+            content: Text(msg),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
           ),

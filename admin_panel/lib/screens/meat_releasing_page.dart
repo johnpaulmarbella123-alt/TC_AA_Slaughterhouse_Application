@@ -3,6 +3,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import '../services/notification_service.dart';
 
 class MeatReleasingPage extends StatefulWidget {
   const MeatReleasingPage({super.key});
@@ -146,23 +147,21 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
 
       await supabase.from('requests').update(updateData).eq('id', reqId);
 
-      // Send notification to customer
-      if (userId != null) {
-        final isDelivery = releaseType == 'delivery';
-        await supabase.from('notifications').insert({
-          'user_id': userId,
-          'title': isDelivery ? 'Meat Out for Delivery' : 'Meat Ready for Pickup',
-          'message': isDelivery
-              ? 'Your meat order is now out for delivery! The driver is on the way to your address.'
-              : 'Your meat order is ready for pickup at the Tabaco City Slaughterhouse. Please collect your order at your earliest convenience.',
-          'is_read': false,
-          'type': isDelivery ? 'meat_delivery' : 'meat_pickup',
-          'data': {
-            'request_id': reqId,
-            'release_type': releaseType,
-          },
-        });
-      }
+      // Send notification to customer safely
+      final isDelivery = releaseType == 'delivery';
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: isDelivery ? 'Meat Out for Delivery' : 'Meat Ready for Pickup',
+        message: isDelivery
+            ? 'Your meat order is now out for delivery! The driver is on the way to your address.'
+            : 'Your meat order is ready for pickup at the Tabaco City Slaughterhouse. Please collect your order at your earliest convenience.',
+        type: isDelivery ? 'meat_delivery' : 'meat_pickup',
+        data: {
+          'request_id': reqId,
+          'release_type': releaseType,
+        },
+      );
 
       _loadRequests();
       if (mounted) {

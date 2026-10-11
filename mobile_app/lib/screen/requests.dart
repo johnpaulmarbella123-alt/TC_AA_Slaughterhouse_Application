@@ -304,6 +304,7 @@ class _RequestsContentState extends State<RequestsContent> {
       );
 
       if (image == null) return;
+      if (!mounted) return;
 
       final user = supabase.auth.currentUser;
 
@@ -344,17 +345,21 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("$type uploaded successfully"),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$type uploaded successfully"),
+          ),
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Upload Error: $e"),
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Upload Error: $e"),
+          ),
+        );
+      }
     }
   }
 
@@ -539,7 +544,7 @@ class _RequestsContentState extends State<RequestsContent> {
 
                       _buildDropdownField(
                         "Livestock Type",
-                        ["Pig/Hog", "Cow/Cattle", "Goat", "Sheep", "Carabao"],
+                        ["Pig/Hog", "Cow/Cattle", "Goat", "Sheep", "Carabao", "Poultry"],
                       ),
 
                       const SizedBox(height: 16),

@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
 import '../screen/how_it_works.dart';
-import 'home_page.dart';
 
 class SignupPages extends StatefulWidget {
 
@@ -100,9 +99,15 @@ class _SignupScreenState
         } else if (errorMessage.contains('Exception:')) {
           errorMessage = errorMessage.replaceAll('Exception:', '').trim();
         }
-        if (errorMessage.contains('Error sending magic link email') || errorMessage.contains('unexpected_failure')) {
+
+        if (errorMessage.contains('SocketException') || errorMessage.contains('Failed host lookup')) {
+          errorMessage = 'No internet connection. Please check your Wi-Fi or mobile data on your device.';
+        } else if (errorMessage.contains('Error sending magic link email') || errorMessage.contains('unexpected_failure')) {
           errorMessage = 'Unable to send OTP email. Please ensure Custom SMTP (Resend) is configured in Supabase.';
+        } else if (errorMessage.toLowerCase().contains('sms') || errorMessage.toLowerCase().contains('phone provider') || errorMessage.toLowerCase().contains('unsupported phone provider')) {
+          errorMessage = 'SMS OTP is not configured in Supabase. Please sign up using an email address, or configure Twilio/SMS provider in Supabase.';
         }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(errorMessage),

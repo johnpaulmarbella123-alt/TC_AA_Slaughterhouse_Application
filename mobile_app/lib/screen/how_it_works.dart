@@ -536,7 +536,7 @@ class HowItWorksScreen extends StatelessWidget {
       {
         "q": "What livestock species can be processed?",
         "a":
-            "Tabaco City 'AA' Slaughterhouse processes Hogs (Pigs), Cattle (Cows), Carabao, Goats, and Sheep according to NMIS standards."
+            "Tabaco City 'AA' Slaughterhouse processes Hogs (Pigs), Cattle (Cows), Carabao, Goats, Sheep, and Poultry (sometimes grouped separately or included, comprising domesticated fowl like chickens, turkeys, and ducks) according to NMIS standards."
       },
       {
         "q": "What legal documents are required before slaughter?",

@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../services/notification_service.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
   const ReceivingRequestsPage({super.key});
@@ -20,19 +22,50 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   List<Map<String, dynamic>> _pendingMarket = [];
   bool _isLoading = true;
   int _pendingTabIndex = 0; // 0 = Barangay, 1 = Market
+  bool _userManuallySelectedTab = false;
 
   // Add scroll controllers for horizontal scrolling
   final ScrollController _approvedScrollController = ScrollController();
   final ScrollController _pendingScrollController = ScrollController();
+  RealtimeChannel? _requestsChannel;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
+    _subscribeRequests();
+    // Auto-poll every 3 seconds so incoming requests appear automatically in real-time
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _loadRequests(silent: true);
+    });
+  }
+
+  void _subscribeRequests() {
+    try {
+      _requestsChannel = supabase
+          .channel('public:admin-receiving-requests')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'requests',
+            callback: (payload) {
+              debugPrint('RECEIVING: Requests change detected, reloading...');
+              if (mounted) _loadRequests(silent: true);
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Realtime error in ReceivingRequestsPage: $e');
+    }
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
+    if (_requestsChannel != null) {
+      supabase.removeChannel(_requestsChannel!);
+    }
     _searchController.dispose();
     _approvedScrollController.dispose();
     _pendingScrollController.dispose();
@@ -42,45 +75,44 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   // ════════════════════════════════════════════
   //  LOAD DATA
   // ════════════════════════════════════════════
-  Future<void> _loadRequests() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadRequests({bool silent = false}) async {
+    if (!silent && mounted) setState(() => _isLoading = true);
     try {
-      final user = supabase.auth.currentUser;
-      debugPrint('═══ ADMIN LOAD REQUESTS ═══');
-      debugPrint('Admin user: ${user?.email} | role: ${user?.userMetadata?['role']}');
-
-      // First try loading ALL requests (no status filter) to see if we can access the table at all
       final allRequests = await supabase
           .from('requests')
           .select()
           .order('created_at', ascending: false);
-      
-      debugPrint('Total requests in DB: ${allRequests.length}');
-      for (final r in allRequests) {
-        debugPrint('  → id=${r['id']} | status=${r['status']} | type=${r['request_type']} | customer=${r['customer_name']}');
-      }
 
       final approved = allRequests.where((r) => r['status'] == 'approved').toList();
       final pendingAll = allRequests.where((r) => r['status'] == 'pending').toList();
 
-      debugPrint('Approved: ${approved.length} | Pending: ${pendingAll.length}');
+      if (mounted) {
+        setState(() {
+          _approvedRequests = List<Map<String, dynamic>>.from(approved);
+          _pendingBarangay = List<Map<String, dynamic>>.from(
+            pendingAll.where((r) => r['request_type'] == 'barangay'),
+          );
+          _pendingMarket = List<Map<String, dynamic>>.from(
+            pendingAll.where((r) => r['request_type'] == 'market'),
+          );
 
-      setState(() {
-        _approvedRequests = List<Map<String, dynamic>>.from(approved);
-        _pendingBarangay = List<Map<String, dynamic>>.from(
-          pendingAll.where((r) => r['request_type'] == 'barangay'),
-        );
-        _pendingMarket = List<Map<String, dynamic>>.from(
-          pendingAll.where((r) => r['request_type'] == 'market'),
-        );
-        _isLoading = false;
-      });
-
-      debugPrint('Barangay pending: ${_pendingBarangay.length} | Market pending: ${_pendingMarket.length}');
-      debugPrint('═══ LOAD COMPLETE ═══');
+          // If the user hasn't manually selected a tab, automatically focus
+          // on the tab that actually has pending items (e.g. Market if Barangay is empty)
+          if (!_userManuallySelectedTab) {
+            if (_pendingBarangay.isEmpty && _pendingMarket.isNotEmpty) {
+              _pendingTabIndex = 1;
+            } else if (_pendingMarket.isEmpty && _pendingBarangay.isNotEmpty) {
+              _pendingTabIndex = 0;
+            }
+          }
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('═══ ERROR loading requests: $e ═══');
-      setState(() => _isLoading = false);
+      if (mounted && !silent) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -106,15 +138,15 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         }
       }
 
-      // 3. Send notification to customer
-      await supabase.from('notifications').insert({
-        'user_id': request['user_id'],
-        'title': 'Approved Request',
-        'message':
+      // 3. Send notification to customer safely
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: request['user_id'],
+        title: 'Approved Request',
+        message:
             'Your slaughter request has been approved for $dateStr to bring your animals',
-        'is_read': false,
-        'type': 'request_approved',
-      });
+        type: 'request_approved',
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -166,16 +198,26 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           .update({'status': 'rejected'})
           .eq('id', request['id']);
 
-      // 2. Send notification to customer
-      await supabase.from('notifications').insert({
-        'user_id': request['user_id'],
-        'title': 'Request Rejected',
-        'message': reason.isNotEmpty
+      // 2. Send notification to customer safely
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: request['user_id'],
+        title: 'Request Rejected',
+        message: reason.isNotEmpty
             ? reason
             : 'Request denied — fully booked. Please select another date.',
-        'is_read': false,
-        'type': 'request_rejected',
-      });
+        type: 'request_rejected',
+        data: {
+          'request_id': request['id'],
+          'reference_no': _buildRefNo(request),
+          'reason': reason.isNotEmpty
+              ? reason
+              : 'Request denied — fully booked. Please select another date.',
+          'preferred_date': request['preferred_date'],
+          'livestock_type': request['livestock_type'],
+          'animal_count': request['animal_count'],
+        },
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -600,6 +642,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                         const DataColumn(label: Text('Store Name')),
                       const DataColumn(label: Text('Livestock')),
                       const DataColumn(label: Text('Marking')),
+                      const DataColumn(label: Text('Schedule Date')),
                       const DataColumn(label: Text('Document')),
                       const DataColumn(label: Text('Status')),
                       const DataColumn(label: Text('Action')),
@@ -617,6 +660,30 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                           '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
                         )),
                         DataCell(Text(req['marking'] ?? '—')),
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(_formatDate(req['preferred_date'])),
+                              if (req['rescheduled_date'] != null)
+                                Container(
+                                  margin: const EdgeInsets.only(top: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                  ),
+                                  child: const Text('Rescheduled',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          color: Color(0xFF92400E),
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                            ],
+                          ),
+                        ),
                         DataCell(_buildDocumentBadges(req)),
                         DataCell(_buildStatusBadge('Pending')),
                         DataCell(
@@ -658,7 +725,12 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   Widget _buildTab(String label, int index) {
     final isActive = _pendingTabIndex == index;
     return GestureDetector(
-      onTap: () => setState(() => _pendingTabIndex = index),
+      onTap: () {
+        setState(() {
+          _userManuallySelectedTab = true;
+          _pendingTabIndex = index;
+        });
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),

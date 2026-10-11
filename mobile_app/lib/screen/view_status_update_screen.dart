@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'condemnation_slip_screen.dart';
 
 class ViewStatusUpdateScreen extends StatefulWidget {
   final Map<String, dynamic>? initialRequest;
@@ -278,6 +279,100 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
 
           const SizedBox(height: 16),
 
+          if ((req['status'] ?? '').toString().toLowerCase() == 'condemned' ||
+              (req['status'] ?? '').toString().toLowerCase() == 'post_mortem_failed') ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                    ? const Color(0xFFFBF4F4)
+                    : const Color(0xFFFFF3E5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                      ? const Color(0xFFE8C2C2)
+                      : const Color(0xFFF7D2A8),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                            ? Icons.check_circle_outline
+                            : Icons.warning_amber_rounded,
+                        color: (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                            ? const Color(0xFFC0392B)
+                            : const Color(0xFFC26E00),
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                              ? 'Operation Concluded — Carcass Condemned'
+                              : 'Post-Mortem Inspection Failed',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                                ? const Color(0xFFA32D2D)
+                                : const Color(0xFF854F0B),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    (req['status'] ?? '').toString().toLowerCase() == 'condemned'
+                        ? 'The carcass was condemned during post-mortem inspection. Condemnation slip has been received and this slaughter operation is concluded.'
+                        : 'Health issues were detected during post-mortem examination. Please review the official condemnation slip.',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade800, height: 1.4),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CondemnationSlipScreen(
+                              data: {
+                                'request_id': req['id'],
+                                'customer_name': req['customer_name'],
+                                'livestock_type': livestockType,
+                                'animal_count': animalCount,
+                                'carcass_weight': carcassWeightNum > 0 ? carcassWeightNum.toStringAsFixed(1) : '',
+                                'inspector_name': _inspection?['inspector_name'] ?? '',
+                                'condemnation_reason': _inspection?['condemnation_reason'] ?? 'Failed Post-Mortem Inspection',
+                              },
+                            ),
+                          ),
+                        ).then((_) => _loadRequestDetails());
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFC0392B),
+                        side: const BorderSide(color: Color(0xFFC0392B)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                      icon: const Icon(Icons.description_outlined, size: 14),
+                      label: const Text(
+                        'View Condemnation Slip',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // ── CARD 1: REQUEST DETAILS ──────────────────────────────
           Container(
             padding: const EdgeInsets.all(18),
@@ -476,6 +571,8 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
       currentStageIndex = 4;
     } else if (['payment_pending', 'paid', 'released', 'completed'].contains(status)) {
       currentStageIndex = 5;
+    } else if (['post_mortem_failed', 'condemned'].contains(status)) {
+      currentStageIndex = 3;
     } else if (_inspection != null) {
       currentStageIndex = 2;
     } else if (status == 'approved') {

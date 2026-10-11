@@ -96,9 +96,16 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         // Calculate fees
         final weight = double.tryParse((requestData['carcass_weight'] ?? 0).toString()) ?? 0;
         final postMortemFee = weight * _kPostMortemRatePerKg;
-        final subtotal = _kVetHealthCertFee + _kPermitToSlaughterFee + _kFacilityFee + _kCorralFee + _kAnteMortemFee + postMortemFee;
         final isBarangay = requestData['request_type'] == 'barangay';
         final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
+
+        final isDelayed = requestData['anti_mortem_response'] == 'accept_penalty' ||
+            requestData['status'] == 'delay_error' ||
+            (requestData['delay_reason'] != null && requestData['delay_reason'].toString().isNotEmpty) ||
+            (requestData['process_notes'] ?? '').toString().contains('Technical delay') ||
+            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('penalty');
+        final penaltyFee = isDelayed ? 500.0 : 0.0;
+        final subtotal = _kVetHealthCertFee + _kPermitToSlaughterFee + _kFacilityFee + _kCorralFee + _kAnteMortemFee + postMortemFee + penaltyFee;
 
         final totalFromPay = paymentData?['total_amount'] != null
             ? double.tryParse(paymentData!['total_amount'].toString())
@@ -116,6 +123,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
               'corral': double.tryParse((paymentData['corral_fee'] ?? _kCorralFee).toString()) ?? _kCorralFee,
               'ante_mortem': double.tryParse((paymentData['ante_mortem_fee'] ?? _kAnteMortemFee).toString()) ?? _kAnteMortemFee,
               'post_mortem': double.tryParse((paymentData['post_mortem_fee'] ?? postMortemFee).toString()) ?? postMortemFee,
+              'penalty_fee': penaltyFee,
               'subtotal': totalFromPay - vanFee,
               'delivery_van': vanFee,
               'total': totalFromPay,
@@ -128,6 +136,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
               'corral': _kCorralFee,
               'ante_mortem': _kAnteMortemFee,
               'post_mortem': postMortemFee,
+              'penalty_fee': penaltyFee,
               'subtotal': subtotal,
               'delivery_van': deliveryFee,
               'total': subtotal + deliveryFee,
@@ -273,6 +282,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 _lineItem("Corral Fee:", "\u20b1${_fees['corral']?.toStringAsFixed(2) ?? '0.00'}"),
                 _lineItem("Ante-Mortem:", "\u20b1${_fees['ante_mortem']?.toStringAsFixed(2) ?? '0.00'}"),
                 _lineItem("Post-Mortem (${weight.toStringAsFixed(0)} kg \u20b1${_kPostMortemRatePerKg.toStringAsFixed(2)}/kg):", "\u20b1${_fees['post_mortem']?.toStringAsFixed(2) ?? '0.00'}"),
+                if (((_fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _lineItem(
+                    "Legal Finality Fee (Delayed Operation):",
+                    "\u20b1${((_fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}",
+                  ),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade300),
                 const SizedBox(height: 4),
@@ -319,6 +333,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     ),
                     child: const Center(
                       child: Text("Please review the receipt before proceeding with payment",
+                          textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 10, color: Color(0xFF0F6E56))),
                     ),
                   ),

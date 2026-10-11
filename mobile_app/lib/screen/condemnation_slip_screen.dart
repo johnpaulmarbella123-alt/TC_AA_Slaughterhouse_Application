@@ -4,14 +4,117 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Detail screen for post-mortem / condemnation slips.
 ///
 /// Designed to look like the official government document.
-/// All fields come from the notification's `data` JSON map.
-class CondemnationSlipScreen extends StatelessWidget {
+/// All fields come from the notification's `data` JSON map or the requests DB.
+/// Once the customer views/receives this slip, the operation is concluded.
+class CondemnationSlipScreen extends StatefulWidget {
   final Map<String, dynamic> data;
 
   const CondemnationSlipScreen({super.key, required this.data});
 
+  @override
+  State<CondemnationSlipScreen> createState() => _CondemnationSlipScreenState();
+}
+
+class _CondemnationSlipScreenState extends State<CondemnationSlipScreen> {
+  late Map<String, dynamic> _data;
+  bool _isConcluding = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _data = Map<String, dynamic>.from(widget.data);
+    _markCondemnationReceivedAndFetchDetails();
+  }
+
+  Future<void> _markCondemnationReceivedAndFetchDetails() async {
+    final reqId = _data['request_id'];
+    if (reqId == null) return;
+
+    try {
+      final supabase = Supabase.instance.client;
+      // When the customer opens the condemnation slip, record receipt and conclude operation
+      await supabase.from('requests').update({
+        'status': 'condemned',
+      }).eq('id', reqId);
+
+      await supabase.from('slaughter_inspection').update({
+        'process_stage': 'Operation Concluded',
+      }).eq('request_id', reqId);
+
+      // Fetch additional fields if missing
+      final reqRow = await supabase
+          .from('requests')
+          .select('*, slaughter_inspection(*)')
+          .eq('id', reqId)
+          .maybeSingle();
+
+      if (reqRow != null && mounted) {
+        setState(() {
+          if (_data['customer_name'] == null || _data['customer_name'].toString().isEmpty) {
+            _data['customer_name'] = reqRow['customer_name'] ?? '';
+          }
+          if (_data['livestock_type'] == null || _data['livestock_type'].toString().isEmpty) {
+            _data['livestock_type'] = reqRow['livestock_type'] ?? '';
+          }
+          if (_data['animal_count'] == null) {
+            _data['animal_count'] = reqRow['animal_count'] ?? 1;
+          }
+          final inspList = reqRow['slaughter_inspection'];
+          Map<String, dynamic>? insp;
+          if (inspList is List && inspList.isNotEmpty) {
+            insp = inspList.first as Map<String, dynamic>;
+          } else if (inspList is Map) {
+            insp = inspList as Map<String, dynamic>;
+          }
+          if (insp != null) {
+            if (_data['inspector_name'] == null || _data['inspector_name'].toString().isEmpty) {
+              _data['inspector_name'] = insp['inspector_name'] ?? '';
+            }
+            if (_data['condemnation_reason'] == null || _data['condemnation_reason'].toString().isEmpty) {
+              _data['condemnation_reason'] = insp['condemnation_reason'] ?? '';
+            }
+            if (_data['carcass_weight'] == null) {
+              _data['carcass_weight'] = insp['carcass_weight'];
+            }
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error marking condemnation slip as received: $e');
+    }
+  }
+
+  Future<void> _concludeOperation() async {
+    setState(() => _isConcluding = true);
+    final reqId = _data['request_id'];
+    if (reqId != null) {
+      try {
+        await Supabase.instance.client.from('requests').update({
+          'status': 'condemned',
+        }).eq('id', reqId);
+
+        await Supabase.instance.client.from('slaughter_inspection').update({
+          'process_stage': 'Operation Concluded',
+        }).eq('request_id', reqId);
+      } catch (e) {
+        debugPrint('Error updating request to concluded: $e');
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isConcluding = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Condemnation slip received. Slaughter operation concluded.'),
+          backgroundColor: Color(0xFFC0392B),
+        ),
+      );
+      Navigator.pop(context, true);
+    }
+  }
+
   String _val(String key, [String fallback = '']) =>
-      (data[key] ?? fallback).toString();
+      (_data[key] ?? fallback).toString();
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +152,7 @@ class CondemnationSlipScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Left Logo Placeholder (Dept of Agriculture)
+                  // Left Logo (Dept of Agriculture)
                   Image.asset('assets/images/logo1.png', width: 45, height: 45,
                     errorBuilder: (context, error, stackTrace) => _fallbackLogo(Icons.account_balance),
                   ),
@@ -62,7 +165,7 @@ class CondemnationSlipScreen extends StatelessWidget {
                       ],
                     ),
                   ),
-                  // Right Logo Placeholder (City of Tabaco)
+                  // Right Logo (City of Tabaco)
                   Image.asset('assets/images/logo2.png', width: 45, height: 45,
                     errorBuilder: (context, error, stackTrace) => _fallbackLogo(Icons.location_city),
                   ),
@@ -134,15 +237,19 @@ class CondemnationSlipScreen extends StatelessWidget {
                     children: [
                       Padding(
                         padding: const EdgeInsets.all(6.0),
-                        child: Text(_val('livestock_type'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                        child: Text(_val('livestock_type', 'Livestock'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
                       ),
                       Padding(
                         padding: const EdgeInsets.all(6.0),
-                        child: Text("${_val('animal_count', '1')} head(s)", style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                        child: Text(
+                          "${_val('animal_count', '1')} head(s)${_val('carcass_weight').isNotEmpty ? '\n${_val('carcass_weight')} kg' : ''}",
+                          style: const TextStyle(fontSize: 9),
+                          textAlign: TextAlign.center,
+                        ),
                       ),
                       Padding(
                         padding: const EdgeInsets.all(6.0),
-                        child: Text(_val('condemnation_reason', 'Failed Inspection'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
+                        child: Text(_val('condemnation_reason', 'Failed Post-Mortem Inspection'), style: const TextStyle(fontSize: 9), textAlign: TextAlign.center),
                       ),
                     ],
                   ),
@@ -219,27 +326,22 @@ class CondemnationSlipScreen extends StatelessWidget {
               // Action Button
               Align(
                 alignment: Alignment.centerRight,
-                child: OutlinedButton(
-                  onPressed: () async {
-                    if (data['request_id'] != null) {
-                      try {
-                        await Supabase.instance.client
-                            .from('requests')
-                            .update({'status': 'condemned'})
-                            .eq('id', data['request_id']);
-                      } catch (_) {}
-                    }
-                    if (context.mounted) {
-                      Navigator.pop(context);
-                    }
-                  },
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.black,
-                    side: const BorderSide(color: Colors.black54),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                child: ElevatedButton.icon(
+                  onPressed: _isConcluding ? null : _concludeOperation,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFC0392B),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    elevation: 1,
                   ),
-                  child: const Text("Got it", style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+                  icon: _isConcluding
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.check_circle_outline, size: 16),
+                  label: const Text(
+                    "Acknowledge & Conclude Operation",
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ],
