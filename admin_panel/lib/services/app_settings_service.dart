@@ -704,16 +704,67 @@ class AppSettingsService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<bool> changePassword(String newPassword) async {
-    try {
-      final client = Supabase.instance.client;
-      if (client.auth.currentUser != null) {
-        await client.auth.updateUser(
-          UserAttributes(password: newPassword),
-        );
-        return true;
+  void syncWithAuthUser([User? authUser]) {
+    final user = authUser ?? Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      if (user.email != null && user.email!.isNotEmpty) {
+        _profileEmail = user.email!;
       }
+      final meta = user.userMetadata;
+      if (meta != null) {
+        if (meta['full_name'] != null && meta['full_name'].toString().trim().isNotEmpty) {
+          _profileName = meta['full_name'].toString().trim();
+        }
+        if (meta['avatar_url'] != null && meta['avatar_url'].toString().trim().isNotEmpty) {
+          _profilePhotoUrl = meta['avatar_url'].toString().trim();
+        }
+        if (meta['role'] != null) {
+          final r = meta['role'].toString();
+          if (r == 'admin') _currentRole = 'Admin';
+        }
+      }
+      notifyListeners();
+    }
+  }
+
+  Future<bool> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+
+    if (user == null || user.email == null || user.email!.isEmpty) {
+      throw const AuthException(
+        'No active session found. Please log in again to change password.',
+      );
+    }
+
+    try {
+      // 1. Re-authenticate user with existing password to verify identity and refresh token
+      await client.auth.signInWithPassword(
+        email: user.email!,
+        password: currentPassword,
+      );
+
+      // 2. Apply new password
+      final response = await client.auth.updateUser(
+        UserAttributes(password: newPassword),
+      );
+
+      if (response.user == null) {
+        throw const AuthException('Failed to update password in Supabase.');
+      }
+
+      debugPrint('Password updated successfully for: ${user.email}');
       return true;
+    } on AuthException catch (e) {
+      debugPrint('Change password auth error: ${e.message}');
+      final msg = e.message.toLowerCase();
+      if (msg.contains('invalid login credentials') || msg.contains('invalid credentials')) {
+        throw const AuthException('The existing / current password you entered is incorrect.');
+      }
+      rethrow;
     } catch (e) {
       debugPrint('Change password error: $e');
       rethrow;

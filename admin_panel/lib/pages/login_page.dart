@@ -60,6 +60,9 @@ class _LoginPageState extends State<LoginPage> {
         // Fetch fresh staff, capacity schedule, and fees from cloud database
         await AppSettingsService.instance.reloadFromSupabase();
 
+        // Sync authenticated user profile details (email, name, role)
+        AppSettingsService.instance.syncWithAuthUser(user);
+
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
         }

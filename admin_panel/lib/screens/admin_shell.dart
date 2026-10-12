@@ -29,6 +29,17 @@ class _AdminShellState extends State<AdminShell> {
   void initState() {
     super.initState();
     _loadedPages.add(_selectedIndex);
+
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/login');
+        }
+      });
+    } else {
+      AppSettingsService.instance.syncWithAuthUser(session.user);
+    }
   }
 
   void _onNavigate(int index, [dynamic tabArg]) {

@@ -54,8 +54,10 @@ class _SettingsPageState extends State<SettingsPage>
 
   // ─── 3. MY PROFILE STATE ───
   late TextEditingController _profileNameCtrl;
+  final TextEditingController _currentPasswordCtrl = TextEditingController();
   final TextEditingController _newPasswordCtrl = TextEditingController();
   final TextEditingController _confirmPasswordCtrl = TextEditingController();
+  bool _obscureCurrentPass = true;
   bool _obscureNewPass = true;
   bool _obscureConfirmPass = true;
   bool _isUpdatingPassword = false;
@@ -176,6 +178,7 @@ class _SettingsPageState extends State<SettingsPage>
     _noticeMsgCtrl.dispose();
 
     _profileNameCtrl.dispose();
+    _currentPasswordCtrl.dispose();
     _newPasswordCtrl.dispose();
     _confirmPasswordCtrl.dispose();
 
@@ -1845,12 +1848,55 @@ class _SettingsPageState extends State<SettingsPage>
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.account_circle, size: 20, color: Color(0xFF2D6A4F)),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Authenticated Admin: ${_settingsService.profileEmail}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const SizedBox(height: 16),
+                  TextField(
+                    controller: _currentPasswordCtrl,
+                    obscureText: _obscureCurrentPass,
+                    decoration: InputDecoration(
+                      labelText: 'Current / Existing Password',
+                      helperText: 'Required: Enter your existing password to verify ownership',
+                      prefixIcon: const Icon(Icons.key_outlined),
+                      suffixIcon: IconButton(
+                        icon: Icon(_obscureCurrentPass
+                            ? Icons.visibility_off
+                            : Icons.visibility),
+                        onPressed: () =>
+                            setState(() => _obscureCurrentPass = !_obscureCurrentPass),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
                   TextField(
                     controller: _newPasswordCtrl,
                     obscureText: _obscureNewPass,
                     decoration: InputDecoration(
                       labelText: 'New Password',
+                      helperText: 'Must be at least 6 characters',
                       prefixIcon: const Icon(Icons.lock_reset),
                       suffixIcon: IconButton(
                         icon: Icon(_obscureNewPass
@@ -1867,6 +1913,7 @@ class _SettingsPageState extends State<SettingsPage>
                     obscureText: _obscureConfirmPass,
                     decoration: InputDecoration(
                       labelText: 'Confirm New Password',
+                      helperText: 'Re-enter your new password to confirm',
                       prefixIcon: const Icon(Icons.lock_outline),
                       suffixIcon: IconButton(
                         icon: Icon(_obscureConfirmPass
@@ -1963,13 +2010,24 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _handleChangePassword() async {
+    final currentPass = _currentPasswordCtrl.text;
     final newPass = _newPasswordCtrl.text;
     final confirmPass = _confirmPasswordCtrl.text;
+
+    if (currentPass.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter your current (existing) password.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
 
     if (newPass.isEmpty || confirmPass.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please fill out the new password fields.'),
+          content: Text('Please fill out all new password fields.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -1979,7 +2037,17 @@ class _SettingsPageState extends State<SettingsPage>
     if (newPass.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Password must be at least 6 characters.'),
+          content: Text('New password must be at least 6 characters.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (newPass == currentPass) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('New password must be different from your existing password.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -1989,7 +2057,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (newPass != confirmPass) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Passwords do not match.'),
+          content: Text('New passwords do not match.'),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -1999,23 +2067,34 @@ class _SettingsPageState extends State<SettingsPage>
     setState(() => _isUpdatingPassword = true);
 
     try {
-      await _settingsService.changePassword(newPass);
+      await _settingsService.changePassword(
+        currentPassword: currentPass,
+        newPassword: newPass,
+      );
+      _currentPasswordCtrl.clear();
       _newPasswordCtrl.clear();
       _confirmPasswordCtrl.clear();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Password updated successfully!'),
+            content: Text(
+                'Password updated successfully! Please use your new password next time you log in.'),
             backgroundColor: Color(0xFF2D6A4F),
+            duration: Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
+      final errorMsg = e
+          .toString()
+          .replaceAll('Exception: ', '')
+          .replaceAll('AuthException: ', '');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to update password: $e'),
+            content: Text('Failed to update password: $errorMsg'),
             backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
