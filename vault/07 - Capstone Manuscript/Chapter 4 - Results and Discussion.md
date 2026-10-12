@@ -225,6 +225,23 @@ To evaluate the operational acceptability, learnability, and perceived efficienc
 
 ---
 
+### Mathematical Formulation and Scoring Methodology
+
+The System Usability Scale employs ten 5-point Likert-scale statements ranging from 1 ("Strongly Disagree") to 5 ("Strongly Agree"). The questions alternate between positive and negative assertions to mitigate response acquiescence bias.
+
+In accordance with institutional guidelines and standard SUS scoring protocol:
+
+1. **For odd-numbered items** ($i \in \{1, 3, 5, 7, 9\}$), the score contribution is calculated by subtracting 1 from the raw response value ($Q_i$):
+   $$ON = \sum_{i \in \{1, 3, 5, 7, 9\}} (Q_i - 1)$$
+
+2. **For even-numbered items** ($i \in \{2, 4, 6, 8, 10\}$), the score contribution is calculated by subtracting the raw response value ($Q_i$) from 5:
+   $$EN = \sum_{i \in \{2, 4, 6, 8, 10\}} (5 - Q_i)$$
+
+3. **Composite System Usability Scale Score**: The individual composite SUS score is derived by multiplying the sum of all adjusted item contributions by 2.5, yielding a standardized metric ranging from 0 to 100:
+   $$SUS = (ON + EN) \times 2.5$$
+
+---
+
 ### SUS Item Response Analysis
 
 #### Table 8. SUS Item Response Analysis ($N = 46$)
@@ -289,6 +306,21 @@ Following psychometric factor structure analysis (Lallemand & Gronier, 2023; Lew
 On contemporary standardized benchmark evaluation scales for digital platforms (Alfahl, 2023; Lee et al., 2023), the composite score of **86.60** places the system in the **top 5th percentile** of evaluated software products (95th+ percentile rank), substantially surpassing the standard empirical benchmark mean of 68.00.
 
 The system achieves an **"Acceptable"** rating in the highest acceptability range and qualifies for a **Grade A+**. The high ratings awarded by meat inspectors (87.50) and commercial dealers (86.83) confirm that tactile UI components, clear typography, structured modals, and real-time visual queue indicators effectively mitigate cognitive fatigue and eliminate operational friction during high-volume abattoir operations.
+
+---
+
+## Intelligent Mechanisms and Automated Optimization Engine
+
+To elevate the abattoir management system beyond basic record-keeping, three intelligent automation mechanisms were engineered into the architecture:
+
+1. **Automated Tariff Calculation Engine**: 
+   A deterministic pricing engine programmed with Tabaco City municipal slaughter tariffs. The engine dynamically evaluates species-specific rates (Hog, Cattle, Carabao, Goat, Poultry) across five distinct sub-fees: facility fee, permit fee, veterinary certificate fee, holding corral fee, and post-mortem rate per kilogram of dressed carcass weight. Upon the entry of the certified carcass weight by the meat inspector, the engine calculates sub-totals, applies statutory exemptions (if applicable), and generates the final payable balance atomically, completely eliminating human mathematical error.
+
+2. **Dynamic Lairage Capacity & Operational Schedule Enforcement**:
+   An automated capacity management system that monitors holding corral thresholds in real time. Based on veterinary guidelines and facility constraints, the module enforces maximum daily head limits (150 hogs, 50 cattle, 50 carabao, 50 goats) and an automated 15:00 daily cutoff time. Once a threshold is reached for a given date, the booking interface automatically locks that livestock category and suggests the next available operational slaughter day, preventing corral overcrowding and maintaining humane animal welfare conditions.
+
+3. **Cryptographic QR Code Anti-Counterfeit Meat Release Verification**:
+   To prevent meat theft, unauthorized dispatch, and counterfeit paper gate passes, the system issues a dynamic, cryptographically verifiable QR code upon confirmed payment settlement. At the dispatch loading dock, security officers scan the code to instantly verify payment status (`paid`), carcass weight, certified inspector ID, and recipient vehicle plate number. Once confirmed, the system marks the transaction as permanently `completed` and records the exact release timestamp (`released_at`), closing the traceability loop from livestock intake to market dispatch.
 
 ---
 
