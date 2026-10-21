@@ -21,6 +21,8 @@ Andersen, J., Roberts, M., & Lee, C. (2023). Automation in meat processing: Enha
 
 Ani, A., Rahman, M., & Ahmed, S. (2019). Evaluation of usability factors in web-based service platforms. *International Journal of Human–Computer Interaction*, 35(12), 1045–1056.
 
+Bangko Sentral ng Pilipinas (BSP). (2024). *Report on e-payments measurement in the Philippines: Accelerating digital retail payment transformation*. Manila: Bangko Sentral ng Pilipinas. https://www.bsp.gov.ph
+
 Bhat, A. (2024). *Online survey methodology and automated data capture*. QuestionPro Academic Publishing.
 
 Bowen, G. A. (2009). Document analysis as a qualitative research method. *Qualitative Research Journal*, 9(2), 27–40. https://doi.org/10.3316/QRJ0902027
@@ -28,6 +30,8 @@ Bowen, G. A. (2009). Document analysis as a qualitative research method. *Qualit
 Chen, L., Wu, T., & Zhang, Y. (2023). Hybrid web and mobile management platforms in food processing industries. *Computers and Electronics in Agriculture*, 208, 107789.
 
 Cruz, P. (2023). Digital scheduling systems for operational service management. *Journal of Information Management Systems*, 18(2), 65–74.
+
+CSB-System SE. (2023). *ERP software solutions for meat processing and abattoir operations*. CSB Enterprise Group. https://www.csb.com
 
 Del Rosario, K., Santos, V., & Mendoza, J. (2022). Web-based municipal transaction and market distribution management system. *Philippine Journal of Information Technology*, 15(1), 78–92.
 
@@ -42,6 +46,8 @@ Department of Information and Communications Technology (DICT). (2022). *eGovern
 Diaz, R. (2024). Role-based access control for secure information systems in organizational environments. *Journal of Cybersecurity and Information Management*, 12(1), 30–42.
 
 Etikan, I., Musa, S. A., & Alkassim, R. S. (2016). Comparison of convenience sampling and purposive sampling. *American Journal of Theoretical and Applied Statistics*, 5(1), 1–4.
+
+European Commission. (2023). *TRACES: TRAde Control and Expert System user documentation for sanitary and phytosanitary certification*. Directorate-General for Health and Food Safety. https://ec.europa.eu
 
 Fernandez, L. (2024). Digital inspection monitoring systems for food safety and compliance in livestock processing facilities. *Food Safety Technology Review*, 10(1), 55–63.
 
@@ -71,6 +77,8 @@ IBM. (n.d.). *IBM SPSS Statistics 28 documentation*. IBM Corporation. https://ww
 
 Javid, M., & Gomez, R. (2021). Sustainability and environmental challenges in the meat processing sector. *International Journal of Environmental Studies*, 78(3), 418–431.
 
+Kang, H. (2023). Understanding system architecture: Principles, models, and design strategies for modern software systems. *Journal of Software Engineering and Applications*, 16(4), 198–215.
+
 Kayesa, N. K., & King, M. S. (2021). The role of document analysis in health policy research: The READ approach. *Health Policy OPEN*, 2, 100024. https://doi.org/10.1016/j.hpopen.2020.100024
 
 Kim, H., & Park, S. (2022). Mobile-cloud application for livestock management and veterinary monitoring. *Computers and Electronics in Agriculture*, 194, 106721.
@@ -85,9 +93,13 @@ Lopez, A., & Ramirez, C. (2023). Evaluation of web-based governance systems in l
 
 Martin, J. (1991). *Rapid application development*. Macmillan Publishing Co., Inc.
 
+Marikina City Government. (2021). *Marikina City slaughterhouse automated management system (MCSAMS) operational guidelines*. City Veterinary and Slaughterhouse Office. https://marikina.gov.ph
+
 McCombes, S. (2022). *Guide to survey research: Definition, methods, and examples*. Scribbr. https://www.scribbr.com/methodology/survey-research/
 
 Mendoza, F. (2020). Mobile-based agricultural record management and communication system for rural farmers. *Journal of Agricultural Technology and Computing*, 8(2), 110–124.
+
+National Livestock Identification System (NLIS). (2022). *Australia's system for livestock identification and traceability: Standards and operational manual*. Meat & Livestock Australia (MLA). https://www.nlis.com.au
 
 National Meat Inspection Service (NMIS). (2020). *Meat safety manual: Procedures and guidelines for slaughterhouse operations*. Department of Agriculture. https://nmis.gov.ph/images/pdf/meat-safety-manual.pdf
 

@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'report_illegal_slaughter_screen.dart';
+import '../services/document_verifier.dart';
 
 class RequestsContent extends StatefulWidget {
   const RequestsContent({super.key});
@@ -12,6 +14,38 @@ class RequestsContent extends StatefulWidget {
   @override
   State<RequestsContent> createState() => _RequestsContentState();
 }
+
+const List<Map<String, String>> albayMunicipalities = [
+  {"code": "050517000", "name": "City of Tabaco"},
+  {"code": "050501000", "name": "Bacacay"},
+  {"code": "050502000", "name": "Camalig"},
+  {"code": "050503000", "name": "Daraga"},
+  {"code": "050504000", "name": "Guinobatan"},
+  {"code": "050505000", "name": "Jovellar"},
+  {"code": "050506000", "name": "City of Legazpi"},
+  {"code": "050507000", "name": "Libon"},
+  {"code": "050508000", "name": "City of Ligao"},
+  {"code": "050509000", "name": "Malilipot"},
+  {"code": "050510000", "name": "Malinao"},
+  {"code": "050511000", "name": "Manito"},
+  {"code": "050512000", "name": "Oas"},
+  {"code": "050513000", "name": "Pio Duran"},
+  {"code": "050514000", "name": "Polangui"},
+  {"code": "050515000", "name": "Rapu-Rapu"},
+  {"code": "050516000", "name": "Santo Domingo"},
+  {"code": "050518000", "name": "Tiwi"},
+];
+
+const List<String> tabacoBarangays = [
+  "Agnas", "Bacolod", "Bangkilingan", "Bantayan", "Baranghawon", "Basagan", "Basud (Pob.)",
+  "Bogñabong", "Bombon (Pob.)", "Bonot", "San Isidro", "Buang", "Buhian", "Cabagñan",
+  "Cobo", "Comon", "Cormidal", "Divino Rostro (Pob.)", "Fatima", "Guinobat", "Hacienda",
+  "Magapo", "Mariroc", "Matagbac", "Oras", "Oson", "Panal", "Pawa", "Pinagbobong",
+  "Quinale Cabasan (Pob.)", "Quinastillojan", "Rawis", "Sagurong", "Salvacion",
+  "San Antonio", "San Carlos", "San Juan (Pob.)", "San Lorenzo", "San Ramon",
+  "San Roque", "San Vicente", "Santo Cristo (Pob.)", "Sua-Igot", "Tabiguian",
+  "Tagas", "Tayhi (Pob.)", "Visita"
+];
 
 class _RequestsContentState extends State<RequestsContent> {
   final supabase = Supabase.instance.client;
@@ -35,12 +69,11 @@ class _RequestsContentState extends State<RequestsContent> {
 
   String? selectedLivestock;
 
-  List provinces = [];
-  List municipalities = [];
+  List municipalities = List.from(albayMunicipalities);
   List barangays = [];
 
-  String? selectedProvince;
-  String? selectedProvinceCode;
+  String? selectedProvince = "Albay";
+  String? selectedProvinceCode = "050500000";
 
   String? selectedMunicipality;
   String? selectedMunicipalityCode;
@@ -56,7 +89,7 @@ class _RequestsContentState extends State<RequestsContent> {
   @override
   void initState() {
     super.initState();
-    loadProvinces();
+    loadMunicipalities(selectedProvinceCode!);
   }
 
   @override
@@ -83,9 +116,10 @@ class _RequestsContentState extends State<RequestsContent> {
         selectedMunicipality == null ||
         selectedBarangay == null ||
         _addressController.text.trim().isEmpty ||
-        _dateController.text.trim().isEmpty) {
+        _dateController.text.trim().isEmpty ||
+        _markingController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill in all required fields")),
+        const SnackBar(content: Text("Please fill in all required fields (including Livestock Marking)")),
       );
       return;
     }
@@ -108,6 +142,39 @@ class _RequestsContentState extends State<RequestsContent> {
           const SnackBar(content: Text("Please login first")),
         );
         setState(() => isLoading = false);
+        return;
+      }
+
+      // Check if marking is already used by an active request
+      final markingInput = _markingController.text.trim();
+      final conflicting = await supabase
+          .from('requests')
+          .select('id, marking, status')
+          .ilike('marking', markingInput)
+          .not('status', 'in', '("completed","cancelled","rejected","released")')
+          .limit(1);
+
+      if (conflicting.isNotEmpty) {
+        setState(() => isLoading = false);
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 48),
+            title: const Text("Marking Already In Use", style: TextStyle(fontWeight: FontWeight.bold)),
+            content: Text(
+              "The livestock marking '$markingInput' is currently assigned to an active request.\n\n"
+              "To prevent animal mix-ups during slaughter and holding, please choose a unique tag or identifier (e.g. $markingInput-1).",
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E855A)),
+                child: const Text("Change Marking"),
+              ),
+            ],
+          ),
+        );
         return;
       }
 
@@ -193,7 +260,9 @@ class _RequestsContentState extends State<RequestsContent> {
     _dateController.clear();
     setState(() {
       selectedLivestock = null;
-      selectedProvince = null;
+      selectedProvince = "Albay";
+      selectedProvinceCode = "050500000";
+      municipalities = List.from(albayMunicipalities);
       selectedMunicipality = null;
       selectedBarangay = null;
       barangayCertificateUrl = null;
@@ -268,79 +337,317 @@ class _RequestsContentState extends State<RequestsContent> {
   // ---------------- DOCUMENT PICKER ----------------
 
   Future<void> _pickDocument(String type) async {
-    final source = await showModalBottomSheet<ImageSource>(
+    // 1. Choose source: Camera, Gallery, or Device Files
+    final selection = await showModalBottomSheet<String>(
       context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
       builder: (context) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                "Upload $type",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+                child: Text(
+                  "Please provide a scanned copy or clear photo of the official document.",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+              const Divider(),
               ListTile(
-                leading: const Icon(Icons.camera_alt),
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF1E855A)),
                 title: const Text("Take Photo"),
-                onTap: () {
-                  Navigator.pop(context, ImageSource.camera);
-                },
+                subtitle: const Text("Capture the physical certificate directly"),
+                onTap: () => Navigator.pop(context, 'camera'),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text("Choose from Gallery"),
-                onTap: () {
-                  Navigator.pop(context, ImageSource.gallery);
-                },
+                leading: const Icon(Icons.photo_library, color: Color(0xFF1E855A)),
+                title: const Text("Select from Gallery"),
+                subtitle: const Text("Choose image from your photo album"),
+                onTap: () => Navigator.pop(context, 'gallery'),
               ),
+              ListTile(
+                leading: const Icon(Icons.folder_open, color: Color(0xFF1E855A)),
+                title: const Text("Choose Files"),
+                subtitle: const Text("Select image or scanned document file"),
+                onTap: () => Navigator.pop(context, 'files'),
+              ),
+              const SizedBox(height: 8),
             ],
           ),
         );
       },
     );
 
-    if (source == null) return;
+    if (selection == null) return;
+
+    File? selectedFile;
 
     try {
-      final XFile? image = await picker.pickImage(
-        source: source,
-        imageQuality: 70,
-      );
+      if (selection == 'camera') {
+        final XFile? image = await picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 70,
+        );
+        if (image != null) selectedFile = File(image.path);
+      } else if (selection == 'gallery') {
+        final XFile? image = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 70,
+        );
+        if (image != null) selectedFile = File(image.path);
+      } else if (selection == 'files') {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['jpg', 'jpeg', 'png'],
+        );
+        if (result != null && result.files.single.path != null) {
+          selectedFile = File(result.files.single.path!);
+        }
+      }
 
-      if (image == null) return;
+      if (selectedFile == null) return;
       if (!mounted) return;
 
-      final user = supabase.auth.currentUser;
-
-      if (user == null) {
+      // 2. File size check
+      final int fileSize = await selectedFile.length();
+      if (fileSize < 10240) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Please login first"),
+            content: Text("Selected file is too small. Please provide a clear scanned certificate."),
+            backgroundColor: Colors.red,
           ),
         );
         return;
       }
 
-      final file = File(image.path);
+      // 3. Display Analyzing Dialog
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            content: Row(
+              children: const [
+                CircularProgressIndicator(color: Color(0xFF1E855A)),
+                SizedBox(width: 20),
+                Expanded(
+                  child: Text(
+                    "Verifying certificate authenticity...",
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
 
+      // 4. Perform On-Device OCR & Document Verification
+      final verification = await DocumentVerifier.verifyCertificate(
+        imageFile: selectedFile,
+        documentType: type,
+      );
+
+      // Dismiss analyzing dialog
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      if (!mounted) return;
+
+      // 5. If rejected, display clear alert & block upload
+      if (!verification.isValid) {
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            icon: const Icon(Icons.cancel_outlined, color: Colors.red, size: 52),
+            title: const Text(
+              "Certificate Not Detected",
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  verification.message,
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Icon(Icons.info_outline, color: Colors.red, size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "Photos of people, random objects, animals, or illegible scans cannot be accepted. Please ensure the official header, certificate title, and seal are visible.",
+                          style: TextStyle(fontSize: 12, color: Colors.red, height: 1.3),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("Try Again", style: TextStyle(color: Color(0xFF1E855A))),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
+      // 6. If verified, show preview confirmation before final upload
+      final bool? proceed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.verified, color: Color(0xFF1E855A), size: 24),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Legitimate Certificate",
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    selectedFile!,
+                    height: 190,
+                    width: double.infinity,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Target: $type",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "Detected Official Markers:",
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: verification.detectedKeywords.take(6).map((k) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF81C784)),
+                      ),
+                      child: Text(
+                        k,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF2E7D32),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  "Click 'Upload' to attach this verified document to your request.",
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E855A),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Upload Document"),
+            ),
+          ],
+        ),
+      );
+
+      if (proceed != true) return;
+
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Please login first")),
+        );
+        return;
+      }
+
+      // 7. Upload to Supabase Storage
       final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
-
       final filePath = "${user.id}/$fileName";
 
-      await supabase.storage.from('request-documents').upload(filePath, file);
-
+      await supabase.storage.from('request-documents').upload(filePath, selectedFile);
       final url = supabase.storage.from('request-documents').getPublicUrl(filePath);
 
       setState(() {
         if (type == "Barangay Certificate") {
           barangayCertificateUrl = url;
-        }
-
-        if (type == "Business Permit") {
+        } else if (type == "Business Permit") {
           businessPermitUrl = url;
-        }
-
-        if (type == "Proof of Ownership") {
+        } else if (type == "Proof of Ownership") {
           ownershipUrl = url;
-        }
-
-        if (type == "Health certificate from veterinarian(optional)") {
+        } else if (type == "Health certificate from veterinarian(optional)") {
           vetCertificateUrl = url;
         }
       });
@@ -348,7 +655,8 @@ class _RequestsContentState extends State<RequestsContent> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("$type uploaded successfully"),
+            content: Text("✓ $type verified and uploaded successfully"),
+            backgroundColor: const Color(0xFF1E855A),
           ),
         );
       }
@@ -357,53 +665,68 @@ class _RequestsContentState extends State<RequestsContent> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text("Upload Error: $e"),
+            backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
 
-  Future<void> loadProvinces() async {
-    final response = await http.get(
-      Uri.parse('https://psgc.gitlab.io/api/provinces'),
-    );
-
-    if (response.statusCode == 200) {
-      setState(() {
-        provinces = jsonDecode(response.body);
-      });
-    }
-  }
 
   Future<void> loadMunicipalities(String provinceCode) async {
-    final response = await http.get(
-      Uri.parse(
-        'https://psgc.gitlab.io/api/provinces/$provinceCode/cities-municipalities/',
-      ),
-    );
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://psgc.gitlab.io/api/provinces/$provinceCode/cities-municipalities/',
+        ),
+      ).timeout(const Duration(seconds: 4));
 
-    if (response.statusCode == 200) {
-      setState(() {
-        municipalities = jsonDecode(response.body);
-        barangays.clear();
-        selectedMunicipality = null;
-        selectedBarangay = null;
-      });
+      if (response.statusCode == 200) {
+        final list = jsonDecode(response.body);
+        if (mounted && list is List && list.isNotEmpty) {
+          setState(() {
+            municipalities = list;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Notice: using pre-bundled Albay municipalities: $e');
+      if (mounted && municipalities.isEmpty) {
+        setState(() {
+          municipalities = List.from(albayMunicipalities);
+        });
+      }
     }
   }
 
   Future<void> loadBarangays(String municipalityCode) async {
-    final response = await http.get(
-      Uri.parse(
-        'https://psgc.gitlab.io/api/cities-municipalities/$municipalityCode/barangays/',
-      ),
-    );
-
-    if (response.statusCode == 200) {
+    // If Tabaco City or name matches, use instant preloaded barangays
+    if (municipalityCode == "050517000" || selectedMunicipality == "City of Tabaco") {
       setState(() {
-        barangays = jsonDecode(response.body);
+        barangays = tabacoBarangays.map((name) => {'name': name}).toList();
         selectedBarangay = null;
       });
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://psgc.gitlab.io/api/cities-municipalities/$municipalityCode/barangays/',
+        ),
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final list = jsonDecode(response.body);
+        if (mounted && list is List) {
+          setState(() {
+            barangays = list;
+            selectedBarangay = null;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading barangays: $e');
     }
   }
 
@@ -558,40 +881,30 @@ class _RequestsContentState extends State<RequestsContent> {
 
                       const SizedBox(height: 16),
 
-                      // PROVINCE
-                      DropdownButtonFormField<String>(
-                        value: selectedProvince,
-                        isExpanded: true,
+                      // PROVINCE (Fixed to Albay)
+                      TextFormField(
+                        initialValue: "Albay",
+                        readOnly: true,
                         decoration: InputDecoration(
                           labelText: "Province",
                           filled: true,
                           fillColor: Colors.grey.shade100,
+                          prefixIcon: const Icon(
+                            Icons.location_on_outlined,
+                            color: Color(0xFF2D6A4F),
+                          ),
+                          suffixIcon: const Padding(
+                            padding: EdgeInsets.only(right: 12),
+                            child: Tooltip(
+                              message: "Fixed to Albay (Local facility jurisdiction)",
+                              child: Icon(Icons.lock_outline, size: 18, color: Colors.grey),
+                            ),
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide.none,
                           ),
                         ),
-                        items: provinces.map<DropdownMenuItem<String>>((province) {
-                          return DropdownMenuItem<String>(
-                            value: province['name'],
-                            child: Text(
-                              province['name'],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          final selected = provinces.firstWhere(
-                            (p) => p['name'] == value,
-                          );
-
-                          setState(() {
-                            selectedProvince = value;
-                            selectedProvinceCode = selected['code'];
-                          });
-
-                          loadMunicipalities(selectedProvinceCode!);
-                        },
                       ),
 
                       const SizedBox(height: 16),
@@ -710,8 +1023,8 @@ class _RequestsContentState extends State<RequestsContent> {
                       ),
                       const SizedBox(height: 16),
                       _buildTextField(
-                        "Marking for livestock",
-                        "Enter markings if any",
+                        "Marking for livestock *",
+                        "Enter unique marking (e.g., MK, MK-1)",
                         controller: _markingController,
                       ),
                       const SizedBox(height: 32),

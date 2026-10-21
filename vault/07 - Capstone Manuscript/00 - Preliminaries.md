@@ -155,25 +155,20 @@ The study concluded that the Operation Management Application for the AA Slaught
   - Scope and Delimitation of the Study
   - Definition of Terms (Conceptual & Operational)
 - [[Chapter 2 - Review of Related Literature and Technical Background|Chapter 2: Review of Related Literature and Technical Background]]
-  - Review of Related Literature and Systems
-  - Information Requirements Assessment
-  - System Features and Functionality Analysis
-  - Extent of System Usability
-  - Summary of Literature
+  - Review of Related Literature and Systems (RRL & RRS)
   - Conceptual Design Framework (Figure 2 IPO Diagram)
   - Technical Background & Software Development Methodology (Figure 3 RAD Model)
-  - System Design & Software Architecture (Figure 4 Decoupled Multi-Tier / MVC)
-  - Process Flowcharts (Figure 5 Existing Manual vs. Figure 6 Proposed System Flowchart)
-  - System Use Case Analysis (Figure 7 Use Case Diagram with 5 Actor Tiers)
-  - Physical Design & Deployment (Figure 8 Infrastructure Network)
-  - Architectural Design (Figure 9 Multi-Tier Block Architecture)
-  - System Execution Sequence (Figure 10 Sequence Diagram)
-  - Deployment Architecture (Figure 11 Deployment Diagram)
-  - Package Architecture (Figure 12 Package Diagram)
-  - Object-Oriented Domain Model (Figure 13 Class Diagram)
-  - Development Tools Used (Table 1)
-  - Database and Data Management Architecture
-  - Software & Hardware Requirements (Tables 2 & 3)
+  - System Design
+    - Software Design Pattern (Figure 4 MVC Pattern)
+    - Process Flowcharts (Figure 5 Existing Manual vs. Figure 6 Proposed System Flowchart)
+    - System Use Case Diagram & Functional Specifications (Figure 7)
+    - Physical Design (Figure 8 Infrastructure Network)
+  - Technologies to be Used (Flutter, Dart, Supabase, PayMongo, PSGC, FCM)
+  - System Architecture (Figures 9 to 13 Architectural, Sequence, Deployment, Package, Class Models)
+  - Development Tools (Table 1)
+  - Database and Data Management
+  - Recommended Software Requirements (Table 2)
+  - Recommended Hardware Requirements (Table 3)
 - [[Chapter 3 - Methodology|Chapter 3: Methodology]]
   - Sources of Data (Primary & Secondary)
   - Data Gathering Techniques (Interviews, Questionnaires, Surveys, Document Analysis)
@@ -212,7 +207,7 @@ The study concluded that the Operation Management Application for the AA Slaught
 | **Figure 4** | Decoupled Multi-Tier Software Architecture | Model-View-Controller (MVC) Pattern |
 | **Figure 5** | Existing Flowchart of Tabaco City Slaughterhouse | Manual Abattoir Process Flowchart |
 | **Figure 6** | Proposed System Flowchart of Operation Management Application | Digital Workflow & Decision Gateway Flowchart |
-| **Figure 7** | System Use Case Diagram | 5-Actor Use Case Interaction Model |
+| **Figure 7** | System Use Case Diagram | 4-Actor Unified Use Case Interaction Model |
 | **Figure 8** | Physical Design & Infrastructure Deployment Diagram | Network, Firewall, BaaS, & Peripheral Topology |
 | **Figure 9** | Architectural Design of the Proposed System | Decoupled Three-Tier System Architecture |
 | **Figure 10** | System Diagram of the System | End-to-End Sequence Diagram Across All Actors |

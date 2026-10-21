@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "07 - Capstone Manuscript/Chapter 3 - Methodology.md",
-                "mode": "source",
+                "file": "07 - Capstone Manuscript/Chapter 2 - Review of Related Literature and Technical Background.md",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Chapter 3 - Methodology"
+              "title": "Chapter 2 - Review of Related Literature and Technical Background"
             }
           }
         ]
@@ -185,24 +185,27 @@
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
-      "markdown-importer:Open format converter": false,
       "bases:Create new base": false
     }
   },
   "active": "f313bd710e068298",
   "lastOpenFiles": [
+    "07 - Capstone Manuscript/figure7_use_case_diagram.svg",
+    "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
     "07 - Capstone Manuscript/Chapter 2 - Review of Related Literature and Technical Background.md",
     "07 - Capstone Manuscript/Chapter 3 - Methodology.md",
-    "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
+    "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
     "07 - Capstone Manuscript/References.md",
+    "05 - Module Reference/Mobile - Client Request Booking.md",
+    "05 - Module Reference/Admin - Document Verification.md",
+    "07 - Capstone Manuscript/00 - Preliminaries.md",
+    "07 - Capstone Manuscript/Chapter 5 - Summary, Conclusions, and Recommendations.md",
+    "05 - Module Reference/Mobile - Inspection Tracking & Condemnation Slips.md",
     "07 - Capstone Manuscript/Appendices.md",
     "05 - Module Reference/Mobile - Illegal Slaughter Whistleblower Reporting.md",
     "05 - Module Reference/Admin - Illegal Slaughter Oversight.md",
     "01 - Architecture & System Maps/Flutter Admin Panel Architecture.md",
     "01 - Architecture & System Maps/End-to-End Workflow State Machine.md",
-    "07 - Capstone Manuscript/00 - Preliminaries.md",
-    "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
-    "07 - Capstone Manuscript/Chapter 5 - Summary, Conclusions, and Recommendations.md",
     "00 - Index/00 - System Map of Content (MOC).md",
     "07 - Capstone Manuscript",
     "fix_headers.js",
@@ -211,13 +214,9 @@
     "06 - Templates/Template - Audit Vulnerability Issue.md",
     "06 - Templates/Template - Daily Dev Log.md",
     "05 - Module Reference/Mobile - GCash & Cash Checkout.md",
-    "05 - Module Reference/Mobile - Inspection Tracking & Condemnation Slips.md",
-    "05 - Module Reference/Mobile - Client Request Booking.md",
     "05 - Module Reference/Admin - Reports & Records.md",
     "05 - Module Reference/Admin - Meat Releasing.md",
     "05 - Module Reference/Admin - Payment & Cashiering.md",
-    "05 - Module Reference/Admin - Slaughter & Inspection.md",
-    "05 - Module Reference/Admin - Document Verification.md",
-    "05 - Module Reference/Admin - Receiving & New Requests.md"
+    "05 - Module Reference/Admin - Slaughter & Inspection.md"
   ]
 }

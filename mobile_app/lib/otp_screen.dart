@@ -109,11 +109,16 @@ class _OtpScreenState extends State<OtpScreen> {
         String msg = e.toString();
         if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
           msg = 'No internet connection. Please check your Wi-Fi or mobile data.';
+        } else if (msg.contains('otp_expired') || msg.contains('Token has expired') || msg.contains('invalid')) {
+          msg = 'The verification code has expired or is invalid. Please check your newest email or tap "Resend Code" below.';
+        } else if (msg.contains('AuthApiException') || msg.contains('AuthException')) {
+          msg = msg.replaceAll(RegExp(r'AuthApi?Exception\([^)]*message:\s*'), '').replaceAll(RegExp(r',[^)]*\)'), '');
         }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Verification failed: $msg'),
+            content: Text(msg),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }

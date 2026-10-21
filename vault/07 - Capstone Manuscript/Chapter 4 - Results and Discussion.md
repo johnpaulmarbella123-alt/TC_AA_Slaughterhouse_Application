@@ -30,7 +30,7 @@ This section explains the empirical results gathered from stakeholder interviews
 The operational data presented in Table 4 outlines the essential information requirements needed to support remote livestock reservation, holding corral capacity management, statutory permit attachment, and physical gate verification.
 
 ```mermaid
-graph LR
+graph TD
     subgraph Sub-Domain A Data Inflow
         A1["Customer Profile<br/>(Name, Phone, Origin Farm Address)"] --> A4["Central Intake Engine"]
         A2["Livestock Details<br/>(Species: Hog/Cattle, Head Count, Live Weight)"] --> A4
