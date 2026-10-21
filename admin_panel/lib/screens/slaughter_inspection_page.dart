@@ -419,8 +419,30 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${req['animal_count']} head(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                        Text('${req['livestock_type'] ?? ''}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                        Text('${req['animal_count']} head(s) • ${req['livestock_type'] ?? ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        const SizedBox(height: 3),
+                        if (req['marking'] != null && req['marking'].toString().trim().isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8F5E9),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFF81C784), width: 0.8),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.label_outline, size: 11, color: Color(0xFF2E7D32)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'Tag: ${req['marking']}',
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          Text('No tag', style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
                       ],
                     )),
                     DataCell(() {
@@ -1017,8 +1039,19 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                   Expanded(child: _buildLabelValue('Customer', cust)),
                 ],
               ),
-              const SizedBox(height: 12),
-              _buildLabelValue('Request Type', type),
+              Row(
+                children: [
+                  Expanded(child: _buildLabelValue('Request Type', type)),
+                  Expanded(
+                    child: _buildLabelValue(
+                      'Livestock Tag / Marking',
+                      widget.request['marking']?.toString().isNotEmpty == true
+                          ? widget.request['marking'].toString()
+                          : '—',
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 20),
               
               const Text('Anti-Mortem Result', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),

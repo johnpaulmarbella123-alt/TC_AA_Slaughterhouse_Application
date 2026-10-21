@@ -921,6 +921,38 @@ class _NewReceivingEntryDialog extends StatefulWidget {
   State<_NewReceivingEntryDialog> createState() => _NewReceivingEntryDialogState();
 }
 
+const List<Map<String, String>> _albayMunicipalities = [
+  {"code": "050517000", "name": "City of Tabaco"},
+  {"code": "050501000", "name": "Bacacay"},
+  {"code": "050502000", "name": "Camalig"},
+  {"code": "050503000", "name": "Daraga"},
+  {"code": "050504000", "name": "Guinobatan"},
+  {"code": "050505000", "name": "Jovellar"},
+  {"code": "050506000", "name": "City of Legazpi"},
+  {"code": "050507000", "name": "Libon"},
+  {"code": "050508000", "name": "City of Ligao"},
+  {"code": "050509000", "name": "Malilipot"},
+  {"code": "050510000", "name": "Malinao"},
+  {"code": "050511000", "name": "Manito"},
+  {"code": "050512000", "name": "Oas"},
+  {"code": "050513000", "name": "Pio Duran"},
+  {"code": "050514000", "name": "Polangui"},
+  {"code": "050515000", "name": "Rapu-Rapu"},
+  {"code": "050516000", "name": "Santo Domingo"},
+  {"code": "050518000", "name": "Tiwi"},
+];
+
+const List<String> _tabacoBarangays = [
+  "Agnas", "Bacolod", "Bangkilingan", "Bantayan", "Baranghawon", "Basagan", "Basud (Pob.)",
+  "Bogñabong", "Bombon (Pob.)", "Bonot", "San Isidro", "Buang", "Buhian", "Cabagñan",
+  "Cobo", "Comon", "Cormidal", "Divino Rostro (Pob.)", "Fatima", "Guinobat", "Hacienda",
+  "Magapo", "Mariroc", "Matagbac", "Oras", "Oson", "Panal", "Pawa", "Pinagbobong",
+  "Quinale Cabasan (Pob.)", "Quinastillojan", "Rawis", "Sagurong", "Salvacion",
+  "San Antonio", "San Carlos", "San Juan (Pob.)", "San Lorenzo", "San Ramon",
+  "San Roque", "San Vicente", "Santo Cristo (Pob.)", "Sua-Igot", "Tabiguian",
+  "Tagas", "Tayhi (Pob.)", "Visita"
+];
+
 class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   bool _isBarangay = true;
   bool _isSaving = false;
@@ -931,17 +963,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   final _storeNameCtrl = TextEditingController();
   final _markingCtrl = TextEditingController();
 
-  // PSGC API address state
-  List _provinces = [];
-  List _municipalities = [];
+  // PSGC API address state (instant Albay defaults)
+  List _municipalities = List.from(_albayMunicipalities);
   List _barangays = [];
-  String? _selectedProvince;
-  String? _selectedProvinceCode;
+  final String _selectedProvince = 'Albay';
+  final String _selectedProvinceCode = '050500000';
   String? _selectedMunicipality;
   String? _selectedMunicipalityCode;
   String? _selectedBarangay;
-  bool _isLoadingProvinces = false;
-  bool _isLoadingMunicipalities = false;
   bool _isLoadingBarangays = false;
 
   String? _selectedAnimalType;
@@ -950,53 +979,43 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   @override
   void initState() {
     super.initState();
-    _loadProvinces();
-  }
-
-  Future<void> _loadProvinces() async {
-    setState(() => _isLoadingProvinces = true);
-    try {
-      final response = await http.get(
-        Uri.parse('https://psgc.gitlab.io/api/provinces'),
-      );
-      if (response.statusCode == 200) {
-        setState(() {
-          _provinces = jsonDecode(response.body);
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading provinces: $e');
-    } finally {
-      setState(() => _isLoadingProvinces = false);
-    }
+    _loadMunicipalities(_selectedProvinceCode);
   }
 
   Future<void> _loadMunicipalities(String provinceCode) async {
-    setState(() {
-      _isLoadingMunicipalities = true;
-      _municipalities = [];
-      _barangays = [];
-      _selectedMunicipality = null;
-      _selectedMunicipalityCode = null;
-      _selectedBarangay = null;
-    });
     try {
       final response = await http.get(
         Uri.parse('https://psgc.gitlab.io/api/provinces/$provinceCode/cities-municipalities/'),
-      );
+      ).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
-        setState(() {
-          _municipalities = jsonDecode(response.body);
-        });
+        final list = jsonDecode(response.body);
+        if (mounted && list is List && list.isNotEmpty) {
+          setState(() {
+            _municipalities = list;
+          });
+        }
       }
     } catch (e) {
-      debugPrint('Error loading municipalities: $e');
-    } finally {
-      setState(() => _isLoadingMunicipalities = false);
+      debugPrint('Notice: Using pre-bundled Albay municipalities: $e');
+      if (mounted && _municipalities.isEmpty) {
+        setState(() {
+          _municipalities = List.from(_albayMunicipalities);
+        });
+      }
     }
   }
 
   Future<void> _loadBarangays(String municipalityCode) async {
+    // If Tabaco City, use instant pre-bundled barangays
+    if (municipalityCode == "050517000" || _selectedMunicipality == "City of Tabaco") {
+      setState(() {
+        _barangays = _tabacoBarangays.map((name) => {'name': name}).toList();
+        _selectedBarangay = null;
+        _isLoadingBarangays = false;
+      });
+      return;
+    }
+
     setState(() {
       _isLoadingBarangays = true;
       _barangays = [];
@@ -1005,16 +1024,19 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     try {
       final response = await http.get(
         Uri.parse('https://psgc.gitlab.io/api/cities-municipalities/$municipalityCode/barangays/'),
-      );
+      ).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
-        setState(() {
-          _barangays = jsonDecode(response.body);
-        });
+        final list = jsonDecode(response.body);
+        if (mounted && list is List) {
+          setState(() {
+            _barangays = list;
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error loading barangays: $e');
     } finally {
-      setState(() => _isLoadingBarangays = false);
+      if (mounted) setState(() => _isLoadingBarangays = false);
     }
   }
 
@@ -1039,17 +1061,59 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     }
 
     if (_isBarangay &&
-        (_selectedProvince == null ||
-            _selectedMunicipality == null ||
-            _selectedBarangay == null)) {
+        (_selectedMunicipality == null || _selectedBarangay == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select Province, Municipality, and Barangay')),
+        const SnackBar(content: Text('Please select Municipality and Barangay')),
+      );
+      return;
+    }
+
+    if (_markingCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a unique marking for the livestock')),
       );
       return;
     }
 
     setState(() => _isSaving = true);
     try {
+      final markingInput = _markingCtrl.text.trim();
+      final conflicting = await widget.supabase
+          .from('requests')
+          .select('id, marking, status')
+          .ilike('marking', markingInput)
+          .not('status', 'in', '("completed","cancelled","rejected","released")')
+          .limit(1);
+
+      if (conflicting.isNotEmpty) {
+        setState(() => _isSaving = false);
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                SizedBox(width: 8),
+                Text('Marking Already In Use'),
+              ],
+            ),
+            content: Text(
+              "The marking '$markingInput' is already assigned to an active request.\n\n"
+              "Please assign a distinct marking (e.g. $markingInput-1) to avoid confusing animals on the floor.",
+            ),
+            actions: [
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E855A)),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+
       await widget.supabase.from('requests').insert({
         'request_type': _isBarangay ? 'barangay' : 'market',
         'customer_name': _customerNameCtrl.text.trim(),
@@ -1173,9 +1237,9 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               const SizedBox(height: 16),
 
               // ── Marking ──
-              _buildLabel('Marking'),
+              _buildLabel('Marking (Unique Tag) *'),
               const SizedBox(height: 6),
-              _buildTextField(_markingCtrl, 'Make a tagname for the livestock..'),
+              _buildTextField(_markingCtrl, 'Enter unique marking (e.g., MK, MK-1)..'),
               const SizedBox(height: 28),
 
               // ── Actions ──
@@ -1217,45 +1281,30 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
   List<Widget> _buildBarangayFields() {
     return [
-      // Province
+      // Province (Fixed to Albay)
       _buildLabel('Province'),
       const SizedBox(height: 6),
-      _isLoadingProvinces
-          ? const SizedBox(
-              height: 48,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
-            )
-          : DropdownButtonFormField<String>(
-              initialValue: _selectedProvince,
-              isExpanded: true,
-              hint: const Text('Select Province', style: TextStyle(fontSize: 13)),
-              decoration: _dropdownDecoration(),
-              items: _provinces.map<DropdownMenuItem<String>>((p) {
-                return DropdownMenuItem<String>(
-                  value: p['name'] as String,
-                  child: Text(p['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
-                );
-              }).toList(),
-              onChanged: (value) {
-                final selected = _provinces.firstWhere((p) => p['name'] == value);
-                setState(() {
-                  _selectedProvince = value;
-                  _selectedProvinceCode = selected['code'] as String;
-                });
-                _loadMunicipalities(_selectedProvinceCode!);
-              },
+      TextFormField(
+        initialValue: 'Albay',
+        readOnly: true,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        decoration: _dropdownDecoration().copyWith(
+          prefixIcon: const Icon(Icons.location_on, color: Color(0xFF2D6A4F), size: 18),
+          suffixIcon: const Padding(
+            padding: EdgeInsets.only(right: 12),
+            child: Tooltip(
+              message: 'Fixed to Albay (Local facility jurisdiction)',
+              child: Icon(Icons.lock_outline, size: 16, color: Colors.grey),
             ),
+          ),
+        ),
+      ),
       const SizedBox(height: 16),
 
       // Municipality
       _buildLabel('City / Municipality'),
       const SizedBox(height: 6),
-      _isLoadingMunicipalities
-          ? const SizedBox(
-              height: 48,
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
-            )
-          : DropdownButtonFormField<String>(
+      DropdownButtonFormField<String>(
               initialValue: _selectedMunicipality,
               isExpanded: true,
               hint: const Text('Select Municipality', style: TextStyle(fontSize: 13)),
@@ -1266,16 +1315,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                   child: Text(m['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
                 );
               }).toList(),
-              onChanged: _selectedProvince == null
-                  ? null
-                  : (value) {
-                      final selected = _municipalities.firstWhere((m) => m['name'] == value);
-                      setState(() {
-                        _selectedMunicipality = value;
-                        _selectedMunicipalityCode = selected['code'] as String;
-                      });
-                      _loadBarangays(_selectedMunicipalityCode!);
-                    },
+              onChanged: (value) {
+                final selected = _municipalities.firstWhere((m) => m['name'] == value);
+                setState(() {
+                  _selectedMunicipality = value;
+                  _selectedMunicipalityCode = selected['code'] as String;
+                });
+                _loadBarangays(_selectedMunicipalityCode!);
+              },
             ),
       const SizedBox(height: 16),
 
