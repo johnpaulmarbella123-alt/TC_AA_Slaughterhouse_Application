@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../auth/auth_server.dart';
 import '../screen/how_it_works.dart';
+import 'forgot_password_page.dart';
 import 'home_page.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -36,6 +38,11 @@ class _LoginScreenState extends State<LoginScreen> {
       // ignore: avoid_print
       print('Login response received: ${response.user?.id}');
       
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('has_previously_logged_in', true);
+      } catch (_) {}
+
       if (mounted) {
         // ignore: avoid_print
         print('Navigating to /HOME');
@@ -177,7 +184,22 @@ class _LoginScreenState extends State<LoginScreen> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () {},
+                        onPressed: () async {
+                          final identifierFromReset = await Navigator.push<String>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ForgotPasswordScreen(
+                                initialIdentifier: _emailController.text.trim().isNotEmpty
+                                    ? _emailController.text.trim()
+                                    : null,
+                              ),
+                            ),
+                          );
+                          if (identifierFromReset != null && identifierFromReset.isNotEmpty) {
+                            _emailController.text = identifierFromReset;
+                            _passwordController.clear();
+                          }
+                        },
                         child: const Text(
                           "Forget password?",
                           style: TextStyle(color: Colors.black54),

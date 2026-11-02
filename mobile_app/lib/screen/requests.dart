@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
@@ -67,6 +69,10 @@ class _RequestsContentState extends State<RequestsContent> {
   final TextEditingController _markingController = TextEditingController();
   final TextEditingController _dateController = TextEditingController();
 
+  String _customerName = '';
+  bool _isMarkingLocked = false;
+  StreamSubscription<AuthState>? _authSubscription;
+
   String? selectedLivestock;
 
   List municipalities = List.from(albayMunicipalities);
@@ -90,10 +96,121 @@ class _RequestsContentState extends State<RequestsContent> {
   void initState() {
     super.initState();
     loadMunicipalities(selectedProvinceCode!);
+    _loadCustomerProfile();
+
+    _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
+      if (data.session?.user != null) {
+        _loadCustomerProfile();
+      }
+    });
+  }
+
+  Future<void> _loadCustomerProfile() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      // 1. Try immediate load from user metadata
+      final meta = user.userMetadata;
+      String? resolvedName = (meta?['display_name'] ?? meta?['full_name'] ?? meta?['name'])?.toString().trim();
+
+      // 2. Fetch latest profile from DB
+      final profile = await supabase
+          .from('profiles')
+          .select('display_name, address')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profile != null && profile['display_name'] != null && profile['display_name'].toString().trim().isNotEmpty) {
+        resolvedName = profile['display_name'].toString().trim();
+      }
+
+      // Fallback if still empty: email username
+      if ((resolvedName == null || resolvedName.isEmpty) && user.email != null) {
+        resolvedName = user.email!.split('@').first;
+      }
+
+      if (resolvedName != null && resolvedName.isNotEmpty && mounted) {
+        setState(() {
+          _customerName = resolvedName!;
+          _customerNameController.text = resolvedName;
+        });
+      }
+
+      // Also pre-fill address if available and field is empty
+      if (profile != null && profile['address'] != null && profile['address'].toString().trim().isNotEmpty) {
+        final profileAddress = profile['address'].toString().trim();
+        if (_addressController.text.trim().isEmpty && mounted) {
+          setState(() {
+            _addressController.text = profileAddress;
+          });
+        }
+      }
+
+      // 3. Load permanent assigned marking
+      String? resolvedMarking;
+      bool isLocked = false;
+      try {
+        final markProfile = await supabase
+            .from('profiles')
+            .select('assigned_marking, marking_locked')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (markProfile != null &&
+            markProfile['assigned_marking'] != null &&
+            markProfile['assigned_marking'].toString().trim().isNotEmpty) {
+          resolvedMarking = markProfile['assigned_marking'].toString().trim();
+          isLocked = markProfile['marking_locked'] == true || markProfile['marking_locked'].toString() == 'true';
+        }
+      } catch (_) {}
+
+      // If not yet in profiles, check user's previous requests
+      if (resolvedMarking == null || resolvedMarking.isEmpty) {
+        try {
+          final pastReq = await supabase
+              .from('requests')
+              .select('marking, customer_marking')
+              .eq('user_id', user.id)
+              .not('status', 'in', '("rejected","cancelled")')
+              .order('created_at', ascending: false)
+              .limit(1)
+              .maybeSingle();
+          if (pastReq != null) {
+            final m = (pastReq['customer_marking'] ?? pastReq['marking'])?.toString().trim();
+            if (m != null && m.isNotEmpty) {
+              resolvedMarking = m;
+              isLocked = true;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // If still empty, suggest initials from customer name
+      if ((resolvedMarking == null || resolvedMarking.isEmpty) && resolvedName != null && resolvedName.isNotEmpty) {
+        final clean = resolvedName.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '').trim();
+        final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+        if (parts.length == 1) {
+          resolvedMarking = parts.first.length >= 3 ? parts.first.substring(0, 3).toUpperCase() : parts.first.toUpperCase();
+        } else if (parts.isNotEmpty) {
+          resolvedMarking = parts.map((p) => p[0].toUpperCase()).join();
+          if (resolvedMarking.length > 5) resolvedMarking = resolvedMarking.substring(0, 5);
+        }
+      }
+
+      if (resolvedMarking != null && resolvedMarking.isNotEmpty && mounted) {
+        setState(() {
+          _markingController.text = resolvedMarking!;
+          _isMarkingLocked = isLocked;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading customer profile: $e');
+    }
   }
 
   @override
   void dispose() {
+    _authSubscription?.cancel();
     _customerNameController.dispose();
     _animalCountController.dispose();
     _addressController.dispose();
@@ -183,6 +300,15 @@ class _RequestsContentState extends State<RequestsContent> {
       final preferredDateIso =
           "${parts[2]}-${parts[1].padLeft(2, '0')}-${parts[0].padLeft(2, '0')}";
 
+      final finalMarking = _markingController.text.trim().toUpperCase();
+      try {
+        await supabase.from('profiles').update({
+          'assigned_marking': finalMarking,
+          'marking_locked': true,
+          'dealer_category': isBarangay ? 'barangay' : 'market',
+        }).eq('id', user.id);
+      } catch (_) {}
+
       // 1. Insert request with all the fields your schema actually has
       final request = await supabase
           .from('requests')
@@ -196,12 +322,10 @@ class _RequestsContentState extends State<RequestsContent> {
             'municipality': selectedMunicipality,
             'barangay': selectedBarangay,
             'address': _addressController.text.trim(),
-            'market_stall_number':
-                isBarangay ? null : _marketStallController.text.trim(),
-            'market_name':
-                isBarangay ? null : _marketNameController.text.trim(),
+            'market_stall_number': null,
+            'market_name': null,
             'preferred_date': preferredDateIso,
-            'marking': _markingController.text.trim(),
+            'marking': finalMarking,
             'special_instruction': _specialInstructionsController.text.trim(),
             'barangay_certificate': barangayCertificateUrl,
             'business_permit': businessPermitUrl,
@@ -250,7 +374,11 @@ class _RequestsContentState extends State<RequestsContent> {
   }
 
   void _resetForm() {
-    _customerNameController.clear();
+    if (_customerName.isNotEmpty) {
+      _customerNameController.text = _customerName;
+    } else {
+      _customerNameController.clear();
+    }
     _animalCountController.clear();
     _addressController.clear();
     _marketStallController.clear();
@@ -400,6 +528,7 @@ class _RequestsContentState extends State<RequestsContent> {
     if (selection == null) return;
 
     File? selectedFile;
+    Uint8List? selectedBytes;
 
     try {
       if (selection == 'camera') {
@@ -409,7 +538,14 @@ class _RequestsContentState extends State<RequestsContent> {
           maxHeight: 1024,
           imageQuality: 70,
         );
-        if (image != null) selectedFile = File(image.path);
+        if (image != null) {
+          selectedBytes = await image.readAsBytes();
+          if (!kIsWeb) {
+            try {
+              selectedFile = File(image.path);
+            } catch (_) {}
+          }
+        }
       } else if (selection == 'gallery') {
         final XFile? image = await picker.pickImage(
           source: ImageSource.gallery,
@@ -417,23 +553,37 @@ class _RequestsContentState extends State<RequestsContent> {
           maxHeight: 1024,
           imageQuality: 70,
         );
-        if (image != null) selectedFile = File(image.path);
+        if (image != null) {
+          selectedBytes = await image.readAsBytes();
+          if (!kIsWeb) {
+            try {
+              selectedFile = File(image.path);
+            } catch (_) {}
+          }
+        }
       } else if (selection == 'files') {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.custom,
-          allowedExtensions: ['jpg', 'jpeg', 'png'],
+          allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+          withData: true,
         );
-        if (result != null && result.files.single.path != null) {
-          selectedFile = File(result.files.single.path!);
+        if (result != null && result.files.isNotEmpty) {
+          selectedBytes = result.files.single.bytes;
+          if (!kIsWeb && result.files.single.path != null) {
+            try {
+              selectedFile = File(result.files.single.path!);
+              selectedBytes ??= await selectedFile.readAsBytes();
+            } catch (_) {}
+          }
         }
       }
 
-      if (selectedFile == null) return;
+      if (selectedBytes == null || selectedBytes.isEmpty) return;
       if (!mounted) return;
 
       // 2. File size check
-      final int fileSize = await selectedFile.length();
-      if (fileSize < 10240) {
+      final int fileSize = selectedBytes.length;
+      if (fileSize < 1024) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -471,6 +621,7 @@ class _RequestsContentState extends State<RequestsContent> {
       // 4. Perform On-Device OCR & Document Verification
       final verification = await DocumentVerifier.verifyCertificate(
         imageFile: selectedFile,
+        imageBytes: selectedBytes,
         documentType: type,
       );
 
@@ -557,8 +708,8 @@ class _RequestsContentState extends State<RequestsContent> {
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    selectedFile!,
+                  child: Image.memory(
+                    selectedBytes!,
                     height: 190,
                     width: double.infinity,
                     fit: BoxFit.contain,
@@ -637,7 +788,11 @@ class _RequestsContentState extends State<RequestsContent> {
       final fileName = "${DateTime.now().millisecondsSinceEpoch}.jpg";
       final filePath = "${user.id}/$fileName";
 
-      await supabase.storage.from('request-documents').upload(filePath, selectedFile);
+      await supabase.storage.from('request-documents').uploadBinary(
+        filePath,
+        selectedBytes,
+        fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
+      );
       final url = supabase.storage.from('request-documents').getPublicUrl(filePath);
 
       setState(() {
@@ -859,8 +1014,33 @@ class _RequestsContentState extends State<RequestsContent> {
                       // 3. Form Fields
                       _buildTextField(
                         "Customer Name",
-                        "Enter customer name",
+                        _customerName.isNotEmpty ? _customerName : "Enter customer name",
                         controller: _customerNameController,
+                        readOnly: _customerNameController.text.isNotEmpty,
+                        prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF1E855A)),
+                        suffixIcon: _customerNameController.text.isNotEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.only(right: 12),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check_circle, size: 16, color: Color(0xFF1E855A)),
+                                    SizedBox(width: 4),
+                                    Text(
+                                      "Verified",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF1E855A),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : null,
+                        helperText: _customerNameController.text.isNotEmpty
+                            ? "Auto-filled from your registered account"
+                            : null,
                       ),
 
                       const SizedBox(height: 16),
@@ -984,21 +1164,6 @@ class _RequestsContentState extends State<RequestsContent> {
                         controller: _addressController,
                       ),
 
-                      const SizedBox(height: 16),
-
-                      if (!isBarangay) ...[
-                        _buildTextField(
-                          "Market Stall Number",
-                          "Enter stall number",
-                          controller: _marketStallController,
-                        ),
-                        const SizedBox(height: 16),
-                        _buildTextField(
-                          "Market Selection",
-                          "Enter Market Name",
-                          controller: _marketNameController,
-                        ),
-                      ],
                       const SizedBox(height: 32),
 
                       // 4. Preferred Schedule Section
@@ -1024,8 +1189,17 @@ class _RequestsContentState extends State<RequestsContent> {
                       const SizedBox(height: 16),
                       _buildTextField(
                         "Marking for livestock *",
-                        "Enter unique marking (e.g., MK, MK-1)",
+                        _isMarkingLocked
+                            ? "Official assigned marking"
+                            : "Enter unique marking (e.g., MK, MK-1)",
                         controller: _markingController,
+                        readOnly: _isMarkingLocked,
+                        prefixIcon: _isMarkingLocked
+                            ? const Icon(Icons.lock, color: Color(0xFF2D6A4F), size: 18)
+                            : null,
+                        helperText: _isMarkingLocked
+                            ? "Official permanent marking recorded at Slaughterhouse (Locked)."
+                            : "Suggested from initials. Once recorded, this becomes your permanent marking.",
                       ),
                       const SizedBox(height: 32),
 
@@ -1115,6 +1289,10 @@ class _RequestsContentState extends State<RequestsContent> {
     bool isNumber = false,
     int maxLines = 1,
     TextEditingController? controller,
+    bool readOnly = false,
+    Widget? prefixIcon,
+    Widget? suffixIcon,
+    String? helperText,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1123,13 +1301,18 @@ class _RequestsContentState extends State<RequestsContent> {
         const SizedBox(height: 8),
         TextField(
           controller: controller,
+          readOnly: readOnly,
           keyboardType: isNumber ? TextInputType.number : TextInputType.text,
           maxLines: maxLines,
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
             filled: true,
-            fillColor: Colors.grey.shade100,
+            fillColor: readOnly ? const Color(0xFFF3F4F6) : Colors.grey.shade100,
+            prefixIcon: prefixIcon,
+            suffixIcon: suffixIcon,
+            helperText: helperText,
+            helperStyle: TextStyle(fontSize: 11, color: Colors.grey.shade600),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide.none,

@@ -42,6 +42,9 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    try {
+      closeInAppWebView();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -54,27 +57,24 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   // ═══════════════════════════════════════════════════
-  //  CASH PAYMENT (existing flow, unchanged)
+  //  CASH PAYMENT — submitted for admin verification
   // ═══════════════════════════════════════════════════
+  /// The customer only *declares* the payment method here. The payment stays
+  /// `pending` (with `payment_method` set) until an admin verifies that the
+  /// money was actually received in the Payment & Cashiering module.
   Future<void> _processPayment(String method) async {
     setState(() => _isProcessing = true);
     try {
       final reqId = widget.request['id'];
 
-      // Update payment record
+      // Record the selected method only — do NOT mark as paid.
       await supabase.from('payments').update({
         'payment_method': method == 'GCash' ? 'GCash' : 'Cash',
-        'status': 'paid',
-        'balance': 0,
+        'status': 'pending',
       }).eq('request_id', reqId);
 
-      // Update requests record
-      await supabase.from('requests').update({
-        'status': 'paid',
-      }).eq('id', reqId);
-
       if (!mounted) return;
-      _showSuccessDialog(method);
+      _showSubmittedDialog(method);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,17 +127,25 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
         _paymongoLinkId = linkId;
       });
 
-      // Step 2: Save the PayMongo link_id to the payment record for tracking
-      await supabase.from('payments').update({
-        'payment_method': 'GCash',
-      }).eq('request_id', reqId);
+      // Note: payment_method is only recorded once PayMongo reports the
+      // link as paid, so abandoned checkouts never reach admin verification.
 
-      // Step 3: Open PayMongo checkout page in browser
+      // Step 3: Open PayMongo checkout page in in-app browser view
       final uri = Uri.parse(checkoutUrl);
       try {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        final launched = await launchUrl(
+          uri,
+          mode: LaunchMode.inAppBrowserView,
+        );
+        if (!launched) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
       } catch (launchError) {
-        throw Exception('Could not open payment page. Please try again.');
+        try {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        } catch (_) {
+          throw Exception('Could not open payment page. Please try again.');
+        }
       }
 
       // Step 4: Start polling for payment status (user will pay in browser)
@@ -161,11 +169,11 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   // ═══════════════════════════════════════════════════
   void _startPolling() {
     _isPolling = true;
-    // Poll every 5 seconds for up to 10 minutes
+    // Poll every 2 seconds for up to 10 minutes
     int attempts = 0;
-    const maxAttempts = 120; // 10 minutes
+    const maxAttempts = 300; // 10 minutes (300 * 2s)
 
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
       attempts++;
       if (attempts > maxAttempts || !_isPolling) {
         timer.cancel();
@@ -202,26 +210,61 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
         final status = data['status'] as String?;
 
         if (status == 'paid') {
-          // Payment successful!
+          // PayMongo reports the checkout as paid — auto-verify directly.
           _pollTimer?.cancel();
           _isPolling = false;
           _paymongoLinkId = null;
 
-          // Update database
+          // Automatically dismiss in-app browser view so user returns to the app
+          try {
+            await closeInAppWebView();
+          } catch (e) {
+            debugPrint('Could not close in-app browser: $e');
+          }
+
           final reqId = widget.request['id'];
+          final userId = widget.request['user_id'] ?? supabase.auth.currentUser?.id;
+          final total = (widget.fees['total'] ?? 0).toDouble();
+          final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+          // 1. Mark payment as paid in database
           await supabase.from('payments').update({
             'payment_method': 'GCash',
             'status': 'paid',
             'balance': 0,
+            'cashier_name': 'Online (PayMongo GCash)',
+            'receipt_number': widget.receiptNo,
           }).eq('request_id', reqId);
 
+          // 2. Update request status to paid
           await supabase.from('requests').update({
             'status': 'paid',
           }).eq('id', reqId);
 
+          // 3. Send payment_verified notification
+          if (userId != null) {
+            try {
+              await supabase.from('notifications').insert({
+                'user_id': userId,
+                'title': 'Payment Confirmed',
+                'message': 'Your payment of \u20b1${total.toStringAsFixed(2)} via GCash has been confirmed. Carcass is ready for release scheduling.',
+                'type': 'payment_verified',
+                'is_read': false,
+                'data': {
+                  'request_id': reqId,
+                  'receipt_no': widget.receiptNo,
+                  'reference_no': refNo,
+                  'amount': total,
+                },
+              });
+            } catch (notifErr) {
+              debugPrint('Notification insert error: $notifErr');
+            }
+          }
+
           if (mounted) {
             setState(() => _isProcessing = false);
-            _showSuccessDialog('GCash');
+            _showPaidSuccessDialog('GCash', total);
           }
         }
       }
@@ -231,9 +274,9 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   // ═══════════════════════════════════════════════════
-  //  SUCCESS DIALOG
+  //  PAID SUCCESS DIALOG (Auto-Verified GCash)
   // ═══════════════════════════════════════════════════
-  void _showSuccessDialog(String method) {
+  void _showPaidSuccessDialog(String method, double total) {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -253,21 +296,81 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                   color: Color(0xFF1A8C62), size: 32),
             ),
             const SizedBox(height: 14),
+            const Text(
+              'Payment Successful!',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
             Text(
-              method == 'GCash'
-                  ? 'GCash Payment Successful!'
-                  : 'Payment on pickup was Successful!',
+              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been successfully verified and confirmed. Your carcass is now ready for release scheduling.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          Center(
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pop(context, true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1A8C62),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(120, 36),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
+              ),
+              child: const Text('Done'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  SUBMITTED (AWAITING VERIFICATION) DIALOG
+  // ═══════════════════════════════════════════════════
+  void _showSubmittedDialog(String method) {
+    final isGCash = method == 'GCash';
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF3CD),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.hourglass_top,
+                  color: Color(0xFF856404), size: 30),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              isGCash
+                  ? 'GCash Payment Submitted'
+                  : 'Cash on Pickup Selected',
               style:
                   const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               textAlign: TextAlign.center,
             ),
-            if (method == 'GCash') ...[
-              const SizedBox(height: 8),
-              Text(
-                'Paid via GCash • PayMongo',
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-            ],
+            const SizedBox(height: 8),
+            Text(
+              isGCash
+                  ? 'Your GCash payment is awaiting verification by the slaughterhouse admin. You will be notified once it is confirmed.'
+                  : 'Please pay the exact amount at the cashier on pickup. Your payment will be confirmed once the admin verifies that it has been received.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
         actions: [
@@ -587,6 +690,8 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                                             'Cash only for pickup payment'),
                                         _bulletPoint(
                                             'Show this receipt number for reference'),
+                                        _bulletPoint(
+                                            'Payment is confirmed only after the cashier verifies it'),
                                       ] else ...[
                                         _bulletPoint(
                                             'You will be redirected to PayMongo to pay via GCash',
@@ -595,7 +700,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                                             'Complete the payment in your browser',
                                             isGCash: true),
                                         _bulletPoint(
-                                            'Return to this app after paying — status will update automatically',
+                                            'Return to this app after paying — your payment will then be verified by the admin',
                                             isGCash: true),
                                         _bulletPoint(
                                             'Do not close this app while paying',
@@ -675,7 +780,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                                         : Text(
                                             _selectedMethod == 'GCash'
                                                 ? 'Pay with GCash'
-                                                : 'Confirm Cash Payment',
+                                                : 'Choose Cash on Pickup',
                                             style: const TextStyle(
                                                 fontWeight: FontWeight.w600),
                                           ),

@@ -97,6 +97,22 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   }
 
   static bool hasTechnicalDelay(Map<String, dynamic> req) {
+    // If the customer chose to take back the livestock, delay penalty fee is strictly waived
+    if (req['anti_mortem_response'] == 'take_back' ||
+        req['status'] == 'taken_back' ||
+        req['status'] == 'pickup_scheduled') {
+      return false;
+    }
+    // Ante-mortem failures (confine / observation) have NO 500 penalty
+    if (req['anti_mortem_response'] == 'confine' ||
+        req['status'] == 'confined' ||
+        req['status'] == 'anti_mortem_failed') {
+      return false;
+    }
+    // Explicit penalty fee on request
+    if (req['penalty_fee'] != null) {
+      return (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0;
+    }
     if (req['anti_mortem_response'] == 'accept_penalty') return true;
     if (req['status'] == 'delay_error') return true;
     if (req['delay_reason'] != null && req['delay_reason'].toString().trim().isNotEmpty) return true;
@@ -118,6 +134,28 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     return false;
   }
 
+  static DateTime _getPaymentDueDate(Map<String, dynamic> req) {
+    DateTime baseDate = DateTime.now();
+    final payment = req['payment'] as Map<String, dynamic>?;
+    final sentStr = payment?['receipt_sent_at'] ?? payment?['updated_at'] ?? payment?['created_at'];
+    if (sentStr != null) {
+      final parsed = DateTime.tryParse(sentStr.toString());
+      if (parsed != null) baseDate = parsed.toLocal();
+    }
+    DateTime dueDate = DateTime(baseDate.year, baseDate.month, baseDate.day, 17, 0, 0);
+    if (baseDate.isAfter(dueDate)) {
+      dueDate = dueDate.add(const Duration(days: 1));
+    }
+    return dueDate;
+  }
+
+  static bool _isPaymentOverdue(Map<String, dynamic> req) {
+    final status = req['payment']?['status'] ?? req['status'];
+    if (status == 'paid' || status == 'released') return false;
+    final dueDate = _getPaymentDueDate(req);
+    return DateTime.now().isAfter(dueDate);
+  }
+
   static Map<String, dynamic> _calcFees(Map<String, dynamic> req) {
     final animalType = (req['livestock_type'] ?? 'hog').toString();
     final rates = AppSettingsService.instance.getFeeRatesForAnimal(animalType);
@@ -125,6 +163,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final postMortemFee = weight * rates.postMortemRatePerKg;
     final isDelayed = hasTechnicalDelay(req);
     final penaltyFee = isDelayed ? 500.0 : 0.0;
+    final dueDate = _getPaymentDueDate(req);
+    final isOverdue = _isPaymentOverdue(req);
+    final payment = req['payment'] as Map<String, dynamic>?;
+    final storedOverdue = payment?['overdue_penalty'] != null
+        ? double.tryParse(payment!['overdue_penalty'].toString()) ?? 0.0
+        : null;
+    final overduePenalty = storedOverdue ?? (isOverdue ? 100.0 : 0.0);
     final subtotal = rates.vetHealthCertFee +
         rates.permitToSlaughterFee +
         rates.facilityFee +
@@ -132,7 +177,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         rates.anteMortemFee +
         rates.additionalFee +
         postMortemFee +
-        penaltyFee;
+        penaltyFee +
+        overduePenalty;
     final isBarangay = req['request_type'] == 'barangay';
     final deliveryFee = isBarangay ? 0.0 : rates.deliveryVanFee;
     return {
@@ -145,6 +191,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       'additional_fee': rates.additionalFee,
       'additional_fee_label': rates.additionalFeeLabel,
       'penalty_fee': penaltyFee,
+      'overdue_penalty': overduePenalty,
+      'is_overdue': isOverdue,
+      'due_date': dueDate,
       'is_delayed': isDelayed,
       'subtotal': subtotal,
       'delivery_van': deliveryFee,
@@ -171,6 +220,14 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final payment = req['payment'] as Map<String, dynamic>?;
     if (payment != null && payment['status'] == 'paid') return 'Verified';
     if (req['status'] == 'paid') return 'Verified';
+    if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
+      final m = payment['payment_method'].toString().toLowerCase();
+      if (m.contains('cash')) {
+        return 'Cash on Pick-up';
+      }
+      return 'Awaiting Verification';
+    }
+    if (req['status'] == 'payment_pending') return 'Awaiting Payment';
     return 'Pending';
   }
 
@@ -192,6 +249,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       final fees = _calcFees(req);
       final receiptNo = _receiptNo(req);
       final refNo = _refNo(req);
+      final now = DateTime.now();
 
       // Upsert payment record
       final existing = await supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
@@ -210,6 +268,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         'ante_mortem_fee': fees['ante_mortem'],
         'post_mortem_fee': fees['post_mortem'],
         'delivery_van_fee': fees['delivery_van'],
+        'created_at': now.toIso8601String(),
       };
 
       if (existing != null) {
@@ -226,7 +285,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         supabase,
         userId: userId,
         title: 'Slaughter Request Receipt Issued',
-        message: 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
+        message: 'Your slaughter operation request has been successfully processed. Payment must be made immediately on or before 5:00 PM today. If the due date passes without payment, an automatic overdue penalty of \u20b1100.00 will be applied.',
         type: 'receipt_issued',
         data: {
           'receipt_no': receiptNo,
@@ -253,6 +312,84 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════
+  //  VERIFY AND CONFIRM PAYMENT (Online/Manual)
+  // ════════════════════════════════════════════
+  Future<void> _verifyAndConfirmPayment(Map<String, dynamic> req) async {
+    try {
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final fees = _calcFees(req);
+      final receiptNo = _receiptNo(req);
+      final refNo = _refNo(req);
+      final method = _paymentMethod(req);
+      final resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'GCash';
+
+      final paymentData = {
+        'request_id': reqId,
+        'user_id': userId,
+        'receipt_number': receiptNo,
+        'payment_method': resolvedMethod,
+        'total_amount': fees['total'],
+        'balance': 0,
+        'status': 'paid',
+        'cashier_name': 'Admin',
+        'vet_health_cert_fee': fees['vet_health_cert'],
+        'permit_fee': fees['permit_to_slaughter'],
+        'facility_fee': fees['facility'],
+        'corral_fee': fees['corral'],
+        'ante_mortem_fee': fees['ante_mortem'],
+        'post_mortem_fee': fees['post_mortem'],
+        'delivery_van_fee': fees['delivery_van'],
+      };
+
+      final existing = await supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
+      if (existing != null) {
+        await supabase.from('payments').update(paymentData).eq('request_id', reqId);
+      } else {
+        await supabase.from('payments').insert(paymentData);
+      }
+
+      await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+
+      // Send notification to customer safely
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: 'Payment Confirmed',
+        message: 'Your payment of \u20b1${(fees['total'] as num).toStringAsFixed(2)} via $resolvedMethod for request $refNo has been confirmed. Carcass is ready for release scheduling.',
+        type: 'payment_verified',
+        data: {
+          'receipt_no': receiptNo,
+          'reference_no': refNo,
+          'amount': fees['total'],
+          'request_id': reqId,
+        },
+      );
+
+      _loadRequests();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text('Payment for $refNo verified and confirmed!'),
+            ]),
+            backgroundColor: Colors.green.shade600,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error verifying payment: $e'), backgroundColor: Colors.redAccent),
         );
       }
     }
@@ -577,6 +714,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                               ),
                             ),
+                            if (status == 'Awaiting Verification') ...[
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                onPressed: () => _verifyAndConfirmPayment(req),
+                                icon: const Icon(Icons.check_circle, size: 13, color: Colors.white),
+                                label: const Text('Verify', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2D6A4F),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  minimumSize: const Size(0, 32),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  elevation: 0,
+                                ),
+                              ),
+                            ],
                           ],
                         )),
                       ]);
@@ -599,11 +751,25 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   }
 
   Widget _buildStatusBadge(String status) {
-    final isVerified = status == 'Verified';
+    Color bg = const Color(0xFFFFF8E5);
+    Color text = const Color(0xFFB8860B);
+    if (status == 'Verified' || status == 'Paid') {
+      bg = const Color(0xFFE6F9F0);
+      text = const Color(0xFF1A8C62);
+    } else if (status == 'Awaiting Verification') {
+      bg = const Color(0xFFEBF8FF);
+      text = const Color(0xFF2B6CB0);
+    } else if (status == 'Cash on Pick-up') {
+      bg = const Color(0xFFFEF3C7);
+      text = const Color(0xFFB45309);
+    } else if (status == 'Awaiting Payment') {
+      bg = const Color(0xFFFFFBEB);
+      text = const Color(0xFFC05621);
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: isVerified ? const Color(0xFFE6F9F0) : const Color(0xFFFFF8E5),
+        color: bg,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
@@ -611,7 +777,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: isVerified ? const Color(0xFF1A8C62) : const Color(0xFFB8860B),
+          color: text,
         ),
       ),
     );
@@ -659,6 +825,49 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 const SizedBox(height: 2),
                 Text('Date: ${DateFormat('M/dd/yyyy').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
                 Text('Time: ${DateFormat('h:mm:ss a').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
+                if (status != 'Verified' && status != 'Awaiting Verification') ...[
+                  Text(
+                    'Due Date: ${DateFormat('M/dd/yyyy').format(fees['due_date'] as DateTime? ?? DateTime.now())} • 5:00 PM',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: (fees['is_overdue'] == true) ? const Color(0xFFC53030) : const Color(0xFF2D3748),
+                    ),
+                  ),
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 4),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: (fees['is_overdue'] == true) ? const Color(0xFFFFF5F5) : const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: (fees['is_overdue'] == true) ? const Color(0xFFFEB2B2) : const Color(0xFFFBD38D),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          (fees['is_overdue'] == true) ? Icons.error_outline : Icons.warning_amber_rounded,
+                          color: (fees['is_overdue'] == true) ? const Color(0xFFC53030) : const Color(0xFFC05621),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            (fees['is_overdue'] == true)
+                                ? 'PAYMENT OVERDUE: Due date expired. An automatic penalty of \u20b1100.00 has been added to the balance.'
+                                : 'NOTICE: Payment must be made immediately on or before 5:00 PM today. If the due date passes without payment, an automatic overdue penalty of \u20b1100.00 will be applied.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: (fees['is_overdue'] == true) ? const Color(0xFF9B2C2C) : const Color(0xFF975A16),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
 
                 // Customer Info
@@ -712,6 +921,28 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                   const Text('Status: PAID', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   Text('Cashier: ${payment?['cashier_name'] ?? 'Admin'}', style: const TextStyle(fontSize: 13)),
+                ] else if (method != '—' && method.isNotEmpty) ...[
+                  Container(
+                    margin: const EdgeInsets.only(top: 8, bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEBF8FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF90CDF4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.phone_android, color: Color(0xFF2B6CB0), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Customer submitted payment via $method. Click "Verify & Confirm $method Payment" below to complete and confirm.',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF2B6CB0), fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 16),
 
@@ -738,7 +969,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                       ),
-                    if (req['status'] == 'payment_pending' && status != 'Verified')
+                    if (status != 'Verified' && method != '—' && method.isNotEmpty)
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _verifyAndConfirmPayment(req);
+                        },
+                        icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                        label: Text('Verify & Confirm $method Payment', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2D6A4F),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      )
+                    else if (req['status'] == 'payment_pending' && status != 'Verified')
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
@@ -796,11 +1041,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   //  NEW PAYMENT ENTRY DIALOG (Walk-in)
   // ════════════════════════════════════════════
   void _showNewPaymentDialog() {
+    final allReqs = [..._barangayRequests, ..._marketRequests];
+    // Gather orders awaiting or pending payment
+    final pendingReqs = allReqs.where((r) {
+      final s = _paymentStatus(r);
+      return s != 'Verified' && r['status'] != 'paid' && r['status'] != 'released';
+    }).toList();
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => _NewPaymentEntryDialog(
         supabase: supabase,
+        pendingRequests: pendingReqs,
         onDone: _loadRequests,
       ),
     );
@@ -812,8 +1065,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
 // ═══════════════════════════════════════════════════════════
 class _NewPaymentEntryDialog extends StatefulWidget {
   final SupabaseClient supabase;
+  final List<Map<String, dynamic>> pendingRequests;
   final VoidCallback onDone;
-  const _NewPaymentEntryDialog({required this.supabase, required this.onDone});
+  const _NewPaymentEntryDialog({
+    required this.supabase,
+    required this.pendingRequests,
+    required this.onDone,
+  });
   @override
   State<_NewPaymentEntryDialog> createState() => _NewPaymentEntryDialogState();
 }
@@ -828,55 +1086,107 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   bool _isProcessing = false;
   Map<String, dynamic>? _foundRequest;
   Map<String, dynamic> _fees = {};
+  late final String _yearPrefix;
 
-  Future<void> _lookupReference() async {
-    final refText = _refCtrl.text.trim();
-    if (refText.isEmpty) return;
+  @override
+  void initState() {
+    super.initState();
+    _yearPrefix = 'MI-${DateTime.now().year}-';
+  }
+
+  Future<void> _lookupReference([String? manualInput]) async {
+    String input = (manualInput ?? _refCtrl.text).trim();
+    if (input.isEmpty) return;
+
+    // Normalize: remove prefix if typed or pasted
+    input = input.replaceAll('MI-', '').replaceAll('mi-', '');
+    final year = DateTime.now().year.toString();
+    if (input.startsWith('$year-')) {
+      input = input.replaceFirst('$year-', '');
+    } else if (input.startsWith('2025-') || input.startsWith('2026-')) {
+      input = input.substring(5);
+    }
+    input = input.replaceAll(RegExp(r'[^0-9]'), '');
+
+    final requestId = int.tryParse(input);
+    if (requestId == null) {
+      if (mounted && manualInput == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a valid reference number (e.g. 114)'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Keep controller showing just the digits
+    if (_refCtrl.text != input) {
+      _refCtrl.text = input;
+      _refCtrl.selection = TextSelection.fromPosition(TextPosition(offset: input.length));
+    }
 
     setState(() => _isLoading = true);
     try {
-      // Parse MI-YYYY-XXX -> get the ID part
-      final parts = refText.split('-');
-      int? requestId;
-      if (parts.length == 3) {
-        requestId = int.tryParse(parts[2]);
-      }
-
-      if (requestId == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Invalid reference number format (MI-YYYY-XXX)'), backgroundColor: Colors.orange),
-          );
-        }
-        setState(() => _isLoading = false);
-        return;
-      }
-
       final data = await widget.supabase
           .from('requests')
-          .select('*, slaughter_inspection(*)')
+          .select('*, slaughter_inspection(*), payments(*)')
           .eq('id', requestId)
           .maybeSingle();
 
       if (data == null) {
-        if (mounted) {
+        if (mounted && manualInput == null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No request found with that reference'), backgroundColor: Colors.orange),
+            SnackBar(
+              content: Text('No request found with reference $_yearPrefix${input.padLeft(3, '0')}'),
+              backgroundColor: Colors.orange,
+            ),
           );
         }
-        setState(() => _isLoading = false);
+        setState(() {
+          _foundRequest = null;
+          _customerName = '';
+          _totalAmount = 0;
+          _balanceAmount = 0;
+          _fees = {};
+          _isLoading = false;
+        });
         return;
       }
 
-      // Flatten inspection data
-      final inspList = data['slaughter_inspection'];
-      if (inspList is List && inspList.isNotEmpty) {
-        data['carcass_weight'] = (inspList.first as Map)['carcass_weight'];
+      // Flatten inspection data (can be Map or List)
+      final inspection = data['slaughter_inspection'];
+      if (inspection is Map) {
+        data['carcass_weight'] = inspection['carcass_weight'];
+        data['inspector_name'] = inspection['inspector_name'];
+      } else if (inspection is List && inspection.isNotEmpty) {
+        final first = inspection.first as Map;
+        data['carcass_weight'] = first['carcass_weight'];
+        data['inspector_name'] = first['inspector_name'];
       }
 
-      // Calculate fees dynamically based on configured animal rates
+      // Flatten payment data (can be Map or List)
+      final payment = data['payments'];
+      if (payment is Map) {
+        data['payment'] = payment;
+      } else if (payment is List && payment.isNotEmpty) {
+        data['payment'] = payment.first as Map<String, dynamic>;
+      }
+
+      // Calculate fees dynamically based on configured animal rates and carcass weight
       final fees = _PaymentCashieringPageState._calcFees(data);
-      final total = fees['total']!;
+      double total = fees['total']!;
+
+      // If already recorded in payments table, respect that stored total / balance
+      final storedPay = data['payment'] as Map<String, dynamic>?;
+      if (storedPay != null && storedPay['total_amount'] != null) {
+        final storedTotal = double.tryParse(storedPay['total_amount'].toString());
+        if (storedTotal != null && storedTotal > 0) {
+          total = storedTotal;
+          fees['total'] = total;
+        }
+      }
 
       setState(() {
         _foundRequest = data;
@@ -890,6 +1200,12 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       debugPrint('Lookup error: $e');
       setState(() => _isLoading = false);
     }
+  }
+
+  void _selectPending(Map<String, dynamic> req) {
+    final id = req['id'].toString().padLeft(3, '0');
+    _refCtrl.text = id;
+    _lookupReference(id);
   }
 
   Future<void> _processPayment() async {
@@ -997,6 +1313,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
               // Reference Number & Customer Name
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
@@ -1010,9 +1327,22 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _refCtrl,
-                          onSubmitted: (_) => _lookupReference(),
+                          keyboardType: TextInputType.number,
+                          onChanged: (val) {
+                            final trimmed = val.trim();
+                            if (trimmed.length >= 3) {
+                              _lookupReference(trimmed);
+                            }
+                          },
+                          onSubmitted: (val) => _lookupReference(val),
                           decoration: InputDecoration(
-                            hintText: 'MI-2025-001',
+                            prefixText: _yearPrefix,
+                            prefixStyle: const TextStyle(
+                              color: Color(0xFF2D6A4F),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                            hintText: '001',
                             hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
                             filled: true,
                             fillColor: const Color(0xFFF7FAFC),
@@ -1021,7 +1351,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
                             suffixIcon: _isLoading
                                 ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
-                                : IconButton(icon: const Icon(Icons.search, size: 20), onPressed: _lookupReference),
+                                : IconButton(icon: const Icon(Icons.search, size: 20), onPressed: () => _lookupReference()),
                           ),
                         ),
                       ],
@@ -1048,7 +1378,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                           ),
                           child: Text(
                             _customerName.isNotEmpty ? _customerName : '\u2014',
-                            style: TextStyle(fontSize: 14, color: _customerName.isNotEmpty ? Colors.black87 : Colors.grey),
+                            style: TextStyle(fontSize: 14, fontWeight: _customerName.isNotEmpty ? FontWeight.w600 : FontWeight.normal, color: _customerName.isNotEmpty ? Colors.black87 : Colors.grey),
                           ),
                         ),
                       ],
@@ -1056,7 +1386,66 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+
+              // Pending suggestions chips
+              if (widget.pendingRequests.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFA7F3D0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Pending Awaiting Payment (Click to select):',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF065F46),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: widget.pendingRequests.map((r) {
+                          final idStr = r['id'].toString().padLeft(3, '0');
+                          final name = r['customer_name'] ?? 'Customer';
+                          final isSelected = _refCtrl.text.trim() == idStr || _refCtrl.text.trim() == r['id'].toString();
+                          return InkWell(
+                            onTap: () => _selectPending(r),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSelected ? const Color(0xFF2D6A4F) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF2D6A4F) : const Color(0xFF6EE7B7),
+                                ),
+                              ),
+                              child: Text(
+                                '#$idStr • $name',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected ? Colors.white : const Color(0xFF047857),
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
 
               // Total Amount & Balance Amount
               Row(

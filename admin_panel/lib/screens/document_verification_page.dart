@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
@@ -271,16 +273,35 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
   }
 
   Widget _buildDocBadges(Map<String, dynamic> req, bool isBarangay) {
-    final docs = <String>[];
-    if (isBarangay && req['barangay_certificate'] != null) docs.add('Barangay Certificate');
-    if (!isBarangay && req['business_permit'] != null) docs.add('Business Permit');
-    if (req['proof_of_ownership'] != null) docs.add('Proof of Ownership');
-    if (req['vet_certificate'] != null) docs.add('Vet Health Certificate');
+    final docs = <MapEntry<String, bool>>[];
+    void addIfPresent(String? val, String label) {
+      if (val != null && val.toString().trim().isNotEmpty) {
+        final isHardCopy = val.toString().startsWith('hard_copy://');
+        docs.add(MapEntry(isHardCopy ? '$label (Hard Copy)' : label, isHardCopy));
+      }
+    }
+
+    if (isBarangay) addIfPresent(req['barangay_certificate']?.toString(), 'Barangay Certificate');
+    if (!isBarangay) addIfPresent(req['business_permit']?.toString(), 'Business Permit');
+    addIfPresent(req['proof_of_ownership']?.toString(), 'Proof of Ownership');
+    addIfPresent(req['vet_certificate']?.toString(), 'Vet Health Certificate');
+
     if (docs.isEmpty) return Text('—', style: TextStyle(color: Colors.grey.shade400));
-    return Wrap(direction: Axis.vertical, spacing: 3, children: docs.map((d) => Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.insert_drive_file_outlined, size: 12, color: Colors.grey.shade500),
+    return Wrap(direction: Axis.vertical, spacing: 3, children: docs.map((entry) => Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(
+        entry.value ? Icons.folder_special_outlined : Icons.insert_drive_file_outlined,
+        size: 12,
+        color: entry.value ? const Color(0xFF276749) : Colors.grey.shade500,
+      ),
       const SizedBox(width: 4),
-      Text(d, style: const TextStyle(fontSize: 11, color: Color(0xFF4A5568))),
+      Text(
+        entry.key,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: entry.value ? FontWeight.w600 : FontWeight.normal,
+          color: entry.value ? const Color(0xFF276749) : const Color(0xFF4A5568),
+        ),
+      ),
     ])).toList());
   }
 
@@ -307,10 +328,30 @@ class _VerifyDocumentsDialog extends StatefulWidget {
 class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
   final _notesCtrl = TextEditingController();
   final Map<String, bool> _verifiedMap = {};
+  final Map<String, String> _docUrls = {};
+  final Map<String, bool> _uploadingMap = {};
   bool _isSaving = false;
+  late final bool _isOnlineCustomer;
 
   @override
-  void initState() { super.initState(); _buildDocMap(); }
+  void initState() {
+    super.initState();
+    final bCert = widget.request['barangay_certificate']?.toString() ?? '';
+    final pOwn = widget.request['proof_of_ownership']?.toString() ?? '';
+    final bPermit = widget.request['business_permit']?.toString() ?? '';
+    final isBarangay = widget.request['request_type'] == 'barangay';
+
+    final hasPermit = isBarangay
+        ? (bCert.isNotEmpty && !bCert.startsWith('hard_copy://'))
+        : (bPermit.isNotEmpty && !bPermit.startsWith('hard_copy://'));
+    final hasOwnership = pOwn.isNotEmpty && !pOwn.startsWith('hard_copy://');
+
+    // Online submissions always have both required documents compiled digitally
+    // before reaching Document Verification
+    _isOnlineCustomer = hasPermit && hasOwnership;
+
+    _buildDocMap();
+  }
 
   @override
   void dispose() { _notesCtrl.dispose(); super.dispose(); }
@@ -318,25 +359,199 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
   void _buildDocMap() {
     final req = widget.request;
     final isBarangay = req['request_type'] == 'barangay';
-    if (isBarangay && req['barangay_certificate'] != null) _verifiedMap['Barangay Certificate'] = false;
-    if (!isBarangay && req['business_permit'] != null) _verifiedMap['Business Permit'] = false;
-    if (req['proof_of_ownership'] != null) _verifiedMap['Proof of Ownership'] = false;
-    if (req['vet_certificate'] != null) _verifiedMap['Veterinary Health Certificate'] = false;
+    final isOnline = _isOnlineCustomer;
+
+    if (isBarangay) {
+      final v = (req['barangay_certificate'] ?? '').toString();
+      if (!isOnline || v.isNotEmpty) {
+        _docUrls['Barangay Certificate'] = v;
+        _verifiedMap['Barangay Certificate'] = v.startsWith('hard_copy://');
+      }
+    } else {
+      final v = (req['business_permit'] ?? '').toString();
+      if (!isOnline || v.isNotEmpty) {
+        _docUrls['Business Permit'] = v;
+        _verifiedMap['Business Permit'] = v.startsWith('hard_copy://');
+      }
+    }
+    final own = (req['proof_of_ownership'] ?? '').toString();
+    if (!isOnline || own.isNotEmpty) {
+      _docUrls['Proof of Ownership'] = own;
+      _verifiedMap['Proof of Ownership'] = own.startsWith('hard_copy://');
+    }
+
+    final vet = (req['vet_certificate'] ?? '').toString();
+    if (!isOnline || vet.isNotEmpty) {
+      _docUrls['Veterinary Health Certificate'] = vet;
+      _verifiedMap['Veterinary Health Certificate'] = vet.startsWith('hard_copy://');
+    }
   }
 
-  String _docUrl(String docLabel) {
-    final req = widget.request;
+  String _docColumnName(String docLabel) {
     switch (docLabel) {
-      case 'Barangay Certificate': return req['barangay_certificate'] ?? '';
-      case 'Business Permit': return req['business_permit'] ?? '';
-      case 'Proof of Ownership': return req['proof_of_ownership'] ?? '';
-      case 'Veterinary Health Certificate': return req['vet_certificate'] ?? '';
+      case 'Barangay Certificate': return 'barangay_certificate';
+      case 'Business Permit': return 'business_permit';
+      case 'Proof of Ownership': return 'proof_of_ownership';
+      case 'Veterinary Health Certificate': return 'vet_certificate';
       default: return '';
+    }
+  }
+
+  String _docUrl(String docLabel) => _docUrls[docLabel] ?? '';
+
+  Future<void> _saveDocValue(String docLabel, String value, String successMessage) async {
+    final reqId = widget.request['id'];
+    final colName = _docColumnName(docLabel);
+    await widget.supabase
+        .from('requests')
+        .update({colName: value})
+        .eq('id', reqId);
+
+    widget.request[colName] = value;
+
+    if (mounted) {
+      setState(() {
+        _docUrls[docLabel] = value;
+        _verifiedMap[docLabel] = true;
+        _uploadingMap[docLabel] = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(successMessage),
+          backgroundColor: const Color(0xFF38A169),
+        ),
+      );
+    }
+  }
+
+  Future<void> _captureWalkInDoc(String docLabel) async {
+    try {
+      setState(() => _uploadingMap[docLabel] = true);
+      final reqId = widget.request['id'];
+      final colName = _docColumnName(docLabel);
+      final picked = await DocumentUploadHelper.captureFromCameraAndUpload(
+        context,
+        widget.supabase as SupabaseClient,
+        docLabel: docLabel,
+        prefix: 'req_${reqId}_$colName',
+      );
+      if (picked == null) {
+        if (mounted) setState(() => _uploadingMap[docLabel] = false);
+        return;
+      }
+
+      await _saveDocValue(
+        docLabel,
+        picked.url,
+        '$docLabel photo captured and attached to record!',
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploadingMap[docLabel] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to capture $docLabel: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _uploadWalkInDoc(String docLabel) async {
+    try {
+      setState(() => _uploadingMap[docLabel] = true);
+      final reqId = widget.request['id'];
+      final colName = _docColumnName(docLabel);
+      final picked = await DocumentUploadHelper.pickAndUpload(
+        widget.supabase as SupabaseClient,
+        prefix: 'req_${reqId}_$colName',
+      );
+      if (picked == null) {
+        if (mounted) setState(() => _uploadingMap[docLabel] = false);
+        return;
+      }
+
+      await _saveDocValue(
+        docLabel,
+        picked.url,
+        '$docLabel uploaded and attached to record!',
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploadingMap[docLabel] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to upload $docLabel: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _markHardCopyFiled(String docLabel) async {
+    try {
+      setState(() => _uploadingMap[docLabel] = true);
+      final stamp = DateFormat('MMM d, yyyy h:mm a').format(DateTime.now());
+      final value = 'hard_copy://Filed on $stamp';
+      await _saveDocValue(
+        docLabel,
+        value,
+        '$docLabel marked as Physical Hard Copy on File ($stamp)!',
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _uploadingMap[docLabel] = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to record hard copy for $docLabel: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _openDoc(String url) async {
     if (url.isEmpty) return;
+    if (url.startsWith('data:image/')) {
+      final commaIdx = url.indexOf(',');
+      if (commaIdx != -1 && mounted) {
+        final bytes = base64Decode(url.substring(commaIdx + 1));
+        await showDialog(
+          context: context,
+          builder: (ctx) => Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680, maxHeight: 720),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Document Preview', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: InteractiveViewer(
+                      child: Image.memory(bytes, fit: BoxFit.contain),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+    }
     final uri = Uri.tryParse(url);
     if (uri == null) return;
     try { if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication); } catch (e) { debugPrint('URL launch error: ${e.toString()}'); }
@@ -379,7 +594,9 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 580, padding: const EdgeInsets.all(28),
+        constraints: const BoxConstraints(maxWidth: 760),
+        width: MediaQuery.of(context).size.width * 0.92,
+        padding: const EdgeInsets.all(24),
         child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Verify Documents — ${isBarangay ? 'In Barangay' : 'In Market'}',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
@@ -454,6 +671,13 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
   }
 
   Widget _docCard(String docLabel, bool isVerified) {
+    final url = _docUrl(docLabel);
+    final hasDoc = url.isNotEmpty;
+    final isHardCopy = url.startsWith('hard_copy://');
+    final hardCopyDetail = isHardCopy ? url.replaceFirst('hard_copy://', '') : '';
+    final isUploading = _uploadingMap[docLabel] == true;
+    final isOnline = _isOnlineCustomer;
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(8),
@@ -461,30 +685,191 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
         color: isVerified ? const Color(0xFFF0FFF4) : Colors.white,
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), child: Row(children: [
-          Icon(isVerified ? Icons.check_circle : Icons.insert_drive_file_outlined, size: 16, color: isVerified ? const Color(0xFF38A169) : const Color(0xFF4A5568)),
-          const SizedBox(width: 8),
-          Text(docLabel, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isVerified ? const Color(0xFF276749) : const Color(0xFF2D3748))),
-          if (isVerified) ...[
-            const SizedBox(width: 8),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: const Color(0xFFC6F6D5), borderRadius: BorderRadius.circular(10)), child: const Text('Verified', style: TextStyle(fontSize: 10, color: Color(0xFF276749), fontWeight: FontWeight.w700))),
-          ],
-        ])),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: [
+              Icon(
+                isVerified
+                    ? Icons.check_circle
+                    : (isHardCopy
+                        ? Icons.folder_special_outlined
+                        : (hasDoc ? Icons.insert_drive_file_outlined : Icons.description_outlined)),
+                size: 16,
+                color: isVerified ? const Color(0xFF38A169) : const Color(0xFF4A5568),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  docLabel,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isVerified ? const Color(0xFF276749) : const Color(0xFF2D3748),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (!isOnline) ...[
+                if (!hasDoc)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(color: const Color(0xFFFFFAF0), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFBD38D))),
+                    child: const Text('Walk-In: Attach or Log Hard Copy', style: TextStyle(fontSize: 10, color: Color(0xFFDD6B20), fontWeight: FontWeight.w700)),
+                  ),
+                if (isHardCopy) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    constraints: const BoxConstraints(maxWidth: 240),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE6FFFA),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF81E6D9)),
+                    ),
+                    child: Text(
+                      hardCopyDetail.isNotEmpty ? 'Hard Copy ($hardCopyDetail)' : 'Hard Copy on File',
+                      style: const TextStyle(fontSize: 10, color: Color(0xFF234E52), fontWeight: FontWeight.w700),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
+              if (isVerified) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(color: const Color(0xFFC6F6D5), borderRadius: BorderRadius.circular(10)),
+                  child: const Text('Verified', style: TextStyle(fontSize: 10, color: Color(0xFF276749), fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ],
+          ),
+        ),
         Divider(height: 1, color: Colors.grey.shade100),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10), child: Row(children: [
-          OutlinedButton.icon(
-            onPressed: () => _openDoc(_docUrl(docLabel)),
-            icon: const Icon(Icons.image_outlined, size: 15),
-            label: const Text('View Document', style: TextStyle(fontSize: 12)),
-            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF4A5568), side: BorderSide(color: Colors.grey.shade300), padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SizedBox(
+                width: double.infinity,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    // LEFT SIDE: View Document or Walk-in intake tools
+                    if (isOnline) ...[
+                      if (hasDoc && !isHardCopy)
+                        OutlinedButton.icon(
+                          onPressed: () => _openDoc(url),
+                          icon: const Icon(Icons.image_outlined, size: 14),
+                          label: const Text('View Document', style: TextStyle(fontSize: 11.5)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF4A5568),
+                            side: BorderSide(color: Colors.grey.shade300),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                        )
+                      else
+                        const SizedBox.shrink(),
+                    ] else ...[
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (hasDoc && !isHardCopy)
+                              OutlinedButton.icon(
+                                onPressed: () => _openDoc(url),
+                                icon: const Icon(Icons.image_outlined, size: 14),
+                                label: const Text('View Document', style: TextStyle(fontSize: 11.5)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF4A5568),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                ),
+                              ),
+                            OutlinedButton.icon(
+                              onPressed: isUploading ? null : () => _captureWalkInDoc(docLabel),
+                              icon: const Icon(Icons.camera_alt_outlined, size: 14),
+                              label: const Text('Take Photo', style: TextStyle(fontSize: 11.5)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF2D6A4F),
+                                side: const BorderSide(color: Color(0xFF9AE6B4)),
+                                backgroundColor: const Color(0xFFF0FFF4),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: isUploading ? null : () => _uploadWalkInDoc(docLabel),
+                              icon: isUploading
+                                  ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                                  : Icon(hasDoc && !isHardCopy ? Icons.sync : Icons.upload_file, size: 14),
+                              label: Text(
+                                isUploading ? 'Saving...' : (hasDoc && !isHardCopy ? 'Replace File' : 'Upload File'),
+                                style: const TextStyle(fontSize: 11.5),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF2B6CB0),
+                                side: const BorderSide(color: Color(0xFF90CDF4)),
+                                backgroundColor: const Color(0xFFEBF8FF),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: isUploading ? null : () => _markHardCopyFiled(docLabel),
+                              icon: Icon(
+                                isHardCopy ? Icons.folder_special : Icons.folder_open_outlined,
+                                size: 14,
+                              ),
+                              label: Text(
+                                isHardCopy ? 'Hard Copy Filed ✓' : 'Hard Copy Filed',
+                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF744210),
+                                side: BorderSide(
+                                  color: isHardCopy ? const Color(0xFFD69E2E) : const Color(0xFFF6E05E),
+                                ),
+                                backgroundColor: isHardCopy ? const Color(0xFFFEFCBF) : const Color(0xFFFFFAF0),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    // RIGHT SIDE: Verify action
+                    OutlinedButton(
+                      onPressed: !hasDoc ? null : () => setState(() => _verifiedMap[docLabel] = !isVerified),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF276749),
+                        backgroundColor: isVerified ? const Color(0xFFC6F6D5) : Colors.white,
+                        side: const BorderSide(color: Color(0xFF9AE6B4)),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                      child: Text(
+                        isVerified ? '✓ Verified' : 'Mark as Verified',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-          const Spacer(),
-          OutlinedButton(
-            onPressed: () => setState(() => _verifiedMap[docLabel] = !isVerified),
-            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFF276749), backgroundColor: isVerified ? const Color(0xFFC6F6D5) : Colors.white, side: const BorderSide(color: Color(0xFF9AE6B4)), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
-            child: Text(isVerified ? '✓ Verified' : 'Mark as Verified', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-          ),
-        ])),
+        ),
       ]),
     );
   }

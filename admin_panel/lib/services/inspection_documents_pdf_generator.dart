@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 class InspectionDocumentsPdfGenerator {
   static pw.MemoryImage? _cachedLogo1;
   static pw.MemoryImage? _cachedLogo2;
+  static pw.MemoryImage? _cachedAppQr;
 
   static Future<void> _loadLogos() async {
     if (_cachedLogo1 == null) {
@@ -19,6 +20,12 @@ class InspectionDocumentsPdfGenerator {
       try {
         final b2 = await rootBundle.load('assets/images/logo2.png');
         _cachedLogo2 = pw.MemoryImage(b2.buffer.asUint8List());
+      } catch (_) {}
+    }
+    if (_cachedAppQr == null) {
+      try {
+        final bQr = await rootBundle.load('assets/images/app_qr_code.png');
+        _cachedAppQr = pw.MemoryImage(bQr.buffer.asUint8List());
       } catch (_) {}
     }
   }
@@ -388,7 +395,7 @@ class InspectionDocumentsPdfGenerator {
                   children: [
                     pw.Row(
                       children: [
-                        pw.Text('ANTI-MORTEM INSPECTION: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10.5)),
+                        pw.Text('ANTE-MORTEM INSPECTION: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10.5)),
                         pw.Text(antiMortem, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10.5, color: PdfColors.green800)),
                       ],
                     ),
@@ -525,5 +532,169 @@ class InspectionDocumentsPdfGenerator {
         ),
       ],
     );
+  }
+
+  /// Generates the Printable Walk-In Receiving & Claim Stub PDF document.
+  static Future<Uint8List> generateWalkInClaimStub({
+    required String refNo,
+    required String marking,
+    required String customerName,
+    required String contactNumber,
+    required String livestockType,
+    required String animalCount,
+    required String requestType,
+    required String destinationOrOrigin,
+    DateTime? date,
+  }) async {
+    await _loadLogos();
+    final pdf = pw.Document();
+    final now = date ?? DateTime.now();
+    final dateStr = DateFormat('MMMM d, yyyy • hh:mm a').format(now);
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.symmetric(horizontal: 40, vertical: 36),
+        build: (pw.Context context) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.all(24),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey800, width: 1.2),
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+            ),
+            child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (_cachedLogo1 != null)
+                      pw.Container(width: 50, height: 50, child: pw.Image(_cachedLogo1!))
+                    else
+                      pw.SizedBox(width: 50, height: 50),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text('Republic of the Philippines • Province of Albay', style: const pw.TextStyle(fontSize: 9)),
+                        pw.Text('TABACO CITY CLASS "AA" SLAUGHTERHOUSE', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                        pw.SizedBox(height: 2),
+                        pw.Text('WALK-IN RECEIVING & MOBILE CLAIM STUB', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
+                      ],
+                    ),
+                    if (_cachedLogo2 != null)
+                      pw.Container(width: 50, height: 50, child: pw.Image(_cachedLogo2!))
+                    else
+                      pw.SizedBox(width: 50, height: 50),
+                  ],
+                ),
+                pw.SizedBox(height: 16),
+                pw.Divider(color: PdfColors.grey400),
+                pw.SizedBox(height: 12),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.green50,
+                        border: pw.Border.all(color: PdfColors.green700),
+                        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('REFERENCE NUMBER (CLAIM CODE)', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
+                          pw.SizedBox(height: 2),
+                          pw.Text(refNo, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.grey100,
+                        border: pw.Border.all(color: PdfColors.grey600),
+                        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('LIVESTOCK MARKING TAG', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                          pw.SizedBox(height: 2),
+                          pw.Text(marking, style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 16),
+                _buildCertificateRow('Date & Time Received:', dateStr),
+                pw.SizedBox(height: 6),
+                _buildCertificateRow('Customer Name:', customerName),
+                pw.SizedBox(height: 6),
+                _buildCertificateRow('Contact Number:', contactNumber.isNotEmpty ? contactNumber : 'Not provided'),
+                pw.SizedBox(height: 6),
+                _buildCertificateRow('Request Classification:', requestType.toUpperCase()),
+                pw.SizedBox(height: 6),
+                _buildCertificateRow('Livestock & Quantity:', '$livestockType ($animalCount head/s)'),
+                pw.SizedBox(height: 6),
+                _buildCertificateRow('Origin / Market Stall:', destinationOrOrigin),
+                pw.SizedBox(height: 16),
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.all(12),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.amber50,
+                    border: pw.Border.all(color: PdfColors.amber700, width: 0.8),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                  ),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.center,
+                    children: [
+                      if (_cachedAppQr != null) ...[
+                        pw.Container(
+                          width: 72,
+                          height: 72,
+                          padding: const pw.EdgeInsets.all(4),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColors.white,
+                            border: pw.Border.all(color: PdfColors.grey400),
+                            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                          ),
+                          child: pw.Image(_cachedAppQr!),
+                        ),
+                        pw.SizedBox(width: 12),
+                      ],
+                      pw.Expanded(
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              'SCAN QR CODE TO INSTALL THE MOBILE APP & TRACK YOUR ORDER:',
+                              style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold),
+                            ),
+                            pw.SizedBox(height: 4),
+                            pw.Text(
+                              '1. Scan the QR code to install the TCAA Slaughterhouse Mobile App and Sign Up.\n'
+                              '2. Go to the "Notify" tab and tap "Claim Walk-In".\n'
+                              '3. Enter your Reference Number ($refNo) or Marking Tag ($marking) to link this transaction.\n'
+                              '4. Receive live alerts for night inspection results, condemnation slips, itemized billing for GCash payment, and morning meat release/delivery.',
+                              style: const pw.TextStyle(fontSize: 8.5, lineSpacing: 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+
+    return pdf.save();
   }
 }

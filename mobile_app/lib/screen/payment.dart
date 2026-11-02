@@ -226,6 +226,7 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
                     child: _ReceiptCard(
                       payment: payment,
                       formatDate: _formatDate,
+                      onPaymentSubmitted: () => _loadPayments(),
                     ),
                   );
                 }).toList(),
@@ -240,8 +241,13 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
 class _ReceiptCard extends StatelessWidget {
   final Map<String, dynamic> payment;
   final String Function(dynamic) formatDate;
+  final VoidCallback? onPaymentSubmitted;
 
-  const _ReceiptCard({required this.payment, required this.formatDate});
+  const _ReceiptCard({
+    required this.payment,
+    required this.formatDate,
+    this.onPaymentSubmitted,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +257,7 @@ class _ReceiptCard extends StatelessWidget {
     final status = payment['status']?.toString() ?? 'pending';
     final isPaid = status == 'paid';
     final method = payment['payment_method']?.toString() ?? '';
+    final isAwaitingVerification = !isPaid && method.trim().isNotEmpty;
 
     // Try to get request data from join (handle Map or List)
     Map<String, dynamic>? requestData;
@@ -293,15 +300,21 @@ class _ReceiptCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isPaid ? const Color(0xFFE4F8F0) : const Color(0xFFFAC775),
+                  color: isPaid
+                      ? const Color(0xFFE4F8F0)
+                      : (isAwaitingVerification ? const Color(0xFFFFF3CD) : const Color(0xFFFAC775)),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  isPaid ? 'Paid' : 'Pending Payment',
+                  isPaid
+                      ? 'Paid'
+                      : (isAwaitingVerification ? 'Awaiting Verification' : 'Pending Payment'),
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,
-                    color: isPaid ? const Color(0xFF0F6E56) : const Color(0xFF633806),
+                    color: isPaid
+                        ? const Color(0xFF0F6E56)
+                        : (isAwaitingVerification ? const Color(0xFF856404) : const Color(0xFF633806)),
                   ),
                 ),
               ),
@@ -341,13 +354,16 @@ class _ReceiptCard extends StatelessWidget {
           const SizedBox(height: 12),
           Center(
             child: OutlinedButton.icon(
-              onPressed: () {
-                Navigator.push(
+              onPressed: () async {
+                final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
                       builder: (_) =>
                           ReceiptDetailScreen(requestId: requestId)),
                 );
+                if (result == true) {
+                  onPaymentSubmitted?.call();
+                }
               },
               icon: const Icon(Icons.visibility_outlined, size: 15),
               label: Text(

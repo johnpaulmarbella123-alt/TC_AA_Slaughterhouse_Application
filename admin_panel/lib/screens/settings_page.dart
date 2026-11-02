@@ -275,6 +275,20 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isAdmin = _settingsService.isAdminOrSuperAdmin;
+
+    if (!isAdmin) {
+      return Scaffold(
+        backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(isDark),
+            Expanded(child: _buildMyProfileTab(isDark)),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
@@ -867,12 +881,10 @@ class _SettingsPageState extends State<SettingsPage>
   // ═══════════════════════════════════════════════════════════
   Widget _buildStaffRolesTab(bool isDark) {
     final rolesList = [
+      'Super Admin',
       'Admin',
-      'Receiving Clerk',
-      'Document Verifier',
+      'Clerk',
       'Inspector',
-      'Cashier',
-      'Releasing Officer',
     ];
 
     return SingleChildScrollView(
@@ -880,7 +892,7 @@ class _SettingsPageState extends State<SettingsPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Role Simulation / Quick Role Switcher Banner
+          // Role Simulation / Quick Role Switcher Banner (Admin/Super Admin preview)
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -900,7 +912,7 @@ class _SettingsPageState extends State<SettingsPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Active Session Role Switcher (Preview Mode)',
+                        'Active Session Role Switcher (Admin Preview Mode)',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
@@ -909,7 +921,7 @@ class _SettingsPageState extends State<SettingsPage>
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Switch the active account role to test module visibility in the sidebar. For example, Cashier sees only Dashboard & Payment, while Inspector sees only Dashboard & Slaughter.',
+                        'Preview how the Dashboard and Sidebar look for Clerk or Inspector. When a Clerk or Inspector logs in with their own credentials, they are locked exclusively to their assigned role.',
                         style: TextStyle(
                           fontSize: 12,
                           color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
@@ -920,7 +932,9 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
                 const SizedBox(width: 16),
                 DropdownButton<String>(
-                  value: _settingsService.currentRole,
+                  value: rolesList.contains(_settingsService.currentRole)
+                      ? _settingsService.currentRole
+                      : 'Admin',
                   dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
                   items: rolesList.map((r) {
                     return DropdownMenuItem(
@@ -942,7 +956,7 @@ class _SettingsPageState extends State<SettingsPage>
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text(
-                              'Active role switched to "$newRole". Sidebar modules updated accordingly!'),
+                              'Active role switched to "$newRole". Dashboard & sidebar modules updated!'),
                           backgroundColor: const Color(0xFF2D6A4F),
                         ),
                       );
@@ -971,7 +985,7 @@ class _SettingsPageState extends State<SettingsPage>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Manage employee user accounts and their operational module access.',
+                    'Provision Clerk and Inspector accounts, assign their roles, and set their exclusive login passwords.',
                     style: TextStyle(
                       fontSize: 12.5,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
@@ -1037,19 +1051,17 @@ class _SettingsPageState extends State<SettingsPage>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Specifies the operational modules visible in the left sidebar for each role:',
+                    'Specifies the dedicated dashboard and operational modules visible in the left sidebar for each role:',
                     style: TextStyle(
                       fontSize: 12,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                     ),
                   ),
                   const SizedBox(height: 14),
-                  _buildMatrixRow('Admin', 'All Modules + Settings & Configuration', isDark),
-                  _buildMatrixRow('Receiving Clerk', 'Dashboard, Receiving & New Requests, My Profile', isDark),
-                  _buildMatrixRow('Document Verifier', 'Dashboard, Document Verification, My Profile', isDark),
-                  _buildMatrixRow('Inspector', 'Dashboard, Slaughter & Inspection, My Profile', isDark),
-                  _buildMatrixRow('Cashier', 'Dashboard, Payment & Cashiering, My Profile', isDark),
-                  _buildMatrixRow('Releasing Officer', 'Dashboard, Meat Releasing, My Profile', isDark),
+                  _buildMatrixRow('Super Admin', 'Primary Bootstrap Account — Full System Control, Admin & Staff Account Provisioning', isDark),
+                  _buildMatrixRow('Admin', 'Executive Dashboard, Reports & Records, Settings & Full Supervisory Oversight', isDark),
+                  _buildMatrixRow('Clerk', 'Clerk Pending-Tasks Dashboard, Receiving & New Requests, Document Verification, Payment & Cashiering, Meat Releasing, My Profile', isDark),
+                  _buildMatrixRow('Inspector', 'Inspector Pending-Tasks Dashboard, Slaughter & Inspection (Ante/Post-Mortem & MIC), My Profile', isDark),
                 ],
               ),
             ),
@@ -1060,19 +1072,15 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Color _roleColor(String role) {
-    switch (role) {
+    switch (StaffAccount.normalizeRole(role)) {
+      case 'Super Admin':
+        return const Color(0xFFB91C1C);
       case 'Admin':
         return const Color(0xFF2D6A4F);
-      case 'Receiving Clerk':
+      case 'Clerk':
         return const Color(0xFF7C3AED);
-      case 'Document Verifier':
-        return const Color(0xFFD97706);
       case 'Inspector':
         return const Color(0xFF2563EB);
-      case 'Cashier':
-        return const Color(0xFF059669);
-      case 'Releasing Officer':
-        return const Color(0xFF0891B2);
       default:
         return Colors.grey.shade700;
     }
@@ -1117,7 +1125,9 @@ class _SettingsPageState extends State<SettingsPage>
   void _showAddStaffDialog(bool isDark) {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
-    String selectedRole = 'Inspector';
+    final passwordCtrl = TextEditingController();
+    bool obscurePass = true;
+    String selectedRole = 'Clerk';
 
     showDialog(
       context: context,
@@ -1126,30 +1136,54 @@ class _SettingsPageState extends State<SettingsPage>
           backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
           title: const Text('Add Staff Member'),
           content: SizedBox(
-            width: 400,
+            width: 420,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: nameCtrl,
-                  decoration: const InputDecoration(labelText: 'Full Name'),
+                  decoration: const InputDecoration(
+                    labelText: 'Full Name',
+                    prefixIcon: Icon(Icons.person_outline, size: 18),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: 'Email Address'),
+                  decoration: const InputDecoration(
+                    labelText: 'Email Address (Login Username)',
+                    prefixIcon: Icon(Icons.email_outlined, size: 18),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordCtrl,
+                  obscureText: obscurePass,
+                  decoration: InputDecoration(
+                    labelText: 'Login Password',
+                    helperText: 'Used by this staff member to log into their role portal',
+                    prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscurePass ? Icons.visibility_off : Icons.visibility,
+                        size: 18,
+                      ),
+                      onPressed: () => setDlgState(() => obscurePass = !obscurePass),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 14),
                 DropdownButtonFormField<String>(
                   initialValue: selectedRole,
-                  decoration: const InputDecoration(labelText: 'Assigned Role'),
+                  decoration: const InputDecoration(
+                    labelText: 'Assigned Role',
+                    prefixIcon: Icon(Icons.badge_outlined, size: 18),
+                  ),
                   items: [
+                    if (_settingsService.isSuperAdmin) 'Super Admin',
                     'Admin',
-                    'Receiving Clerk',
-                    'Document Verifier',
+                    'Clerk',
                     'Inspector',
-                    'Cashier',
-                    'Releasing Officer',
                   ].map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
                   onChanged: (v) {
                     if (v != null) setDlgState(() => selectedRole = v);
@@ -1167,27 +1201,40 @@ class _SettingsPageState extends State<SettingsPage>
               onPressed: () async {
                 final name = nameCtrl.text.trim();
                 final email = emailCtrl.text.trim();
-                if (name.isNotEmpty && email.isNotEmpty) {
-                  final newStaff = StaffAccount(
-                    id: 'staff-${DateTime.now().millisecondsSinceEpoch}',
-                    fullName: name,
-                    email: email,
-                    role: selectedRole,
-                    createdAt: DateTime.now(),
+                final password = passwordCtrl.text;
+                if (name.isEmpty || email.isEmpty || password.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter Full Name, Email Address, and Login Password.'),
+                      backgroundColor: Colors.redAccent,
+                    ),
                   );
-                  Navigator.pop(ctx);
-                  await _settingsService.addStaffAccount(newStaff);
-                  if (mounted) {
-                    setState(() {});
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Added $name as $selectedRole and saved to cloud database!'),
-                        backgroundColor: const Color(0xFF2D6A4F),
-                      ),
-                    );
-                  }
+                  return;
+                }
+                final newStaff = StaffAccount(
+                  id: 'staff-${DateTime.now().millisecondsSinceEpoch}',
+                  fullName: name,
+                  email: email,
+                  role: selectedRole,
+                  createdAt: DateTime.now(),
+                  password: password,
+                );
+                Navigator.pop(ctx);
+                await _settingsService.addStaffAccount(newStaff);
+                if (mounted) {
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Added $name ($selectedRole) with exclusive login credentials!'),
+                      backgroundColor: const Color(0xFF2D6A4F),
+                    ),
+                  );
                 }
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D6A4F),
+                foregroundColor: Colors.white,
+              ),
               child: const Text('Add Staff'),
             ),
           ],
@@ -1196,7 +1243,83 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  void _showResetStaffPasswordDialog(StaffAccount staff, bool isDark) {
+    final passCtrl = TextEditingController(text: staff.password ?? '');
+    bool obscure = true;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Text('Set Login Password — ${staff.fullName}'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Role Portal: ${StaffAccount.normalizeRole(staff.role)}\nEmail: ${staff.email}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: passCtrl,
+                  obscureText: obscure,
+                  decoration: InputDecoration(
+                    labelText: 'New Login Password',
+                    prefixIcon: const Icon(Icons.key_outlined, size: 18),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscure ? Icons.visibility_off : Icons.visibility,
+                        size: 18,
+                      ),
+                      onPressed: () => setDlgState(() => obscure = !obscure),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newPass = passCtrl.text.trim();
+                if (newPass.isEmpty) return;
+                Navigator.pop(ctx);
+                await _settingsService.updateStaffPassword(staff.id, newPass);
+                if (mounted) {
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Updated login password for ${staff.fullName} (${staff.role}).'),
+                      backgroundColor: const Color(0xFF2D6A4F),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D6A4F),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Save Password'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildStaffRow(StaffAccount staff, bool isDark, List<String> rolesList) {
+    final normalizedStaffRole = StaffAccount.normalizeRole(staff.role);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Row(
@@ -1250,7 +1373,7 @@ class _SettingsPageState extends State<SettingsPage>
           Expanded(
             flex: 3,
             child: DropdownButton<String>(
-              value: staff.role,
+              value: rolesList.contains(normalizedStaffRole) ? normalizedStaffRole : 'Clerk',
               dropdownColor:
                   isDark ? const Color(0xFF1E293B) : Colors.white,
               underline: const SizedBox(),
@@ -1307,7 +1430,14 @@ class _SettingsPageState extends State<SettingsPage>
               ),
             ],
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          // Set / Reset Password Action
+          IconButton(
+            icon: const Icon(Icons.key_outlined,
+                color: Color(0xFF2D6A4F), size: 20),
+            tooltip: 'Set / Reset Login Password',
+            onPressed: () => _showResetStaffPasswordDialog(staff, isDark),
+          ),
           // Delete Action
           IconButton(
             icon: const Icon(Icons.delete_outline,
@@ -1862,7 +1992,7 @@ class _SettingsPageState extends State<SettingsPage>
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'Authenticated Admin: ${_settingsService.profileEmail}',
+                            'Authenticated User: ${_settingsService.profileEmail}',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,

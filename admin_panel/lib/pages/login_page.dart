@@ -17,6 +17,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _keepMeLoggedIn = false;
+  String _selectedRolePortal = 'Admin'; // 'Admin', 'Clerk', or 'Inspector'
   final _supabase = Supabase.instance.client;
 
   @override
@@ -26,42 +27,126 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  bool _doesRoleMatchPortal(String actualRole, String portal) {
+    final normalized = StaffAccount.normalizeRole(actualRole);
+    if (portal == 'Admin') {
+      return normalized == 'Admin' || normalized == 'Super Admin';
+    }
+    return normalized == portal;
+  }
+
   Future<void> _handleLogin() async {
     final email = _usernameController.text.trim();
     final password = _passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      _showError('Please enter username and password');
+      _showError('Please enter email/username and password');
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      final response = await _supabase.auth.signInWithPassword(
-        email: email, 
-        password: password,
+      // 1. Load latest staff accounts & roles from Supabase
+      await AppSettingsService.instance.reloadFromSupabase();
+
+      final staffList = AppSettingsService.instance.staffAccounts;
+      final matchedStaffIdx = staffList.indexWhere(
+        (s) => s.email.toLowerCase() == email.toLowerCase(),
       );
-      
-      final user = response.user;
-      if (user != null) {
-        // Check if the user has the admin role in their metadata
-        final role = user.userMetadata?['role'];
-        if (role != 'admin') {
-          await _supabase.auth.signOut();
-          _showError('Access denied. Admin privileges required.');
+      final StaffAccount? matchedStaff =
+          matchedStaffIdx != -1 ? staffList[matchedStaffIdx] : null;
+
+      if (matchedStaff != null && !matchedStaff.isActive) {
+        await _supabase.auth.signOut();
+        _showError('Access denied: Your staff account has been deactivated by the administrator.');
+        return;
+      }
+
+      // 2. If staff member has a configured account in Staff & Roles, verify and enforce role portal
+      if (matchedStaff != null) {
+        final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
+        if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
+          _showError(
+            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+          );
           return;
         }
 
-        // Save the "keep me logged in" preference
+        // Try direct Supabase Auth first; if not a separate Auth user, verify against StaffAccount password
+        bool authSuccess = false;
+        try {
+          final res = await _supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          if (res.user != null) authSuccess = true;
+        } catch (_) {}
+
+        if (!authSuccess) {
+          final configuredPass = matchedStaff.password?.trim() ?? '';
+          final bool passOk = configuredPass.isNotEmpty && password == configuredPass;
+
+          if (!passOk) {
+            _showError('Invalid email or password.');
+            return;
+          }
+
+          // Ensure background Supabase session is active for RLS queries
+          await AppSettingsService.instance.ensureAdminAuthSession();
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
+        await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
+
+        if (mounted) {
+          Navigator.pushReplacementNamed(context, '/dashboard');
+        }
+        return;
+      }
+
+      // 3. Standard Supabase Auth sign-in
+      final response = await _supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      final user = response.user;
+      if (user != null) {
+        final metaRole = user.userMetadata?['role']?.toString() ?? '';
+        if (metaRole != 'admin' &&
+            metaRole != 'superadmin' &&
+            metaRole != 'clerk' &&
+            metaRole != 'inspector' &&
+            matchedStaff == null) {
+          await _supabase.auth.signOut();
+          _showError('Access denied. Staff or Admin privileges required.');
+          return;
+        }
+
+        // Determine actual role (Staff & Roles assignment takes precedence)
+        final String actualRole = matchedStaff != null
+            ? StaffAccount.normalizeRole(matchedStaff.role)
+            : StaffAccount.normalizeRole(metaRole);
+
+        if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
+          await _supabase.auth.signOut();
+          _showError(
+            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+          );
+          return;
+        }
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 
-        // Fetch fresh staff, capacity schedule, and fees from cloud database
-        await AppSettingsService.instance.reloadFromSupabase();
-
-        // Sync authenticated user profile details (email, name, role)
-        AppSettingsService.instance.syncWithAuthUser(user);
+        if (matchedStaff != null) {
+          await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
+        } else {
+          await AppSettingsService.instance.setActiveStaffSession(null);
+          AppSettingsService.instance.syncWithAuthUser(user);
+        }
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
@@ -194,6 +279,12 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildLoginForm() {
+    final portals = [
+      {'role': 'Admin', 'icon': Icons.admin_panel_settings_outlined},
+      {'role': 'Clerk', 'icon': Icons.assignment_ind_outlined},
+      {'role': 'Inspector', 'icon': Icons.biotech_outlined},
+    ];
+
     return Center(
       child: SingleChildScrollView(
         child: Column(
@@ -201,19 +292,69 @@ class _LoginPageState extends State<LoginPage> {
           children: [
             const Text(
               'Welcome',
-              style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w300),
+              style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w300),
             ),
-            const SizedBox(height: 6),
-            const Text(
-              'Admin Login',
-              style: TextStyle(color: Colors.white70, fontSize: 16),
+            const SizedBox(height: 4),
+            Text(
+              '$_selectedRolePortal Login Portal',
+              style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+
+            // ── Exclusive Role Portal Selector ──
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+              ),
+              child: Row(
+                children: portals.map((p) {
+                  final role = p['role'] as String;
+                  final icon = p['icon'] as IconData;
+                  final isSelected = _selectedRolePortal == role;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _selectedRolePortal = role),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(vertical: 9),
+                        decoration: BoxDecoration(
+                          color: isSelected ? const Color(0xFF2D6A4F) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              icon,
+                              size: 15,
+                              color: isSelected ? Colors.white : Colors.white60,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              role,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : Colors.white70,
+                                fontSize: 12.5,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 18),
             _buildTextField(
               controller: _usernameController,
-              label: 'Username',
+              label: 'Email / Username',
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             _buildTextField(
               controller: _passwordController,
               label: 'Password',
@@ -223,7 +364,7 @@ class _LoginPageState extends State<LoginPage> {
                 setState(() => _obscurePassword = !_obscurePassword);
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -247,44 +388,51 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    const Text('Keep me logged in', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                    const Text('Keep me logged in', style: TextStyle(color: Colors.white70, fontSize: 13)),
                   ],
                 ),
                 TextButton(
                   onPressed: () {},
-                  child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                  child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 13)),
                 ),
               ],
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 20),
             SizedBox(
-              width: 200,
+              width: 220,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleLogin,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF2D6A4F),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 child: _isLoading
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Log in', style: TextStyle(fontSize: 16, color: Colors.white)),
+                    : Text('Log in as $_selectedRolePortal', style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
               ),
             ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Need an admin account? ', style: TextStyle(color: Colors.white70)),
-                GestureDetector(
-                  onTap: () => Navigator.pushReplacementNamed(context, '/signup'),
-                  child: const Text(
-                    'Set up your account here.',
-                    style: TextStyle(color: Colors.white, decoration: TextDecoration.underline),
+            const SizedBox(height: 16),
+            if (_selectedRolePortal == 'Admin')
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('Need an admin account? ', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
+                  GestureDetector(
+                    onTap: () => Navigator.pushReplacementNamed(context, '/signup'),
+                    child: const Text(
+                      'Set up your account here.',
+                      style: TextStyle(color: Colors.white, fontSize: 12.5, decoration: TextDecoration.underline),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              )
+            else
+              Text(
+                '$_selectedRolePortal accounts are provisioned by the Admin in Settings → Staff & Roles.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white60, fontSize: 11.5),
+              ),
           ],
         ),
       ),

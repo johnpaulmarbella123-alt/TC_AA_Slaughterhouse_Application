@@ -66,8 +66,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     // Precache the heavy hero image so it's ready when the Home tab renders
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       precacheImage(const AssetImage('assets/images/BG.jpeg'), context);
+
+      // Verify active session against Supabase; if no credentials or user deleted, redirect to Login
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) {
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (r) => false);
+        }
+        return;
+      }
+      try {
+        final userRes = await Supabase.instance.client.auth.getUser();
+        if (userRes.user == null) {
+          throw Exception('Account not found in Supabase');
+        }
+      } catch (_) {
+        try {
+          await Supabase.instance.client.auth.signOut();
+        } catch (_) {}
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (r) => false);
+        }
+      }
     });
   }
 

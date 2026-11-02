@@ -13,14 +13,47 @@ class NotificationService {
     Map<String, dynamic>? data,
     String? referenceNo,
   }) async {
-    if (userId == null || userId.toString().trim().isEmpty) {
+    dynamic resolvedUserId = userId;
+    if (resolvedUserId == null || resolvedUserId.toString().trim().isEmpty) {
+      // Check if a walk-in customer claimed this order via `system_settings` ('walk_in_claims')
+      try {
+        dynamic reqId = data?['request_id'];
+        if (reqId == null && referenceNo != null && referenceNo.isNotEmpty) {
+          final m = RegExp(r'(?:MI-\d{4}-|RCP-\d{4}-|^)(\d+)$')
+              .firstMatch(referenceNo.toUpperCase());
+          if (m != null) reqId = int.tryParse(m.group(1)!);
+        }
+        if (reqId != null) {
+          final claimsRow = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'walk_in_claims')
+              .maybeSingle();
+          if (claimsRow != null && claimsRow['value'] is Map) {
+            final claimsMap = Map<String, dynamic>.from(claimsRow['value']);
+            final claimedUid = claimsMap[reqId.toString()];
+            if (claimedUid != null && claimedUid.toString().trim().isNotEmpty) {
+              resolvedUserId = claimedUid.toString().trim();
+              try {
+                await supabase
+                    .from('requests')
+                    .update({'user_id': resolvedUserId})
+                    .eq('id', reqId);
+              } catch (_) {}
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (resolvedUserId == null || resolvedUserId.toString().trim().isEmpty) {
       debugPrint('Notification skipped: user_id is null or empty');
       return false;
     }
 
     try {
       final payload = <String, dynamic>{
-        'user_id': userId,
+        'user_id': resolvedUserId,
         'title': title,
         'message': message,
         'is_read': false,

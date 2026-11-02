@@ -30,16 +30,52 @@ class _AdminShellState extends State<AdminShell> {
     super.initState();
     _loadedPages.add(_selectedIndex);
 
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final session = Supabase.instance.client.auth.currentSession;
+      final hasStaffSession = AppSettingsService.instance.hasActiveStaffSession;
+
+      if (session == null && !hasStaffSession) {
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/login');
         }
-      });
-    } else {
-      AppSettingsService.instance.syncWithAuthUser(session.user);
-    }
+        return;
+      }
+
+      // Verify active staff session against Supabase
+      if (hasStaffSession) {
+        await AppSettingsService.instance.reloadFromSupabase();
+        final staffEmail = AppSettingsService.instance.activeStaffOverrideEmail;
+        final validStaff = staffEmail != null &&
+            AppSettingsService.instance.staffAccounts.any(
+              (s) => s.email.toLowerCase() == staffEmail.toLowerCase() && s.isActive,
+            );
+
+        if (!validStaff) {
+          // Staff account was deleted or deactivated in Supabase!
+          await AppSettingsService.instance.setActiveStaffSession(null);
+          await Supabase.instance.client.auth.signOut();
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/login');
+          }
+          return;
+        }
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      } else if (session != null) {
+        // Verify active Supabase Auth user
+        try {
+          final userRes = await Supabase.instance.client.auth.getUser();
+          if (userRes.user == null) {
+            throw Exception('Account not found in Supabase');
+          }
+          AppSettingsService.instance.syncWithAuthUser(session.user);
+        } catch (_) {
+          await Supabase.instance.client.auth.signOut();
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/login');
+          }
+        }
+      }
+    });
   }
 
   void _onNavigate(int index, [dynamic tabArg]) {
@@ -279,8 +315,16 @@ class _AdminSidebarState extends State<_AdminSidebar> {
                       index: 0,
                       icon: Icons.dashboard_outlined,
                       activeIcon: Icons.dashboard,
-                      label: 'Dashboard',
-                      subtitle: 'Overview & statistics',
+                      label: settingsService.currentRole == 'Clerk'
+                          ? 'Clerk Dashboard'
+                          : (settingsService.currentRole == 'Inspector'
+                              ? 'Inspector Dashboard'
+                              : 'Dashboard'),
+                      subtitle: settingsService.currentRole == 'Clerk'
+                          ? 'Pending receiving, verification & billing tasks'
+                          : (settingsService.currentRole == 'Inspector'
+                              ? 'Pending ante-mortem & post-mortem tasks'
+                              : 'Overview & statistics'),
                       isDark: isDark,
                     ),
                   if (settingsService.isModuleAllowed(1)) ...[
@@ -373,10 +417,16 @@ class _AdminSidebarState extends State<_AdminSidebar> {
             ),
             child: _buildNavItem(
               index: 7,
-              icon: Icons.settings_outlined,
-              activeIcon: Icons.settings,
-              label: 'Settings',
-              subtitle: 'Fees, Staff, Schedule, Profile',
+              icon: settingsService.isAdminOrSuperAdmin
+                  ? Icons.settings_outlined
+                  : Icons.person_outline,
+              activeIcon: settingsService.isAdminOrSuperAdmin
+                  ? Icons.settings
+                  : Icons.person,
+              label: settingsService.isAdminOrSuperAdmin ? 'Settings' : 'My Profile',
+              subtitle: settingsService.isAdminOrSuperAdmin
+                  ? 'Fees, Staff, Schedule, Profile'
+                  : 'Account profile & password',
               isDark: isDark,
             ),
           ),
@@ -659,6 +709,7 @@ class _AdminSidebarState extends State<_AdminSidebar> {
               onPressed: () async {
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setBool('keepMeLoggedIn', false);
+                await AppSettingsService.instance.setActiveStaffSession(null);
                 await Supabase.instance.client.auth.signOut();
                 if (context.mounted) {
                   Navigator.pushReplacementNamed(context, '/');

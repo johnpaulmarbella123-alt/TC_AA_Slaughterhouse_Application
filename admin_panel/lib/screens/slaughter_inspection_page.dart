@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
+import '../services/app_settings_service.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
   const SlaughterInspectionPage({super.key});
@@ -22,14 +23,21 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   String _filterStage = 'All';
   Timer? _pollingTimer;
   RealtimeChannel? _realtimeChannel;
+  final Set<String> _shownAnteMortemAlertIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
     _subscribeRealtime();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAnteMortemAlerts();
+    });
     _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (mounted) _loadRequests(silent: true);
+      if (mounted) {
+        _loadRequests(silent: true);
+        _checkAnteMortemAlerts();
+      }
     });
   }
 
@@ -75,10 +83,38 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*)')
-          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed', 'post_mortem_failed', 'condemned', 'mic_generated'])
+          .inFilter('status', ['doc_verified', 'slaughter_started', 'releasable', 'delay_error', 'completed', 'anti_mortem_failed', 'pickup_scheduled', 'taken_back', 'post_mortem_failed', 'condemned', 'mic_generated'])
           .order('created_at', ascending: false);
+
+      // Seamlessly sync response from system_settings ante_mortem_alerts
+      Map<String, dynamic> alerts = {};
+      try {
+        final alertRow = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'ante_mortem_alerts')
+            .maybeSingle();
+        if (alertRow != null && alertRow['value'] is Map) {
+          alerts = Map<String, dynamic>.from(alertRow['value']);
+        }
+      } catch (_) {}
       
       final activeRequests = List<Map<String, dynamic>>.from(data).map((r) {
+        final idStr = r['id'].toString();
+        if (alerts.containsKey(idStr) && alerts[idStr] is Map) {
+          final alertChoice = alerts[idStr]['choice']?.toString();
+          if (alertChoice != null && alertChoice.isNotEmpty) {
+            if (r['anti_mortem_response'] == null || r['anti_mortem_response'].toString().isEmpty) {
+              r['anti_mortem_response'] = alertChoice;
+              r['anti_mortem_response_at'] = alerts[idStr]['responded_at'];
+              supabase.from('requests').update({
+                'anti_mortem_response': alertChoice,
+                'anti_mortem_response_at': alerts[idStr]['responded_at'] ?? DateTime.now().toIso8601String(),
+              }).eq('id', r['id']).then((_) {}).catchError((_) {});
+            }
+          }
+        }
+
         final inspectionList = r['slaughter_inspection'];
         Map<String, dynamic>? inspection;
         if (inspectionList is List && inspectionList.isNotEmpty) {
@@ -267,7 +303,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             child: DropdownButton<String>(
               value: _filterStage,
               icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
-              items: ['All', 'Anti-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'MIC', 'Complete', 'Technical Error/Delay']
+              items: ['All', 'Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay']
                   .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
                   .toList(),
               onChanged: (val) {
@@ -398,12 +434,27 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                   final postMortem = req['post_mortem'] ?? 'PENDING';
                   final status = req['status'] ?? '';
                   final isDelayed = status == 'delay_error';
-                  final isAntiMortemFailed = status == 'anti_mortem_failed';
+                  final isAntiMortemFailed = status == 'anti_mortem_failed' || status == 'pickup_scheduled' || status == 'taken_back';
                   final isPostMortemFailed = status == 'post_mortem_failed';
                   final isCondemnedStatus = status == 'condemned';
                   final isCondemned = req['condemnation_reason'] != null || isCondemnedStatus;
                   final isCondemnationAcknowledged = req['condemnation_acknowledged'] == true || isCondemnedStatus;
                   final customerResponse = req['anti_mortem_response']?.toString();
+
+                  bool isScheduledForFutureDate() {
+                    final pref = req['preferred_date']?.toString();
+                    if (pref == null || pref.isEmpty) return false;
+                    try {
+                      final date = DateTime.parse(pref);
+                      final today = DateTime.now();
+                      final todayMidnight = DateTime(today.year, today.month, today.day);
+                      final reqMidnight = DateTime(date.year, date.month, date.day);
+                      return reqMidnight.isAfter(todayMidnight);
+                    } catch (_) {
+                      return false;
+                    }
+                  }
+                  final bool isFuture = isScheduledForFutureDate();
 
                   return DataRow(cells: [
                     DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
@@ -493,7 +544,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                     }()),
                     DataCell(_buildBadge(
                       stage,
-                      stage == 'Complete' ? Colors.green : (stage == 'Anti-Mortem' ? Colors.red : Colors.grey),
+                      stage == 'Complete' ? Colors.green : ((stage == 'Ante-Mortem' || stage == 'Anti-Mortem') ? Colors.red : Colors.grey),
                     )),
                     DataCell(Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -541,7 +592,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                               : isDelayed
                                   ? (customerResponse == null
                                       ? _buildBadge('Awaiting Fee Response', Colors.orange, light: true)
-                                      : customerResponse == 'accept_penalty' || customerResponse == 'confine'
+                                      : customerResponse == 'accept_penalty'
                                           ? GestureDetector(
                                               onTap: () => _openAntiMortemResponseDialog(req),
                                               child: Column(
@@ -590,32 +641,34 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                 ],
                               ),
                             )
-                          : isAntiMortemFailed || isPostMortemFailed
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
+                          : isAntiMortemFailed
+                              ? _buildAntiMortemStatusBadge(req, status, customerResponse)
+                              : isPostMortemFailed
+                                  ? Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.warning_amber_rounded, color: Colors.red.shade600, size: 16),
-                                        const SizedBox(width: 4),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(
-                                            color: Colors.red.shade50,
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(color: Colors.red.shade200),
-                                          ),
-                                          child: Text(
-                                            isAntiMortemFailed ? 'Anti-Mortem Failed' : 'Post-Mortem Failed',
-                                            style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
-                                          ),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.warning_amber_rounded, color: Colors.red.shade600, size: 16),
+                                            const SizedBox(width: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red.shade50,
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border.all(color: Colors.red.shade200),
+                                              ),
+                                              child: Text(
+                                                'Post-Mortem Failed',
+                                                style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
-                                    ),
-                                  ],
-                                )
+                                    )
                               : isDelayed
                                   ? Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
@@ -653,7 +706,20 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                         ),
                                       ],
                                     )
-                                  : _buildBadge(status == 'releasable' ? 'Releasable' : (status == 'mic_generated' ? 'MIC Generated' : (status == 'doc_verified' ? 'SLAUGHTER' : status.toUpperCase())), (status == 'releasable' || status == 'mic_generated') ? Colors.green : Colors.orange, light: true),
+                                  : isFuture && status == 'doc_verified'
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFEDE9FE),
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(color: const Color(0xFFDDD6FE)),
+                                          ),
+                                          child: const Text(
+                                            'AWAITING ARRIVAL',
+                                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF6D28D9)),
+                                          ),
+                                        )
+                                      : _buildBadge(status == 'releasable' ? 'Releasable' : (status == 'mic_generated' ? 'MIC Generated' : (status == 'doc_verified' ? 'SLAUGHTER' : status.toUpperCase())), (status == 'releasable' || status == 'mic_generated') ? Colors.green : Colors.orange, light: true),
                     ),
                     DataCell(
                       (isPostMortemFailed || isCondemnedStatus || postMortem.toString().toUpperCase() == 'FAILED' || isAntiMortemFailed)
@@ -702,15 +768,29 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          OutlinedButton(
-                            onPressed: () => _openUpdateDialog(req),
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              minimumSize: const Size(0, 32),
-                              side: BorderSide(color: Colors.grey.shade300),
-                            ),
-                            child: const Text('Update', style: TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
-                          ),
+                          isFuture && status == 'doc_verified'
+                              ? Tooltip(
+                                  message: 'Livestock scheduled for a future date. Ante-mortem inspection cannot be logged until animal arrives at the facility.',
+                                  child: OutlinedButton(
+                                    onPressed: null,
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      minimumSize: const Size(0, 32),
+                                      side: BorderSide(color: Colors.grey.shade300),
+                                      disabledForegroundColor: Colors.grey.shade400,
+                                    ),
+                                    child: const Text('Pending Arrival', style: TextStyle(fontSize: 11.5)),
+                                  ),
+                                )
+                              : OutlinedButton(
+                                  onPressed: () => _openUpdateDialog(req),
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    minimumSize: const Size(0, 32),
+                                    side: BorderSide(color: Colors.grey.shade300),
+                                  ),
+                                  child: const Text('Update', style: TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
+                                ),
                           if (isPostMortemFailed || isCondemnedStatus || isCondemned) ...[
                             const SizedBox(width: 6),
                             OutlinedButton(
@@ -733,7 +813,58 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                               child: Text('Slip', style: TextStyle(fontSize: 12, color: Colors.red.shade700)),
                             ),
                           ],
-                          if ((isAntiMortemFailed || isDelayed) && customerResponse != null) ...[
+                          if (isAntiMortemFailed) ...[
+                            const SizedBox(width: 6),
+                            if (customerResponse == 'confine')
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.check, size: 13),
+                                onPressed: () => _showClearConfinementDialog(req),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1E855A),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  minimumSize: const Size(0, 32),
+                                ),
+                                label: const Text('Cleared & Ready for Slaughter', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              )
+                            else if (customerResponse == 'take_back')
+                              if (status == 'pickup_scheduled')
+                                ElevatedButton.icon(
+                                  icon: const Icon(Icons.handshake_outlined, size: 13),
+                                  onPressed: () => _showConfirmTakenBackDialog(req),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFC0392B),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    minimumSize: const Size(0, 32),
+                                  ),
+                                  label: const Text('Confirm Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                )
+                              else if (status != 'taken_back')
+                                OutlinedButton.icon(
+                                  icon: const Icon(Icons.schedule, size: 13),
+                                  onPressed: () => _openAntiMortemResponseDialog(req),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFFC0392B),
+                                    side: const BorderSide(color: Color(0xFFC0392B)),
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    minimumSize: const Size(0, 32),
+                                  ),
+                                  label: const Text('Set Pickup Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                )
+                              else
+                                const SizedBox.shrink()
+                            else
+                              OutlinedButton(
+                                onPressed: () => _openAntiMortemResponseDialog(req),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  minimumSize: const Size(0, 32),
+                                  side: BorderSide(color: Colors.blue.shade300),
+                                ),
+                                child: const Text('Record Decision', style: TextStyle(fontSize: 11, color: Color(0xFF2563EB))),
+                              ),
+                          ] else if (isDelayed) ...[
                             const SizedBox(width: 6),
                             OutlinedButton(
                               onPressed: () => _openAntiMortemResponseDialog(req),
@@ -742,7 +873,10 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                 minimumSize: const Size(0, 32),
                                 side: BorderSide(color: Colors.blue.shade300),
                               ),
-                              child: Text('Respond', style: TextStyle(fontSize: 12, color: Colors.blue.shade600)),
+                              child: Text(
+                                customerResponse != null ? 'Respond' : 'Record Decision',
+                                style: TextStyle(fontSize: 12, color: Colors.blue.shade600),
+                              ),
                             ),
                           ],
                         ],
@@ -770,6 +904,541 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         onDone: _loadRequests,
       ),
     );
+  }
+
+  Future<void> _acknowledgeAnteMortemAlert(String reqId) async {
+    try {
+      final alertRow = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'ante_mortem_alerts')
+          .maybeSingle();
+      if (alertRow != null && alertRow['value'] is Map) {
+        final alerts = Map<String, dynamic>.from(alertRow['value']);
+        if (alerts.containsKey(reqId) && alerts[reqId] is Map) {
+          alerts[reqId]['acknowledged'] = true;
+          await supabase.from('system_settings').upsert({
+            'key': 'ante_mortem_alerts',
+            'value': alerts,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _checkAnteMortemAlerts() async {
+    try {
+      // 1. Check system_settings ante_mortem_alerts for instant notifications
+      try {
+        final alertRow = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'ante_mortem_alerts')
+            .maybeSingle();
+        if (alertRow != null && alertRow['value'] is Map) {
+          final alerts = Map<String, dynamic>.from(alertRow['value']);
+          for (final entry in alerts.entries) {
+            final idStr = entry.key;
+            final alert = entry.value as Map<String, dynamic>;
+            if (alert['acknowledged'] == true) continue;
+            if (_shownAnteMortemAlertIds.contains(idStr)) continue;
+
+            final req = [..._barangayRequests, ..._marketRequests].firstWhere(
+              (r) => r['id'].toString() == idStr,
+              orElse: () => <String, dynamic>{},
+            );
+            if (req.isNotEmpty) {
+              _shownAnteMortemAlertIds.add(idStr);
+              if (mounted) {
+                _showAnteMortemAlertModal(req, alert['choice']?.toString() ?? 'accept_penalty');
+              }
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 2. Direct requests table query fallback
+      final data = await supabase
+          .from('requests')
+          .select('id, customer_name, livestock_type, animal_count, status, anti_mortem_response, anti_mortem_response_at')
+          .inFilter('status', ['anti_mortem_failed', 'delay_error'])
+          .not('anti_mortem_response', 'is', null)
+          .order('anti_mortem_response_at', ascending: false)
+          .limit(5);
+
+      for (final req in data) {
+        final idStr = req['id'].toString();
+        final response = req['anti_mortem_response']?.toString();
+        if (response != null && response.isNotEmpty && !_shownAnteMortemAlertIds.contains(idStr)) {
+          _shownAnteMortemAlertIds.add(idStr);
+          if (mounted) {
+            _showAnteMortemAlertModal(req, response);
+          }
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showAnteMortemAlertModal(Map<String, dynamic> req, String choice) {
+    final ref = _refNo(req);
+    final customer = req['customer_name'] ?? 'Customer';
+    final livestock = req['livestock_type'] ?? 'Livestock';
+    final count = req['animal_count'] ?? 1;
+    final isPenaltyAccepted = choice == 'accept_penalty';
+    final isConfine = choice == 'confine';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isPenaltyAccepted
+                  ? Icons.receipt_long
+                  : (isConfine ? Icons.medical_services_outlined : Icons.assignment_return_outlined),
+              color: isPenaltyAccepted
+                  ? const Color(0xFF16A34A)
+                  : (isConfine ? const Color(0xFFD97706) : const Color(0xFFC0392B)),
+              size: 24,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                isPenaltyAccepted
+                    ? 'Technical Delay: Reschedule Accepted'
+                    : 'Ante-Mortem Decision Received',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isPenaltyAccepted
+                      ? const Color(0xFFECFDF5)
+                      : (isConfine ? const Color(0xFFFFFBEB) : const Color(0xFFFEF2F2)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isPenaltyAccepted
+                        ? const Color(0xFFA7F3D0)
+                        : (isConfine ? const Color(0xFFFCD34D) : const Color(0xFFFCA5A5)),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Order: $ref | $customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 4),
+                    Text('Livestock: $livestock ($count head)', style: const TextStyle(fontSize: 12)),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Text('Customer Response: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        Expanded(
+                          child: Text(
+                            isPenaltyAccepted
+                                ? 'ACCEPTED ₱500 PENALTY & RESCHEDULE'
+                                : (isConfine ? 'CONFINE IN SLAUGHTERHOUSE' : 'TAKE LIVESTOCK BACK'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isPenaltyAccepted
+                                  ? const Color(0xFF15803D)
+                                  : (isConfine ? const Color(0xFFB45309) : const Color(0xFFDC2626)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                isPenaltyAccepted
+                    ? 'The customer accepted the ₱500 legal finality fee to keep livestock in the facility for resumed slaughter. Please select the rescheduled date.'
+                    : (isConfine
+                        ? 'The customer agreed to confine the animal in the corral under observation. Once cleared by the veterinarian, you can resume slaughter.'
+                        : 'The customer chose to retrieve their livestock. Please set the pickup schedule so the customer knows when to collect the animal at the corral.'),
+                style: const TextStyle(fontSize: 13, color: Color(0xFF4A5568)),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _acknowledgeAnteMortemAlert(req['id'].toString());
+            },
+            child: const Text('Dismiss'),
+          ),
+          ElevatedButton.icon(
+            icon: Icon(
+              isPenaltyAccepted
+                  ? Icons.calendar_month
+                  : (isConfine ? Icons.check : Icons.schedule),
+              size: 16,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _acknowledgeAnteMortemAlert(req['id'].toString());
+              if (isPenaltyAccepted) {
+                _openAntiMortemResponseDialog(req);
+              } else if (isConfine) {
+                _showClearConfinementDialog(req);
+              } else {
+                _openAntiMortemResponseDialog(req);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isPenaltyAccepted
+                  ? const Color(0xFF2563EB)
+                  : (isConfine ? const Color(0xFF1E855A) : const Color(0xFFC0392B)),
+              foregroundColor: Colors.white,
+            ),
+            label: Text(
+              isPenaltyAccepted
+                  ? 'Set Rescheduled Date'
+                  : (isConfine ? 'Manage Confinement' : 'Set Pickup Schedule'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAntiMortemStatusBadge(Map<String, dynamic> req, String status, String? customerResponse) {
+    if (status == 'taken_back') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE6F9F0),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.3)),
+        ),
+        child: const Text('Taken Back (Released)', style: TextStyle(fontSize: 10, color: Color(0xFF2D6A4F), fontWeight: FontWeight.w600)),
+      );
+    }
+    if (status == 'pickup_scheduled') {
+      final pickupStr = req['pickup_time']?.toString();
+      DateTime? dt;
+      if (pickupStr != null) dt = DateTime.tryParse(pickupStr);
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEBF8FF),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFBEE3F8)),
+        ),
+        child: Text(
+          dt != null ? 'Pickup: ${DateFormat('MMM d, h:mm a').format(dt)}' : 'Pickup Scheduled',
+          style: const TextStyle(fontSize: 10, color: Color(0xFF2B6CB0), fontWeight: FontWeight.w600),
+        ),
+      );
+    }
+    if (customerResponse == 'confine') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFCD34D)),
+        ),
+        child: const Text('Confined (Under Observation)', style: TextStyle(fontSize: 10, color: Color(0xFFB45309), fontWeight: FontWeight.w600)),
+      );
+    }
+    if (customerResponse == 'take_back') {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFCA5A5)),
+        ),
+        child: const Text('Take Back Requested', style: TextStyle(fontSize: 10, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.red.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red.shade200),
+      ),
+      child: const Text('Ante-Mortem Failed', style: TextStyle(fontSize: 10, color: Color(0xFFC53030), fontWeight: FontWeight.w600)),
+    );
+  }
+
+  void _showClearConfinementDialog(Map<String, dynamic> req) {
+    final ref = _refNo(req);
+    final customer = req['customer_name'] ?? 'Customer';
+    final livestock = req['livestock_type'] ?? 'Livestock';
+    final count = req['animal_count'] ?? 1;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.check_circle_outline, color: Color(0xFF1E855A), size: 24),
+            SizedBox(width: 8),
+            Text('Clear Confinement for Slaughter', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Has this livestock been re-inspected and cleared by the veterinarian as fit for slaughter?',
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF86EFAC)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Order: $ref | $customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF166534))),
+                    const SizedBox(height: 4),
+                    Text('Livestock: $livestock ($count head)', style: const TextStyle(fontSize: 12, color: Color(0xFF166534))),
+                    const SizedBox(height: 4),
+                    const Text('Next Process Stage: Stunning (Active Slaughter Queue)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF166534))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.play_arrow, size: 16),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _clearConfinementAndResumeSlaughter(req);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E855A),
+              foregroundColor: Colors.white,
+            ),
+            label: const Text('Confirm Cleared & Resume Slaughter'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _clearConfinementAndResumeSlaughter(Map<String, dynamic> req) async {
+    try {
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final livestockType = req['livestock_type'] ?? 'Livestock';
+      final animalCount = req['animal_count'] ?? 1;
+      final refNo = _refNo(req);
+
+      // 1. Update requests status to slaughter_started & stage to Stunning
+      await supabase.from('requests').update({
+        'status': 'slaughter_started',
+        'process_stage': 'Stunning',
+      }).eq('id', reqId);
+
+      // 2. Update slaughter_inspection
+      final existingInsp = await supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
+          ? AppSettingsService.instance.configuredInspectors.first
+          : 'Dr. Maria Clara Reyes';
+      final inspData = {
+        'request_id': reqId,
+        'anti_mortem': 'Passed',
+        'process_stage': 'Stunning',
+        'inspector_name': defaultInspector,
+        'process_notes': 'Cleared after confinement and observation. Resumed active slaughter at Stunning stage.',
+      };
+      if (existingInsp != null) {
+        await supabase.from('slaughter_inspection').update(inspData).eq('request_id', reqId);
+      } else {
+        await supabase.from('slaughter_inspection').insert(inspData);
+      }
+
+      // 3. Notify customer
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: '$livestockType — Cleared & Ready for Slaughter',
+        message: 'Your $animalCount head(s) of $livestockType ($refNo) has been cleared by the veterinarian and is now ready for slaughter. Slaughter operations have resumed at the Stunning stage.',
+        type: 'slaughter_started',
+        data: {
+          'request_id': reqId,
+          'reference_no': refNo,
+          'livestock_type': livestockType,
+          'process_stage': 'Stunning',
+        },
+      );
+
+      _loadRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(children: [
+              Icon(Icons.check_circle, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Text('Livestock cleared! Moved to active slaughter queue (Stunning). Customer notified.'),
+            ]),
+            backgroundColor: Color(0xFF1E855A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error clearing confinement: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _showConfirmTakenBackDialog(Map<String, dynamic> req) {
+    final ref = _refNo(req);
+    final customer = req['customer_name'] ?? 'Customer';
+    final livestock = req['livestock_type'] ?? 'Livestock';
+    final count = req['animal_count'] ?? 1;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.handshake_outlined, color: Color(0xFFC0392B), size: 24),
+            SizedBox(width: 8),
+            Text('Confirm Animal Handover', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Confirm that the customer or authorized representative has physically taken back $count head(s) of $livestock at the slaughterhouse corral.',
+                  style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF5F5),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFEB2B2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Order: $ref | $customer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF991B1B))),
+                    const SizedBox(height: 4),
+                    Text('Livestock: $livestock ($count head)', style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.done_all, size: 16),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _confirmAnimalTakenBack(req);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFC0392B),
+              foregroundColor: Colors.white,
+            ),
+            label: const Text('Confirm Animal Handover Complete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmAnimalTakenBack(Map<String, dynamic> req) async {
+    try {
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final livestockType = req['livestock_type'] ?? 'Livestock';
+      final refNo = _refNo(req);
+      final formattedTime = DateFormat('h:mm a, MMMM d, yyyy').format(DateTime.now());
+
+      await supabase.from('requests').update({
+        'status': 'taken_back',
+        'released_at': DateTime.now().toIso8601String(),
+      }).eq('id', reqId);
+
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: '$livestockType — Handover Complete',
+        message: 'Your $livestockType ($refNo) was officially released and handed over to you at the slaughterhouse corral at $formattedTime. Thank you!',
+        type: 'taken_back',
+        data: {
+          'request_id': reqId,
+          'reference_no': refNo,
+          'livestock_type': livestockType,
+          'verified_at': formattedTime,
+        },
+      );
+
+      _loadRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(children: [
+              Icon(Icons.verified, color: Colors.white, size: 20),
+              SizedBox(width: 8),
+              Text('Livestock handover confirmed! Status set to Taken Back.'),
+            ]),
+            backgroundColor: Color(0xFFC0392B),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error confirming handover: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildBadge(String text, Color color, {bool outline = false, bool light = false}) {
@@ -804,6 +1473,8 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   final _carcassCtrl = TextEditingController();
   final _inspectorCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
+  late List<String> _inspectors;
+  String? _selectedInspector;
 
   bool _healthIssueDetected = false;
   final _condemnationCtrl = TextEditingController();
@@ -811,17 +1482,69 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   bool _technicalError = false;
   final _delayReasonCtrl = TextEditingController();
 
+  (double min, double max) _getAcceptableWeightRange(String? type, int count) {
+    final t = (type ?? '').toLowerCase();
+    final heads = count > 0 ? count : 1;
+    if (t.contains('cattle') || t.contains('cow') || t.contains('carabao')) {
+      return (100.0 * heads, 500.0 * heads);
+    } else if (t.contains('goat') || t.contains('sheep')) {
+      return (10.0 * heads, 40.0 * heads);
+    } else if (t.contains('poultry') || t.contains('chicken')) {
+      return (0.8 * heads, 5.0 * heads);
+    }
+    // Default to Hog / Swine / Pig
+    return (40.0 * heads, 160.0 * heads);
+  }
+
+  bool _isWeightInRange(double weight, String? type, int count) {
+    final range = _getAcceptableWeightRange(type, count);
+    return weight >= range.$1 && weight <= range.$2;
+  }
+
+  void _checkAutoDetermination() {
+    final count = int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
+    final type = widget.request['livestock_type']?.toString();
+    final weight = double.tryParse(_carcassCtrl.text.trim());
+
+    // 1. If Ante-Mortem passes, auto-determine next stage to 'Stunning' if in early stages
+    if (_antiMortem == 'Passed') {
+      if ((_processStage == 'Ante-Mortem' || _processStage == 'Anti-Mortem') || _processStage == 'Preparation') {
+        _processStage = 'Stunning';
+      }
+    }
+
+    // 2. Only auto-mark Complete if weight is entered & within acceptable range AND Post-Mortem passes
+    if (weight != null && _isWeightInRange(weight, type, count) && _postMortem == 'Passed') {
+      _processStage = 'Complete';
+    } else if (_processStage == 'Complete' && (weight == null || !_isWeightInRange(weight, type, count))) {
+      // Revert if weight is removed or not acceptable
+      _processStage = 'Weighing';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     final req = widget.request;
     _antiMortem = req['anti_mortem'] ?? 'Pending';
-    final validStages = ['Anti-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'MIC', 'Complete', 'Technical Error/Delay'];
+    final validStages = ['Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay'];
     final reqStage = req['process_stage'] ?? 'Preparation';
     _processStage = validStages.contains(reqStage) ? reqStage : 'Preparation';
     _postMortem = req['post_mortem'] ?? 'Pending';
     if (req['carcass_weight'] != null) _carcassCtrl.text = req['carcass_weight'].toString();
-    if (req['inspector_name'] != null) _inspectorCtrl.text = req['inspector_name'].toString();
+
+    // Built-in inspector name based on staff accounts & roles
+    _inspectors = AppSettingsService.instance.configuredInspectors;
+    final existingInspector = req['inspector_name']?.toString().trim();
+    if (existingInspector != null && existingInspector.isNotEmpty && _inspectors.contains(existingInspector)) {
+      _selectedInspector = existingInspector;
+    } else if (_inspectors.isNotEmpty) {
+      _selectedInspector = _inspectors.first;
+    } else {
+      _selectedInspector = existingInspector ?? 'Dr. Maria Clara Reyes';
+    }
+    _inspectorCtrl.text = _selectedInspector ?? '';
+
     if (req['process_notes'] != null) _notesCtrl.text = req['process_notes'].toString();
     if (req['condemnation_reason'] != null) {
       _healthIssueDetected = true;
@@ -837,9 +1560,30 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       }
     }
     _technicalError = _processStage == 'Technical Error/Delay';
+    _carcassCtrl.addListener(() {
+      if (mounted) {
+        setState(() {
+          _checkAutoDetermination();
+        });
+      }
+    });
   }
 
   Future<void> _updateProcess({bool notifyDelay = false}) async {
+    final weight = double.tryParse(_carcassCtrl.text.trim());
+
+    if (_processStage == 'Complete' && !notifyDelay) {
+      if (weight == null || weight <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Warning: Carcass weight is required before marking as Complete.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+    }
+
     setState(() => _isLoading = true);
     try {
       final reqId = widget.request['id'];
@@ -858,7 +1602,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       // If anti-mortem failed, set to anti_mortem_failed and notify with options
       if (_antiMortem == 'Failed') {
         newStatus = 'anti_mortem_failed';
-        _processStage = 'Anti-Mortem';
+        _processStage = 'Ante-Mortem';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
         final vetFindings = _notesCtrl.text.isNotEmpty ? _notesCtrl.text : 'Health issue detected during ante-mortem inspection';
         notifTitle = '$livestockType — Health Issue Detected';
@@ -1054,7 +1798,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               ),
               const SizedBox(height: 20),
               
-              const Text('Anti-Mortem Result', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
+              const Text('Ante-Mortem Result', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
               const SizedBox(height: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1064,7 +1808,14 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                     isExpanded: true,
                     value: _antiMortem,
                     items: ['Pending', 'Passed', 'Failed'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (v) => setState(() => _antiMortem = v!),
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _antiMortem = v;
+                          _checkAutoDetermination();
+                        });
+                      }
+                    },
                   ),
                 ),
               ),
@@ -1085,7 +1836,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                             child: DropdownButton<String>(
                               isExpanded: true,
                               value: _processStage,
-                              items: ['Anti-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'MIC', 'Complete', 'Technical Error/Delay'].map((e) => DropdownMenuItem(
+                              items: ['Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay'].map((e) => DropdownMenuItem(
                                 value: e, 
                                 child: Container(
                                   width: double.infinity,
@@ -1098,6 +1849,19 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                                 ),
                               )).toList(),
                               onChanged: (v) => setState(() {
+                                if (v == 'Complete') {
+                                  final weight = double.tryParse(_carcassCtrl.text.trim());
+                                  if (weight == null || weight <= 0) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Warning: Carcass weight is required before marking as Complete.'),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                    _processStage = 'Weighing';
+                                    return;
+                                  }
+                                }
                                 _processStage = v!;
                                 if (_processStage == 'Technical Error/Delay') {
                                   _technicalError = true;
@@ -1123,13 +1887,54 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _carcassCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
                             filled: true,
                             fillColor: Colors.grey.shade100,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                            hintText: 'e.g. 75.0',
                           ),
                         ),
+                        const SizedBox(height: 6),
+                        Builder(
+                          builder: (context) {
+                            final count = int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
+                            final type = widget.request['livestock_type']?.toString() ?? 'Livestock';
+                            final range = _getAcceptableWeightRange(type, count);
+                            final w = double.tryParse(_carcassCtrl.text.trim());
+                            if (w == null) {
+                              return Text(
+                                'Acceptable range: ${range.$1.toStringAsFixed(0)}–${range.$2.toStringAsFixed(0)} kg ($count head $type)',
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                              );
+                            }
+                            final inRange = _isWeightInRange(w, type, count);
+                            return Row(
+                              children: [
+                                Icon(
+                                  inRange ? Icons.check_circle_outline : Icons.info_outline,
+                                  size: 13,
+                                  color: inRange ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    inRange
+                                        ? 'Within acceptable range (${range.$1.toStringAsFixed(0)}–${range.$2.toStringAsFixed(0)} kg)'
+                                        : 'Outside typical range (${range.$1.toStringAsFixed(0)}–${range.$2.toStringAsFixed(0)} kg)',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      color: inRange ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+
                       ],
                     ),
                   ),
@@ -1152,7 +1957,14 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                               isExpanded: true,
                               value: _postMortem,
                               items: ['Pending', 'Passed', 'Failed'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                              onChanged: (v) => setState(() => _postMortem = v!),
+                              onChanged: (v) {
+                              if (v != null) {
+                                setState(() {
+                                  _postMortem = v;
+                                  _checkAutoDetermination();
+                                });
+                              }
+                            },
                             ),
                           ),
                         ),
@@ -1166,15 +1978,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                       children: [
                         const Text('Inspector Name', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
                         const SizedBox(height: 6),
-                        TextField(
-                          controller: _inspectorCtrl,
-                          decoration: InputDecoration(
-                            filled: true,
-                            fillColor: Colors.grey.shade100,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                          ),
-                        ),
+                        _buildInspectorField(),
                       ],
                     ),
                   ),
@@ -1341,6 +2145,101 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       ],
     );
   }
+
+  Widget _buildInspectorField() {
+    // If only one inspector is configured in the system, show automatically with no other options
+    if (_inspectors.length <= 1) {
+      final name = _selectedInspector ?? (_inspectors.isNotEmpty ? _inspectors.first : 'Dr. Maria Clara Reyes');
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_user_outlined, size: 18, color: Color(0xFF2D6A4F)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF2D3748),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE6F9F0),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'Inspector',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1A8C62),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // If multiple inspectors (e.g. 2, 3, or more) are configured, all are available for selection
+    final currentValue = _inspectors.contains(_selectedInspector)
+        ? _selectedInspector
+        : _inspectors.first;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: true,
+          value: currentValue,
+          icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF4A5568)),
+          items: _inspectors.map((inspectorName) {
+            return DropdownMenuItem<String>(
+              value: inspectorName,
+              child: Row(
+                children: [
+                  const Icon(Icons.person_outline, size: 16, color: Color(0xFF2D6A4F)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      inspectorName,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (val) {
+            if (val != null) {
+              setState(() {
+                _selectedInspector = val;
+                _inspectorCtrl.text = val;
+              });
+            }
+          },
+        ),
+      ),
+    );
+  }
 }
 
 class _MICDialog extends StatefulWidget {
@@ -1491,7 +2390,7 @@ class _MICDialogState extends State<_MICDialog> {
               const SizedBox(height: 4),
               Text('Slaughter Date: ${formatDate(slaughterDate)}', style: const TextStyle(fontSize: 14)),
               const SizedBox(height: 32),
-              Text('ANTI-MORTEM INSPECTION: $antiMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              Text('ANTE-MORTEM INSPECTION: $antiMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 4),
               Text('POST-MORTEM INSPECTION: $postMortem', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(height: 4),
@@ -1888,7 +2787,7 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ANTI-MORTEM RESPONSE DIALOG
+//  ANTE-MORTEM RESPONSE DIALOG
 //  Admin handles the customer's response (confine or take back)
 // ═══════════════════════════════════════════════════════════
 class _AntiMortemResponseDialog extends StatefulWidget {
@@ -1911,10 +2810,39 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   final _notesCtrl = TextEditingController();
+  late String _manualDecision;
 
-  String get _response => widget.request['anti_mortem_response']?.toString() ?? '';
+  bool get _isTechnicalDelay {
+    final status = widget.request['status']?.toString();
+    final stage = widget.request['process_stage']?.toString();
+    final insp = widget.request['slaughter_inspection'];
+    String? inspStage;
+    if (insp is Map) inspStage = insp['process_stage']?.toString();
+    return status == 'delay_error' ||
+        stage == 'Technical Error/Delay' ||
+        inspStage == 'Technical Error/Delay';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.request['anti_mortem_response']?.toString() ?? '';
+    if (existing.isNotEmpty) {
+      _manualDecision = existing;
+    } else {
+      _manualDecision = _isTechnicalDelay ? 'accept_penalty' : 'confine';
+    }
+  }
+
+  String get _response {
+    final existing = widget.request['anti_mortem_response']?.toString() ?? '';
+    return existing.isNotEmpty ? existing : _manualDecision;
+  }
+
+  bool get _hasCustomerAppResponse =>
+      (widget.request['anti_mortem_response']?.toString() ?? '').isNotEmpty;
   bool get _isPenaltyAccepted => _response == 'accept_penalty';
-  bool get _isConfine => _response == 'confine' || _isPenaltyAccepted;
+  bool get _isConfine => _response == 'confine';
   bool get _isTakeBack => _response == 'take_back';
 
   Future<void> _pickDate() async {
@@ -1951,12 +2879,18 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
 
       // 2. Update slaughter_inspection to Complete & Passed
       final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
+          ? AppSettingsService.instance.configuredInspectors.first
+          : 'Dr. Maria Clara Reyes';
+      final existingInsp = widget.request['inspector_name']?.toString().trim();
+      final resolvedInsp = (existingInsp != null && existingInsp.isNotEmpty) ? existingInsp : defaultInspector;
+
       final inspectionData = {
         'request_id': reqId,
         'anti_mortem': 'Passed',
         'process_stage': 'Complete',
         'post_mortem': 'Passed',
-        'inspector_name': 'Admin Inspector',
+        'inspector_name': resolvedInsp,
         'process_notes': _notesCtrl.text.isNotEmpty
             ? _notesCtrl.text
             : 'Technical delay resolved. Resumed slaughter completed successfully.',
@@ -2003,57 +2937,19 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
   }
 
   Future<void> _submit() async {
-    if (_selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a date'), backgroundColor: Colors.orange),
-      );
-      return;
-    }
+    final reqId = widget.request['id'];
+    final userId = widget.request['user_id'];
+    final livestockType = widget.request['livestock_type'] ?? 'Livestock';
 
-    setState(() => _isLoading = true);
-    try {
-      final reqId = widget.request['id'];
-      final userId = widget.request['user_id'];
-      final livestockType = widget.request['livestock_type'] ?? 'Livestock';
-      final dateStr = DateFormat('MMMM d, yyyy').format(_selectedDate!);
-
-      if (_isConfine) {
-        // Admin sets new slaughter date for confined or penalty-accepted livestock
-        await widget.supabase.from('requests').update({
-          'rescheduled_date': _selectedDate!.toIso8601String().split('T')[0],
-        }).eq('id', reqId);
-
-        await NotificationService.sendNotificationSafely(
-          widget.supabase,
-          userId: userId,
-          title: _isPenaltyAccepted
-              ? '$livestockType — Rescheduled Slaughter Confirmed'
-              : '$livestockType — Confinement Confirmed',
-          message: _isPenaltyAccepted
-              ? 'Your slaughter operation has been rescheduled for $dateStr following the technical delay. Legal finality fee of ₱500.00 will be added to your payment.'
-              : 'Your livestock has been confined at the slaughterhouse. New slaughter schedule: $dateStr.',
-          type: 'confine_confirmed',
-          data: {
-            'request_id': reqId,
-            'livestock_type': livestockType,
-            'new_date': _selectedDate!.toIso8601String(),
-            'admin_notes': _notesCtrl.text,
-            'penalty_fee': _isPenaltyAccepted ? 500.0 : null,
-          },
+    if (_isTakeBack) {
+      if (_selectedDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a pickup date'), backgroundColor: Colors.orange),
         );
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_isPenaltyAccepted
-                  ? 'Resumed slaughter date set to $dateStr. Customer notified.'
-                  : 'New slaughter date set to $dateStr. Customer notified.'),
-              backgroundColor: Colors.green.shade600,
-            ),
-          );
-        }
-      } else if (_isTakeBack) {
-        // Admin approves pickup time
+        return;
+      }
+      setState(() => _isLoading = true);
+      try {
         DateTime pickupDateTime = _selectedDate!;
         if (_selectedTime != null) {
           pickupDateTime = DateTime(
@@ -2061,22 +2957,23 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
             _selectedTime!.hour, _selectedTime!.minute,
           );
         }
-
-        final timeStr = _selectedTime != null
-            ? _selectedTime!.format(context)
-            : '8:00 AM';
+        final dateStr = DateFormat('MMMM d, yyyy').format(_selectedDate!);
+        final timeStr = _selectedTime != null ? _selectedTime!.format(context) : '8:00 AM';
 
         await widget.supabase.from('requests').update({
-          'status': 'taken_back',
+          'anti_mortem_response': 'take_back',
+          'anti_mortem_response_at': DateTime.now().toIso8601String(),
+          'status': 'pickup_scheduled',
           'pickup_approved': true,
           'pickup_time': pickupDateTime.toIso8601String(),
         }).eq('id', reqId);
 
+        final penaltyWaivedNote = _isTechnicalDelay ? ' Technical delay penalty fee has been waived.' : '';
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,
-          title: '$livestockType — Pickup Approved',
-          message: 'Your livestock pickup has been approved. Please pick up on $dateStr at $timeStr at Tabaco City Slaughterhouse.',
+          title: '$livestockType — Pickup Scheduled',
+          message: 'Your livestock pickup has been scheduled for $dateStr at $timeStr at the Tabaco City Slaughterhouse corral.$penaltyWaivedNote Please present your reference # and valid ID upon arrival.',
           type: 'pickup_approved',
           data: {
             'request_id': reqId,
@@ -2084,28 +2981,112 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
             'pickup_date': _selectedDate!.toIso8601String(),
             'pickup_time': timeStr,
             'admin_notes': _notesCtrl.text,
+            'penalty_fee': 0.0,
           },
         );
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Pickup approved for $dateStr at $timeStr. Customer notified.'), backgroundColor: Colors.green.shade600),
+            SnackBar(content: Text('Pickup scheduled for $dateStr at $timeStr. Customer notified.'), backgroundColor: Colors.green.shade600),
+          );
+          Navigator.pop(context);
+          widget.onDone();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
           );
         }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
       }
-
-      if (mounted) {
-        Navigator.pop(context);
-        widget.onDone();
-      }
-    } catch (e) {
-      if (mounted) {
+    } else if (_isPenaltyAccepted && _isTechnicalDelay) {
+      if (_selectedDate == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+          const SnackBar(content: Text('Please select a rescheduled slaughter date'), backgroundColor: Colors.orange),
         );
+        return;
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      setState(() => _isLoading = true);
+      try {
+        final dateStr = DateFormat('MMMM d, yyyy').format(_selectedDate!);
+        await widget.supabase.from('requests').update({
+          'anti_mortem_response': 'accept_penalty',
+          'anti_mortem_response_at': DateTime.now().toIso8601String(),
+          'rescheduled_date': _selectedDate!.toIso8601String().split('T')[0],
+        }).eq('id', reqId);
+
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: '$livestockType — Rescheduled Slaughter Confirmed',
+          message: 'Your slaughter operation has been rescheduled for $dateStr following the technical delay. Legal finality fee of ₱500.00 will be added to your payment.',
+          type: 'confine_confirmed',
+          data: {
+            'request_id': reqId,
+            'livestock_type': livestockType,
+            'new_date': _selectedDate!.toIso8601String(),
+            'admin_notes': _notesCtrl.text,
+            'penalty_fee': 500.0,
+          },
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Resumed slaughter date set to $dateStr. Customer notified.'), backgroundColor: Colors.green.shade600),
+          );
+          Navigator.pop(context);
+          widget.onDone();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } else if (_isConfine) {
+      setState(() => _isLoading = true);
+      try {
+        await widget.supabase.from('requests').update({
+          'anti_mortem_response': 'confine',
+          'anti_mortem_response_at': DateTime.now().toIso8601String(),
+          'status': 'confined',
+        }).eq('id', reqId);
+
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: '$livestockType — Confinement Under Observation',
+          message: 'Your livestock has been placed into quarantine/confinement at the slaughterhouse under veterinary observation (₱0 penalty). You will be notified once cleared.',
+          type: 'confine_confirmed',
+          data: {
+            'request_id': reqId,
+            'livestock_type': livestockType,
+            'admin_notes': _notesCtrl.text,
+            'penalty_fee': 0.0,
+          },
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: const Text('Livestock placed in confinement. Customer notified.'), backgroundColor: Colors.blue.shade700),
+          );
+          Navigator.pop(context);
+          widget.onDone();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -2115,6 +3096,24 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
     final cust = widget.request['customer_name']?.toString() ?? 'Unknown';
     final livestock = widget.request['livestock_type']?.toString() ?? '—';
     final respondedAt = widget.request['anti_mortem_response_at'];
+
+    final headerIcon = _isTechnicalDelay
+        ? (_isPenaltyAccepted ? Icons.calendar_month : Icons.undo)
+        : (_isConfine ? Icons.local_hospital : Icons.undo);
+    final headerColor = _isTechnicalDelay
+        ? (_isPenaltyAccepted ? Colors.green.shade600 : Colors.deepOrange.shade600)
+        : (_isConfine ? Colors.blue.shade600 : Colors.deepOrange.shade600);
+    final headerBg = _isTechnicalDelay
+        ? (_isPenaltyAccepted ? Colors.green.shade50 : Colors.deepOrange.shade50)
+        : (_isConfine ? Colors.blue.shade50 : Colors.deepOrange.shade50);
+
+    final titleText = _isTechnicalDelay
+        ? (_isPenaltyAccepted
+            ? 'Technical Delay: Reschedule Slaughter (₱500 Fee)'
+            : 'Technical Delay: Take Livestock Back')
+        : (_isConfine
+            ? 'Customer Chose: Confine'
+            : 'Customer Chose: Take Back');
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -2133,14 +3132,10 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: _isConfine ? Colors.blue.shade50 : Colors.deepOrange.shade50,
+                      color: headerBg,
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      _isConfine ? Icons.local_hospital : Icons.undo,
-                      color: _isConfine ? Colors.blue.shade600 : Colors.deepOrange.shade600,
-                      size: 22,
-                    ),
+                    child: Icon(headerIcon, color: headerColor, size: 22),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -2148,15 +3143,14 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _isPenaltyAccepted
-                              ? 'Customer Chose: Accept Penalty (₱500)'
-                              : _isConfine
-                                  ? 'Customer Chose: Confine'
-                                  : 'Customer Chose: Take Back',
+                          titleText,
                           style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 2),
-                        Text('Ref: $ref • $cust', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        Text(
+                          'Ref: $ref • $cust • ${_isTechnicalDelay ? "Technical Delay" : "Ante-Mortem Inspection"}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                        ),
                       ],
                     ),
                   ),
@@ -2168,23 +3162,83 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
               ),
               const SizedBox(height: 20),
 
+              // Manual Entry when customer has not responded via app
+              if (!_hasCustomerAppResponse) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.phone_in_talk, size: 16, color: Colors.amber.shade900),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Walk-In / Phone Decision Entry (Customer has not responded via App)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (_isTechnicalDelay)
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(
+                              value: 'accept_penalty',
+                              label: Text('Reschedule (₱500 Fee)', style: TextStyle(fontSize: 12)),
+                              icon: Icon(Icons.calendar_month, size: 14),
+                            ),
+                            ButtonSegment(
+                              value: 'take_back',
+                              label: Text('Take Back', style: TextStyle(fontSize: 12)),
+                              icon: Icon(Icons.undo, size: 14),
+                            ),
+                          ],
+                          selected: {_manualDecision == 'accept_penalty' || _manualDecision == 'take_back' ? _manualDecision : 'accept_penalty'},
+                          onSelectionChanged: (s) => setState(() => _manualDecision = s.first),
+                        )
+                      else
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(
+                              value: 'confine',
+                              label: Text('Confine', style: TextStyle(fontSize: 12)),
+                              icon: Icon(Icons.local_hospital, size: 14),
+                            ),
+                            ButtonSegment(
+                              value: 'take_back',
+                              label: Text('Take Back', style: TextStyle(fontSize: 12)),
+                              icon: Icon(Icons.undo, size: 14),
+                            ),
+                          ],
+                          selected: {_manualDecision == 'confine' || _manualDecision == 'take_back' ? _manualDecision : 'confine'},
+                          onSelectionChanged: (s) => setState(() => _manualDecision = s.first),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Customer response summary card
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: _isPenaltyAccepted
-                      ? Colors.green.shade50
-                      : _isConfine
-                          ? Colors.blue.shade50
-                          : Colors.deepOrange.shade50,
+                  color: _isTechnicalDelay
+                      ? (_isPenaltyAccepted ? Colors.green.shade50 : Colors.deepOrange.shade50)
+                      : (_isConfine ? Colors.blue.shade50 : Colors.deepOrange.shade50),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                    color: _isPenaltyAccepted
-                        ? Colors.green.shade200
-                        : _isConfine
-                            ? Colors.blue.shade200
-                            : Colors.deepOrange.shade200,
+                    color: _isTechnicalDelay
+                        ? (_isPenaltyAccepted ? Colors.green.shade200 : Colors.deepOrange.shade200)
+                        : (_isConfine ? Colors.blue.shade200 : Colors.deepOrange.shade200),
                   ),
                 ),
                 child: Column(
@@ -2193,33 +3247,31 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     Row(
                       children: [
                         Icon(
-                          _isPenaltyAccepted
-                              ? Icons.receipt_long
-                              : _isConfine
-                                  ? Icons.local_hospital
-                                  : Icons.undo,
+                          _isTechnicalDelay
+                              ? (_isPenaltyAccepted ? Icons.receipt_long : Icons.undo)
+                              : (_isConfine ? Icons.local_hospital : Icons.undo),
                           size: 18,
-                          color: _isPenaltyAccepted
-                              ? Colors.green.shade700
-                              : _isConfine
-                                  ? Colors.blue.shade700
-                                  : Colors.deepOrange.shade700,
+                          color: _isTechnicalDelay
+                              ? (_isPenaltyAccepted ? Colors.green.shade700 : Colors.deepOrange.shade700)
+                              : (_isConfine ? Colors.blue.shade700 : Colors.deepOrange.shade700),
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          _isPenaltyAccepted
-                              ? 'Penalty Fee Accepted (₱500.00)'
-                              : _isConfine
-                                  ? 'Confine in Slaughterhouse'
-                                  : 'Take Livestock Back',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: _isPenaltyAccepted
-                                ? Colors.green.shade700
-                                : _isConfine
-                                    ? Colors.blue.shade700
-                                    : Colors.deepOrange.shade700,
+                        Expanded(
+                          child: Text(
+                            _isTechnicalDelay
+                                ? (_isPenaltyAccepted
+                                    ? 'Reschedule with Legal Finality Fee (₱500.00)'
+                                    : 'Take Livestock Back (Penalty Waived)')
+                                : (_isConfine
+                                    ? 'Confine in Slaughterhouse (Quarantine / Observation)'
+                                    : 'Take Livestock Back (₱0 Charge)'),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _isTechnicalDelay
+                                  ? (_isPenaltyAccepted ? Colors.green.shade700 : Colors.deepOrange.shade700)
+                                  : (_isConfine ? Colors.blue.shade700 : Colors.deepOrange.shade700),
+                            ),
                           ),
                         ),
                       ],
@@ -2227,8 +3279,14 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     const SizedBox(height: 8),
                     _detailRow('Livestock:', livestock),
                     _detailRow('Customer:', cust),
-                    if (_isPenaltyAccepted)
-                      _detailRow('Terms:', 'Agreed to ₱500 legal finality fee to keep animal in facility'),
+                    if (_isTechnicalDelay && _isPenaltyAccepted)
+                      _detailRow('Terms:', 'Customer agrees to ₱500 legal finality fee to reschedule operation.')
+                    else if (_isTechnicalDelay && _isTakeBack)
+                      _detailRow('Terms:', 'Livestock returned to customer. Technical delay penalty is waived (₱0).')
+                    else if (!_isTechnicalDelay && _isConfine)
+                      _detailRow('Terms:', 'Livestock placed in corral for veterinary observation (₱0 fee). Admin can resume slaughter once cleared.')
+                    else if (!_isTechnicalDelay && _isTakeBack)
+                      _detailRow('Terms:', 'Livestock returned to customer. No processing or penalty fee (₱0).'),
                     if (respondedAt != null)
                       _detailRow('Responded:', DateFormat('MMM d, yyyy h:mm a').format(DateTime.parse(respondedAt.toString()))),
                   ],
@@ -2238,54 +3296,60 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
 
               // Action section
               Text(
-                _isPenaltyAccepted
-                    ? 'Set Resumption Slaughter Date'
-                    : _isConfine
-                        ? 'Set New Slaughter Date'
-                        : 'Approve Pickup Time',
+                _isTechnicalDelay
+                    ? (_isPenaltyAccepted
+                        ? 'Set Rescheduled Slaughter Date'
+                        : 'Schedule Livestock Pickup')
+                    : (_isConfine
+                        ? 'Confirm Slaughterhouse Confinement'
+                        : 'Schedule Livestock Pickup'),
                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF4A5568)),
               ),
               const SizedBox(height: 4),
               Text(
-                _isPenaltyAccepted
-                    ? 'Select the date when this livestock slaughter will resume. The customer accepted the ₱500 fee and will be notified of the schedule.'
-                    : _isConfine
-                        ? 'Select a new date for when this confined livestock can be slaughtered. The customer will be notified.'
-                        : 'Approve a date and time for the customer to pick up their livestock. They will be notified.',
+                _isTechnicalDelay
+                    ? (_isPenaltyAccepted
+                        ? 'Select the date when this livestock slaughter will resume. The ₱500 legal finality fee will be applied to the customer\'s bill.'
+                        : 'Approve a date and time for the customer to pick up their livestock. Technical delay penalty is waived (₱0).')
+                    : (_isConfine
+                        ? 'Confirm that this livestock is placed in facility confinement for veterinary observation. No penalty fee will be charged. Once cleared by the veterinarian, click "Cleared & Ready for Slaughter" on the table to resume.'
+                        : 'Approve a date and time for the customer to pick up their livestock. (₱0 fee applies).'),
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 12),
 
-              // Date picker
-              InkWell(
-                onTap: _pickDate,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_today, size: 18, color: Color(0xFF4A5568)),
-                      const SizedBox(width: 10),
-                      Text(
-                        _selectedDate != null
-                            ? DateFormat('MMMM d, yyyy').format(_selectedDate!)
-                            : 'Select date...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: _selectedDate != null ? Colors.black87 : Colors.grey.shade500,
+              // Date picker (for reschedule or pickup)
+              if (_isTakeBack || (_isTechnicalDelay && _isPenaltyAccepted)) ...[
+                InkWell(
+                  onTap: _pickDate,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, size: 18, color: Color(0xFF4A5568)),
+                        const SizedBox(width: 10),
+                        Text(
+                          _selectedDate != null
+                              ? DateFormat('MMMM d, yyyy').format(_selectedDate!)
+                              : (_isTakeBack ? 'Select pickup date...' : 'Select rescheduled slaughter date...'),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: _selectedDate != null ? Colors.black87 : Colors.grey.shade500,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
 
-              // Time picker (only for take back)
+              // Time picker (only for take back pickup)
               if (_isTakeBack) ...[
                 const SizedBox(height: 12),
                 InkWell(
@@ -2305,7 +3369,7 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                         Text(
                           _selectedTime != null
                               ? _selectedTime!.format(context)
-                              : 'Select time...',
+                              : 'Select pickup time...',
                           style: TextStyle(
                             fontSize: 14,
                             color: _selectedTime != null ? Colors.black87 : Colors.grey.shade500,
@@ -2344,7 +3408,7 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
                     child: const Text('Cancel', style: TextStyle(color: Colors.black87)),
                   ),
-                  if (_isPenaltyAccepted)
+                  if (_isTechnicalDelay && _isPenaltyAccepted)
                     ElevatedButton.icon(
                       onPressed: _isLoading ? null : _markDelayResolvedAndReleasable,
                       icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
@@ -2359,13 +3423,27 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
                     onPressed: _isLoading ? null : _submit,
                     icon: _isLoading
                         ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : Icon(_isConfine ? Icons.event_available : Icons.check_circle_outline, size: 16, color: Colors.white),
+                        : Icon(
+                            _isTakeBack
+                                ? Icons.schedule
+                                : (_isTechnicalDelay ? Icons.calendar_month : Icons.local_hospital),
+                            size: 16,
+                            color: Colors.white,
+                          ),
                     label: Text(
-                      _isConfine ? 'Set Date & Notify' : 'Approve & Notify',
-                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      _isLoading
+                          ? 'Saving...'
+                          : _isTakeBack
+                              ? 'Schedule Pickup & Notify'
+                              : (_isTechnicalDelay
+                                  ? 'Set Rescheduled Date & Notify'
+                                  : 'Confirm Confinement & Notify'),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _isConfine ? Colors.blue.shade600 : Colors.green.shade600,
+                      backgroundColor: _isTakeBack
+                          ? const Color(0xFFC0392B)
+                          : (_isTechnicalDelay ? const Color(0xFF2563EB) : const Color(0xFF1E855A)),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -2382,10 +3460,17 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
   Widget _detailRow(String label, String value) => Padding(
     padding: const EdgeInsets.only(bottom: 3),
     child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-        Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+            textAlign: TextAlign.right,
+          ),
+        ),
       ],
     ),
   );

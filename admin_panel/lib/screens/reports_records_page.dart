@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:async';
 import 'dart:math';
 import 'dart:ui' show PointerDeviceKind;
@@ -5,9 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'illegal_slaughter_reports_view.dart';
 import '../services/report_pdf_generator.dart';
+import '../services/regular_dealers_service.dart';
+import '../services/nmic_report_pdf_generator.dart';
 
 class ReportsRecordsPage extends StatefulWidget {
   final String? initialTab;
@@ -36,12 +40,28 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   int _unreviewedIllegalReports = 0;
   Map<String, dynamic>? _latestIllegalReport;
 
+  // NMIC & Abattoir Official Reports state
+  DateTime _nmicReportDate = DateTime.now();
+  DateTime _monthlyLogMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  String _selectedNmicSpecies = 'HOG';
+  String _selectedNmicFormType = 'Weekly Summary';
+  String? _selectedCustomerFilter;
+  String _customerPeriodFilter = 'This Month';
+  List<Map<String, dynamic>> _nmicTransmissionsList = [];
+  String _dealerSearchQuery = '';
+  String _dealerCategoryFilter = 'All'; // 'All', 'Market', 'Barangay', 'New'
+
   @override
   void initState() {
     super.initState();
     _activeTab = widget.initialTab ?? 'Analytics';
     _loadData();
     _loadIllegalReportAlerts();
+    RegularDealersService.instance.init().then((_) {
+      RegularDealersService.instance.getTransmissions().then((list) {
+        if (mounted) setState(() => _nmicTransmissionsList = list);
+      });
+    });
     _alertTimer = Timer.periodic(const Duration(seconds: 3), (_) {
       _loadIllegalReportAlerts();
     });
@@ -203,6 +223,11 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         }
         return r;
       }).toList();
+
+      try {
+        await RegularDealersService.instance.init();
+        await RegularDealersService.instance.syncCustomersFromRequests(enriched);
+      } catch (_) {}
 
       setState(() {
         _allRequests = enriched;
@@ -701,6 +726,16 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                             _buildUninspectedSection(),
                             const SizedBox(height: 24),
                             _buildRecentReports(),
+                          ] else if (_activeTab == 'Daily Production (Abattoir)') ...[
+                            _buildDailyAbattoirProductionTab(),
+                          ] else if (_activeTab == 'Monthly Dealer Log') ...[
+                            _buildMonthlyDealerLogTab(),
+                          ] else if (_activeTab == 'NMIS Reports & Transmittal') ...[
+                            _buildNmisReportsTab(),
+                          ] else if (_activeTab == 'Customer Records') ...[
+                            _buildCustomerHistoricalRecordsTab(),
+                          ] else if (_activeTab == 'Meat Dealers Directory') ...[
+                            _buildMeatDealersDirectoryTab(),
                           ] else ...[
                             _buildReportIllegalSection(),
                           ],
@@ -1031,16 +1066,29 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   //  TAB BUTTONS
   // ════════════════════════════════════════════
   Widget _buildTabButtons() {
-    return Row(
-      children: [
-        _tabButton('Analytics', _activeTab == 'Analytics'),
-        const SizedBox(width: 8),
-        _tabButton(
-          'Report Illegal',
-          _activeTab == 'Report Illegal',
-          badgeCount: _unreviewedIllegalReports,
-        ),
-      ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _tabButton('Analytics', _activeTab == 'Analytics'),
+          const SizedBox(width: 8),
+          _tabButton('Daily Production (Abattoir)', _activeTab == 'Daily Production (Abattoir)'),
+          const SizedBox(width: 8),
+          _tabButton('Monthly Dealer Log', _activeTab == 'Monthly Dealer Log'),
+          const SizedBox(width: 8),
+          _tabButton('NMIS Reports & Transmittal', _activeTab == 'NMIS Reports & Transmittal'),
+          const SizedBox(width: 8),
+          _tabButton('Customer Records', _activeTab == 'Customer Records'),
+          const SizedBox(width: 8),
+          _tabButton('Meat Dealers Directory', _activeTab == 'Meat Dealers Directory'),
+          const SizedBox(width: 8),
+          _tabButton(
+            'Report Illegal',
+            _activeTab == 'Report Illegal',
+            badgeCount: _unreviewedIllegalReports,
+          ),
+        ],
+      ),
     );
   }
 
@@ -1924,6 +1972,1807 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   Widget _buildReportIllegalSection() {
     return IllegalSlaughterReportsView(
       onReportsUpdated: _loadIllegalReportAlerts,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  1. DAILY ABATTOIR PRODUCTION TAB (Market & Barangay)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildDailyAbattoirProductionTab() {
+    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(_nmicReportDate);
+    final targetDateOnly = DateTime(_nmicReportDate.year, _nmicReportDate.month, _nmicReportDate.day);
+
+    final dailyReqs = _allRequests.where((r) {
+      final dtStr = r['scheduled_date'] ?? r['created_at'];
+      if (dtStr == null) return false;
+      try {
+        final dt = DateTime.parse(dtStr.toString());
+        return DateTime(dt.year, dt.month, dt.day) == targetDateOnly;
+      } catch (_) {
+        return false;
+      }
+    }).toList();
+
+    int hogs = 0, cow = 0, cara = 0;
+    double totalWeight = 0;
+    for (var r in dailyReqs) {
+      final sp = (r['livestock_type'] ?? '').toString().toLowerCase();
+      final count = int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+      final wt = double.tryParse((r['carcass_weight'] ?? 0).toString()) ?? 0;
+      totalWeight += wt;
+      if (sp.contains('cow') || sp.contains('cattle') || sp.contains('baka')) {
+        cow += count;
+      } else if (sp.contains('cara') || sp.contains('buffalo')) {
+        cara += count;
+      } else {
+        hogs += count;
+      }
+    }
+
+    final dealersService = RegularDealersService.instance;
+    final marketDealers = dealersService.marketDealers;
+    final barangayDealers = dealersService.barangayDealers;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Top Action Bar
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Daily Slaughterhouse Production Report',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Official Abattoir Record (Incoming Livestock & Carcass Production) • $dateStr',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today, size: 16),
+                label: Text(DateFormat('yyyy-MM-dd').format(_nmicReportDate)),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _nmicReportDate,
+                    firstDate: DateTime(2024),
+                    lastDate: DateTime(2030),
+                  );
+                  if (picked != null) setState(() => _nmicReportDate = picked);
+                },
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.picture_as_pdf, size: 16),
+                label: const Text('Export Official PDF'),
+                onPressed: () async {
+                  final pdfBytes = await NmicReportPdfGenerator.generateDailyProductionReport(
+                    date: _nmicReportDate,
+                    requests: _allRequests,
+                  );
+                  await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D6A4F),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('Send to NMIC via Email'),
+                onPressed: () {
+                  _openNmicTransmittalDialog(
+                    reportType: 'Daily Production Report',
+                    periodLabel: DateFormat('MMMM d, yyyy').format(_nmicReportDate),
+                    getPdfBytes: () => NmicReportPdfGenerator.generateDailyProductionReport(
+                      date: _nmicReportDate,
+                      requests: _allRequests,
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E3A8A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Summary KPI Row
+        Row(
+          children: [
+            _buildKpiCard('Hogs Slaughtered', '$hogs heads', const Color(0xFF2D6A4F), Icons.pets),
+            const SizedBox(width: 16),
+            _buildKpiCard('Cattle / Cow', '$cow heads', const Color(0xFF2B6CB0), Icons.agriculture),
+            const SizedBox(width: 16),
+            _buildKpiCard('Carabao', '$cara heads', const Color(0xFFD69E2E), Icons.nature),
+            const SizedBox(width: 16),
+            _buildKpiCard('Carcass Weight', '${NumberFormat("#,##0.0").format(totalWeight)} kg', const Color(0xFF805AD5), Icons.scale),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Market Section Preview (Rows 1-40)
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('MARKET SECTION (40 Dealers)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                  Text('Pre-assigned permanent markings active', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildDealersTablePreview(marketDealers, dailyReqs),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Barangay Section Preview (Rows 1-63)
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('BARANGAY SECTION (63 Dealers)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                  Text('Pre-assigned permanent markings active', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildDealersTablePreview(barangayDealers, dailyReqs),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDealersTablePreview(List<RegularDealer> dealers, List<Map<String, dynamic>> dailyReqs) {
+    // Map requests by marking/name
+    final Map<String, int> headsByMarking = {};
+    final Map<String, double> wtByMarking = {};
+    for (var r in dailyReqs) {
+      final mark = (r['customer_marking'] ?? r['animal_tag'] ?? r['tag_id'] ?? '').toString().trim().toUpperCase();
+      final name = (r['customer_name'] ?? r['owner_name'] ?? '').toString().trim().toUpperCase();
+      final count = int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+      final wt = double.tryParse((r['carcass_weight'] ?? 0).toString()) ?? 0;
+      if (mark.isNotEmpty) {
+        headsByMarking[mark] = (headsByMarking[mark] ?? 0) + count;
+        wtByMarking[mark] = (wtByMarking[mark] ?? 0) + wt;
+      }
+      if (name.isNotEmpty) {
+        headsByMarking[name] = (headsByMarking[name] ?? 0) + count;
+        wtByMarking[name] = (wtByMarking[name] ?? 0) + wt;
+      }
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Table(
+        border: TableBorder.all(color: Colors.grey.shade200, width: 1),
+        columnWidths: const {
+          0: FixedColumnWidth(48),
+          1: FlexColumnWidth(3),
+          2: FixedColumnWidth(100),
+          3: FixedColumnWidth(100),
+          4: FixedColumnWidth(120),
+          5: FixedColumnWidth(120),
+        },
+        children: [
+          TableRow(
+            decoration: BoxDecoration(color: Colors.grey.shade100),
+            children: const [
+              Padding(padding: EdgeInsets.all(8), child: Text('No.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+              Padding(padding: EdgeInsets.all(8), child: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+              Padding(padding: EdgeInsets.all(8), child: Text('Markings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+              Padding(padding: EdgeInsets.all(8), child: Text('Heads', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+              Padding(padding: EdgeInsets.all(8), child: Text('Carcass Wt (kg)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+              Padding(padding: EdgeInsets.all(8), child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+            ],
+          ),
+          ...dealers.map((d) {
+            final h = headsByMarking[d.markings.toUpperCase()] ?? headsByMarking[d.name.toUpperCase()] ?? 0;
+            final w = wtByMarking[d.markings.toUpperCase()] ?? wtByMarking[d.name.toUpperCase()] ?? 0;
+            final hasSlaughter = h > 0;
+            return TableRow(
+              decoration: BoxDecoration(color: hasSlaughter ? const Color(0xFFF0FFF4) : Colors.white),
+              children: [
+                Padding(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4), child: Text('${d.dealerNumber}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+                Padding(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8), child: Text(d.name, style: TextStyle(fontSize: 12, fontWeight: hasSlaughter ? FontWeight.bold : FontWeight.normal))),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4)),
+                    child: Text(d.markings, textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+                  ),
+                ),
+                Padding(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4), child: Text(hasSlaughter ? '$h' : '—', textAlign: TextAlign.center, style: TextStyle(fontSize: 12, fontWeight: hasSlaughter ? FontWeight.bold : FontWeight.normal, color: hasSlaughter ? const Color(0xFF2D6A4F) : Colors.grey))),
+                Padding(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4), child: Text(hasSlaughter ? NumberFormat('#,##0.0').format(w) : '—', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+                Padding(padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4), child: Text(hasSlaughter ? 'Processed' : 'No Entry', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, color: hasSlaughter ? const Color(0xFF38A169) : Colors.grey.shade400))),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  2. MONTHLY DEALER LOG TAB (31-Day Matrix)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildMonthlyDealerLogTab() {
+    final monthStr = DateFormat('MMMM yyyy').format(_monthlyLogMonth);
+    final daysInMonth = DateTime(_monthlyLogMonth.year, _monthlyLogMonth.month + 1, 0).day;
+
+    final dealersService = RegularDealersService.instance;
+    final allDealers = dealersService.allDealers;
+
+    // Filter requests for month
+    final monthReqs = _allRequests.where((r) {
+      final dtStr = r['scheduled_date'] ?? r['created_at'];
+      if (dtStr == null) return false;
+      try {
+        final dt = DateTime.parse(dtStr.toString());
+        return dt.year == _monthlyLogMonth.year && dt.month == _monthlyLogMonth.month;
+      } catch (_) {
+        return false;
+      }
+    }).toList();
+
+    int totalMonthHeads = monthReqs.fold(0, (a, b) => a + (int.tryParse((b['animal_count'] ?? 1).toString()) ?? 1));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Action Bar
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Meat Dealer Licensing – Monthly Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                    const SizedBox(height: 4),
+                    Text('Tabaco City Abattoir Office 31-Day Production Matrix • $monthStr', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: () => setState(() => _monthlyLogMonth = DateTime(_monthlyLogMonth.year, _monthlyLogMonth.month - 1)),
+              ),
+              Text(monthStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: () => setState(() => _monthlyLogMonth = DateTime(_monthlyLogMonth.year, _monthlyLogMonth.month + 1)),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.print, size: 16),
+                label: const Text('Export Landscape PDF'),
+                onPressed: () async {
+                  final pdfBytes = await NmicReportPdfGenerator.generateMonthlyDealerLog(
+                    month: _monthlyLogMonth,
+                    requests: _allRequests,
+                  );
+                  await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D6A4F),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('Send to NMIC via Email'),
+                onPressed: () {
+                  _openNmicTransmittalDialog(
+                    reportType: 'Monthly Dealer Log',
+                    periodLabel: monthStr,
+                    getPdfBytes: () => NmicReportPdfGenerator.generateMonthlyDealerLog(
+                      month: _monthlyLogMonth,
+                      requests: _allRequests,
+                    ),
+                  );
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E3A8A),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        Row(
+          children: [
+            _buildKpiCard('Total Heads (Month)', '$totalMonthHeads heads', const Color(0xFF2D6A4F), Icons.pets),
+            const SizedBox(width: 16),
+            _buildKpiCard('Market Dealers', '${dealersService.marketDealers.length} registered', const Color(0xFF2B6CB0), Icons.storefront),
+            const SizedBox(width: 16),
+            _buildKpiCard('Barangay Dealers', '${dealersService.barangayDealers.length} registered', const Color(0xFFD69E2E), Icons.home_work),
+            const SizedBox(width: 16),
+            _buildKpiCard('Days Covered', '$daysInMonth days', const Color(0xFF805AD5), Icons.calendar_month),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Monthly Dealer 31-Day Tally Overview', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                  Text('Showing all ${allDealers.length} registered dealers', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                  columns: [
+                    const DataColumn(label: Text('No.', style: TextStyle(fontWeight: FontWeight.bold))),
+                    const DataColumn(label: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold))),
+                    const DataColumn(label: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold))),
+                    const DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.bold))),
+                    ...List.generate(daysInMonth, (i) => DataColumn(label: Text('${i + 1}'))),
+                  ],
+                  rows: allDealers.take(20).map((d) {
+                    return DataRow(cells: [
+                      DataCell(Text('${d.dealerNumber}')),
+                      DataCell(Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                      DataCell(Text(d.markings, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)))),
+                      DataCell(Text(d.category.toUpperCase())),
+                      ...List.generate(daysInMonth, (_) => const DataCell(Text('—'))),
+                    ]);
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Center(
+                child: Text('Preview showing top 20 rows. Click "Export Landscape PDF" to print the complete 31-day matrix.',
+                    style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey.shade600)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  3. NMIS REPORTS & TRANSMITTAL TAB
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildNmisReportsTab() {
+    final monthStr = DateFormat('MMMM yyyy').format(_monthlyLogMonth);
+    final dealersService = RegularDealersService.instance;
+    final nmic = dealersService.nmicSettings;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Action Bar
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('National Meat Inspection Service (NMIS) Regulatory Reports',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                        const SizedBox(height: 4),
+                        Text('Form No. NMIS-POSM-F-034 • Official Transmittal & Compliance Suite',
+                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.picture_as_pdf, size: 16),
+                    label: const Text('Export Selected NMIS Form'),
+                    onPressed: () async {
+                      Uint8List pdfBytes;
+                      if (_selectedNmicFormType == 'Weekly Summary') {
+                        pdfBytes = await NmicReportPdfGenerator.generateNmisWeeklySummary(
+                          month: _monthlyLogMonth,
+                          requests: _allRequests,
+                        );
+                      } else {
+                        pdfBytes = await NmicReportPdfGenerator.generateNmisServiceTransactionReport(
+                          month: _monthlyLogMonth,
+                          species: _selectedNmicSpecies,
+                          requests: _allRequests,
+                        );
+                      }
+                      await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D6A4F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.send_rounded, size: 16),
+                    label: const Text('Send Transmittal & Form to NMIC'),
+                    onPressed: () {
+                      _openNmicTransmittalDialog(
+                        reportType: _selectedNmicFormType == 'Weekly Summary'
+                            ? 'NMIS Weekly Summary Report'
+                            : 'NMIS Form NMIS-POSM-F-034 ($_selectedNmicSpecies)',
+                        periodLabel: monthStr,
+                        getPdfBytes: () {
+                          if (_selectedNmicFormType == 'Weekly Summary') {
+                            return NmicReportPdfGenerator.generateNmisWeeklySummary(
+                              month: _monthlyLogMonth,
+                              requests: _allRequests,
+                            );
+                          } else {
+                            return NmicReportPdfGenerator.generateNmisServiceTransactionReport(
+                              month: _monthlyLogMonth,
+                              species: _selectedNmicSpecies,
+                              requests: _allRequests,
+                            );
+                          }
+                        },
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E3A8A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              // Filter selectors
+              Row(
+                children: [
+                  const Text('Report Form: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _selectedNmicFormType,
+                    items: const [
+                      DropdownMenuItem(value: 'Weekly Summary', child: Text('Weekly Summary Report (All Species)')),
+                      DropdownMenuItem(value: 'Species Transaction', child: Text('Service Transaction Description (Per Species)')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setState(() => _selectedNmicFormType = v);
+                    },
+                  ),
+                  const SizedBox(width: 24),
+                  if (_selectedNmicFormType == 'Species Transaction') ...[
+                    const Text('Species: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(width: 8),
+                    ...['HOG', 'CATTLE', 'CARABAO', 'GOAT'].map((sp) {
+                      final isSel = _selectedNmicSpecies == sp;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text(sp),
+                          selected: isSel,
+                          onSelected: (_) => setState(() => _selectedNmicSpecies = sp),
+                          selectedColor: const Color(0xFF2D6A4F),
+                          labelStyle: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      );
+                    }),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Compliance Info Card
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('NMIS Official Establishment Details & Transmittal Config',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.email_outlined, size: 16, color: Color(0xFF1E3A8A)),
+                    label: const Text(
+                      'NMIC Email Settings',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E3A8A),
+                      ),
+                    ),
+                    onPressed: _openEmailConfigDialog,
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Color(0xFF1E3A8A)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: _buildInfoItem('License to Operate', nmic.ltoNumber)),
+                  Expanded(child: _buildInfoItem('Establishment', nmic.establishmentName)),
+                  Expanded(child: _buildInfoItem('POSMS Head', nmic.nmicOfficerName)),
+                  Expanded(child: _buildInfoItem('Default Recipient Email', nmic.nmicEmail)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(child: _buildInfoItem('Inspection Officer', nmic.dmioOfficerName)),
+                  Expanded(child: _buildInfoItem('Plant Representative', nmic.plantRepresentative)),
+                  Expanded(child: _buildInfoItem('Fee Basis', nmic.feeBasisDetails.isNotEmpty ? nmic.feeBasisDetails : 'City Ordinance No. 2018-012')),
+                  Expanded(
+                    child: _buildInfoItem(
+                      'Email Delivery Method',
+                      'Gmail Web (1-Click Direct)',
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // NMIS Transmissions Audit Log Table
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('NMIS Transmissions & Audit Dispatch Log', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                  Text('Soft copies logged for weekly physical inspection compliance', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (_nmicTransmissionsList.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(
+                    child: Text('No transmissions recorded yet. Use "Send Transmittal & Form to NMIC" to email reports.',
+                        style: TextStyle(color: Colors.grey.shade500, fontStyle: FontStyle.italic)),
+                  ),
+                )
+              else
+                Table(
+                  border: TableBorder.all(color: Colors.grey.shade200),
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey.shade100),
+                      children: const [
+                        Padding(padding: EdgeInsets.all(8), child: Text('Date & Time', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Report Type', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Period', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Recipient Email', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Sent By', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                      ],
+                    ),
+                    ..._nmicTransmissionsList.map((t) {
+                      return TableRow(
+                        children: [
+                          Padding(padding: const EdgeInsets.all(8), child: Text(t['created_at']?.toString().split('T').first ?? '', style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(t['report_type'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(t['period_label'] ?? '', style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(t['recipient_email'] ?? '', style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(t['sent_by'] ?? 'Admin', style: const TextStyle(fontSize: 12))),
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(4)),
+                              child: Text('Transmitted', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green.shade800), textAlign: TextAlign.center),
+                            ),
+                          ),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  4. CUSTOMER SLAUGHTER RECORDS TAB (Audit Trail)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildCustomerHistoricalRecordsTab() {
+    final dealersService = RegularDealersService.instance;
+    final allDealers = dealersService.allDealers;
+
+    // Filter requests by customer
+    List<Map<String, dynamic>> filtered = _allRequests;
+    if (_selectedCustomerFilter != null && _selectedCustomerFilter!.isNotEmpty) {
+      final query = _selectedCustomerFilter!.toUpperCase().trim();
+      filtered = filtered.where((r) {
+        final name = (r['customer_name'] ?? r['owner_name'] ?? '').toString().toUpperCase().trim();
+        final mark = (r['customer_marking'] ?? r['animal_tag'] ?? r['tag_id'] ?? '').toString().toUpperCase().trim();
+        return name == query || mark == query || name.contains(query);
+      }).toList();
+    }
+
+    // Filter by period
+    final now = DateTime.now();
+    if (_customerPeriodFilter == 'This Week') {
+      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+      filtered = filtered.where((r) {
+        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
+        return dt != null && dt.isAfter(startOfWeek);
+      }).toList();
+    } else if (_customerPeriodFilter == 'This Month') {
+      filtered = filtered.where((r) {
+        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
+        return dt != null && dt.year == now.year && dt.month == now.month;
+      }).toList();
+    } else if (_customerPeriodFilter == 'This Year') {
+      filtered = filtered.where((r) {
+        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
+        return dt != null && dt.year == now.year;
+      }).toList();
+    }
+
+    int heads = filtered.fold(0, (a, b) => a + (int.tryParse((b['animal_count'] ?? 1).toString()) ?? 1));
+    double wt = filtered.fold(0.0, (a, b) => a + (double.tryParse((b['carcass_weight'] ?? 0).toString()) ?? 0));
+    double fees = filtered.fold(0.0, (a, b) => a + _calcRequestFee(b));
+
+    // Find active dealer details if selected
+    RegularDealer? activeDealer;
+    if (_selectedCustomerFilter != null) {
+      activeDealer = dealersService.findDealerByName(_selectedCustomerFilter!) ??
+          dealersService.findDealerByMarking(_selectedCustomerFilter!);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Action Bar & Filters
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Customer Slaughter Historical Audit Records',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+                        const SizedBox(height: 4),
+                        Text('Individual dealer slaughter totals required for NMIC inspection audit',
+                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.picture_as_pdf, size: 16),
+                    label: const Text('Export Customer Record (PDF)'),
+                    onPressed: () async {
+                      if (_selectedCustomerFilter == null || _selectedCustomerFilter!.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Please select a customer or dealer first')),
+                        );
+                        return;
+                      }
+                      final pdfBytes = await NmicReportPdfGenerator.generateCustomerSlaughterHistoryReport(
+                        customerName: activeDealer?.name ?? _selectedCustomerFilter!,
+                        marking: activeDealer?.markings ?? 'TAG',
+                        periodLabel: _customerPeriodFilter,
+                        requests: filtered,
+                      );
+                      await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D6A4F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              Row(
+                children: [
+                  // Customer selector
+                  Expanded(
+                    flex: 2,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: _selectedCustomerFilter,
+                      decoration: const InputDecoration(
+                        labelText: 'Select Customer / Regular Dealer',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('All Customers / Dealers')),
+                        ...allDealers.map((d) => DropdownMenuItem(
+                              value: d.name,
+                              child: Text('${d.name} [Mark: ${d.markings}] (${d.category.toUpperCase()})'),
+                            )),
+                      ],
+                      onChanged: (v) => setState(() => _selectedCustomerFilter = v),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // Period selector
+                  ...['This Week', 'This Month', 'This Year', 'All Time'].map((p) {
+                    final isSel = _customerPeriodFilter == p;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(p),
+                        selected: isSel,
+                        onSelected: (_) => setState(() => _customerPeriodFilter = p),
+                        selectedColor: const Color(0xFF2D6A4F),
+                        labelStyle: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+              if (activeDealer != null) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0FFF4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF9AE6B4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified, color: Color(0xFF2D6A4F), size: 20),
+                      const SizedBox(width: 8),
+                      Text('Dealer: ${activeDealer.name}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(color: const Color(0xFF1E3A8A), borderRadius: BorderRadius.circular(4)),
+                        child: Text('Official Mark: ${activeDealer.markings}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('Classification: ${activeDealer.category.toUpperCase()} SECTION', style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+                      const Spacer(),
+                      const Text('Marking Permanently Locked', style: TextStyle(color: Color(0xFF2D6A4F), fontWeight: FontWeight.bold, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        Row(
+          children: [
+            _buildKpiCard('Total Animals Slaughtered', '$heads heads', const Color(0xFF2D6A4F), Icons.pets),
+            const SizedBox(width: 16),
+            _buildKpiCard('Total Carcass Weight', '${NumberFormat("#,##0.0").format(wt)} kg', const Color(0xFF2B6CB0), Icons.scale),
+            const SizedBox(width: 16),
+            _buildKpiCard('Total Inspection Fees', NumberFormat('₱#,##0.00').format(fees), const Color(0xFFD69E2E), Icons.payments),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Transactions Table
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Detailed Slaughter Transactions (${filtered.length} records)',
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+              const SizedBox(height: 12),
+              if (filtered.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(child: Text('No slaughter transactions found for the selected customer and timeframe.', style: TextStyle(color: Colors.grey.shade500, fontStyle: FontStyle.italic))),
+                )
+              else
+                Table(
+                  border: TableBorder.all(color: Colors.grey.shade200),
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(color: Colors.grey.shade100),
+                      children: const [
+                        Padding(padding: EdgeInsets.all(8), child: Text('Date', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Reference #', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Species', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Heads', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Carcass Wt (kg)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.center)),
+                        Padding(padding: EdgeInsets.all(8), child: Text('Fee Paid', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12), textAlign: TextAlign.right)),
+                      ],
+                    ),
+                    ...filtered.take(30).map((r) {
+                      final dt = r['scheduled_date'] ?? r['created_at'] ?? '';
+                      final ref = r['reference_no']?.toString() ?? (r['id'] != null ? 'MI-2026-${r['id'].toString().padLeft(3, '0')}' : '—');
+                      final sp = r['livestock_type'] ?? 'Hog';
+                      final count = r['animal_count'] ?? 1;
+                      final weight = r['carcass_weight'] ?? 0;
+                      final st = r['status'] ?? 'Completed';
+                      final fee = _calcRequestFee(r);
+                      return TableRow(
+                        children: [
+                          Padding(padding: const EdgeInsets.all(8), child: Text(dt.toString().split('T').first, style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(ref, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(sp.toString(), style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text('$count', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(NumberFormat('#,##0.0').format(double.tryParse('$weight') ?? 0), textAlign: TextAlign.center, style: const TextStyle(fontSize: 12))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(st.toString(), textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Color(0xFF2D6A4F)))),
+                          Padding(padding: const EdgeInsets.all(8), child: Text(NumberFormat('₱#,##0.00').format(fee), textAlign: TextAlign.right, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                        ],
+                      );
+                    }),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  5. NMIC TRANSMITTAL LETTER & EMAIL MODAL DIALOG
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _openNmicTransmittalDialog({
+    required String reportType,
+    required String periodLabel,
+    required Future<Uint8List> Function() getPdfBytes,
+  }) async {
+    final dealersService = RegularDealersService.instance;
+    await dealersService.init();
+    final nmic = dealersService.nmicSettings;
+
+    final emailCtrl = TextEditingController(text: nmic.nmicEmail);
+    final subjectCtrl = TextEditingController(
+        text: 'Official Transmittal: $reportType ($periodLabel) - Tabaco City Slaughterhouse');
+    final bodyCtrl = TextEditingController(
+      text: 'Good day ${nmic.nmicOfficerName},\n\n'
+          'Pursuant to Republic Act No. 9296 (Meat Inspection Code of the Philippines) as amended by RA 10536, '
+          'the Tabaco City Slaughterhouse (License To Operate: ${nmic.ltoNumber}) hereby officially transmits '
+          'the soft copy of the $reportType covering $periodLabel.\n\n'
+          'Please find the certified soft copy PDF report attached for your regulatory review and POSMS recording. '
+          'Physical hard copies and original receipts are prepared and available on-site for the upcoming weekly inspection.\n\n'
+          'Respectfully submitted,\n'
+          '${nmic.plantRepresentative}\n'
+          '${nmic.plantRepTitle}\n'
+          'Tabaco City Slaughterhouse',
+    );
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.mark_email_read_outlined, color: Color(0xFF1E3A8A)),
+            const SizedBox(width: 10),
+            const Text('Send Transmittal & Reports to NMIC', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 580,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Color(0xFF1E3A8A), size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Sending official soft copy to NMIC. This fulfills the digital report requirement so only hard copies are required during weekly physical inspections.',
+                          style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: emailCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'NMIC Recipient Email',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: subjectCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Transmittal Subject',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.subject),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: bodyCtrl,
+                  maxLines: 7,
+                  decoration: const InputDecoration(
+                    labelText: 'Transmittal Letter Message',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.attach_file, size: 18, color: Colors.grey),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('Attached: ${reportType.replaceAll(" ", "_")}_$periodLabel.pdf (Soft Copy)',
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.download, size: 16),
+            label: const Text('Download Soft Copy PDF'),
+            onPressed: () async {
+              final bytes = await getPdfBytes();
+              await Printing.sharePdf(bytes: bytes, filename: '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf');
+            },
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Send to NMIC via Gmail'),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
+            onPressed: () async {
+              final recipient = emailCtrl.text.trim();
+              final subject = subjectCtrl.text.trim();
+              final body = bodyCtrl.text.trim();
+              final messenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(ctx);
+
+              if (recipient.isEmpty) {
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Please enter recipient email address'), backgroundColor: Colors.redAccent),
+                );
+                return;
+              }
+
+              await _sendViaGmail(
+                recipient: recipient,
+                subject: subject,
+                body: body,
+                reportType: reportType,
+                periodLabel: periodLabel,
+                getPdfBytes: getPdfBytes,
+                messenger: messenger,
+                navigator: navigator,
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendViaGmail({
+    required String recipient,
+    required String subject,
+    required String body,
+    required String reportType,
+    required String periodLabel,
+    required Future<Uint8List> Function() getPdfBytes,
+    required ScaffoldMessengerState messenger,
+    required NavigatorState navigator,
+  }) async {
+    final dealersService = RegularDealersService.instance;
+    // 1. Download soft copy PDF so the user can easily attach it
+    try {
+      final bytes = await getPdfBytes();
+      await Printing.sharePdf(bytes: bytes, filename: '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf');
+    } catch (_) {}
+
+    // 2. Open Gmail Web in new tab with pre-filled fields
+    final gmailUrl = 'https://mail.google.com/mail/?view=cm&fs=1'
+        '&to=${Uri.encodeComponent(recipient)}'
+        '&su=${Uri.encodeComponent(subject)}'
+        '&body=${Uri.encodeComponent(body)}';
+
+    try {
+      await launchUrl(Uri.parse(gmailUrl), mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    await dealersService.logNmicTransmission(
+      reportType: reportType,
+      periodLabel: periodLabel,
+      recipientEmail: recipient,
+      transmittalSubject: subject,
+      transmittalBody: body,
+    );
+
+    final updatedList = await dealersService.getTransmissions();
+    if (mounted) setState(() => _nmicTransmissionsList = updatedList);
+
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('Opened Gmail Web! Attach the downloaded PDF report to complete sending.'),
+        backgroundColor: Color(0xFF2D6A4F),
+      ),
+    );
+  }
+
+  Widget _buildKpiCard(String title, String value, Color color, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
+              child: Icon(icon, color: color, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                  const SizedBox(height: 2),
+                  Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2D3748))),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════
+  //  MEAT DEALERS DIRECTORY & EMAIL CONFIG
+  // ════════════════════════════════════════════
+  Map<String, int> _calcDealerLifetimeHeads() {
+    final Map<String, int> map = {};
+    for (var r in _allRequests) {
+      final name = (r['customer_name'] ?? '').toString().trim().toLowerCase();
+      if (name.isEmpty) continue;
+      final count = int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+      map[name] = (map[name] ?? 0) + count;
+    }
+    return map;
+  }
+
+  void _openEmailConfigDialog() {
+    final dealersService = RegularDealersService.instance;
+    final nmic = dealersService.nmicSettings;
+    final recipientCtrl = TextEditingController(text: nmic.nmicEmail);
+    final officerCtrl = TextEditingController(text: nmic.nmicOfficerName);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.mark_email_read_outlined, color: Color(0xFF1E3A8A), size: 24),
+            SizedBox(width: 10),
+            Text('NMIC Recipient Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SizedBox(
+          width: 480,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(8)),
+                child: Row(
+                  children: const [
+                    Icon(Icons.check_circle_outline, color: Color(0xFF2D6A4F), size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Direct 1-Click Gmail Dispatch is active. No API keys or third-party service required. You can customize the default recipient email below.',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF1B5E20), height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: recipientCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Default NMIC Recipient Email *',
+                  hintText: 'e.g. jonhpaulmarbella123@gmail.com or nmic.region5@da.gov.ph',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: officerCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'NMIC POSMS Head / Officer Name',
+                  hintText: 'DR. BEJAEE C. DE DIOS',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.check, size: 16),
+            label: const Text('Save Settings'),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E3A8A), foregroundColor: Colors.white),
+            onPressed: () async {
+              final messenger = ScaffoldMessenger.of(context);
+              final r = recipientCtrl.text.trim();
+              final o = officerCtrl.text.trim();
+
+              if (r.isNotEmpty) nmic.nmicEmail = r;
+              if (o.isNotEmpty) nmic.nmicOfficerName = o;
+
+              await dealersService.saveNmicSettings(nmic);
+              if (mounted) setState(() {});
+              if (ctx.mounted) Navigator.pop(ctx);
+
+              messenger.showSnackBar(
+                const SnackBar(
+                  content: Text('NMIC Recipient Settings saved successfully!'),
+                  backgroundColor: Color(0xFF2D6A4F),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openRegisterDealerDialog({RegularDealer? editDealer}) {
+    final dealersService = RegularDealersService.instance;
+    final isEditing = editDealer != null;
+    final nameCtrl = TextEditingController(text: editDealer?.name ?? '');
+    final markingCtrl = TextEditingController(text: editDealer?.markings ?? '');
+    final phoneCtrl = TextEditingController(text: editDealer?.phone ?? '');
+    String category = editDealer?.category ?? 'barangay';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Icon(isEditing ? Icons.edit : Icons.person_add_alt_1, color: const Color(0xFF2D6A4F)),
+              const SizedBox(width: 8),
+              Text(
+                isEditing ? 'Edit Meat Dealer Record' : 'Register New Meat Dealer',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Meat Dealer Full Name *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: nameCtrl,
+                    onChanged: (val) {
+                      if (!isEditing && val.trim().isNotEmpty && markingCtrl.text.isEmpty) {
+                        markingCtrl.text = dealersService.suggestMarkingForName(val);
+                      }
+                    },
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. Jonathan Bino, Vangie Marbella...',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Category / Designation *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      ChoiceChip(
+                        label: const Text('Barangay Meat Dealer'),
+                        selected: category == 'barangay',
+                        onSelected: (_) => setDialogState(() => category = 'barangay'),
+                        selectedColor: const Color(0xFFD69E2E).withValues(alpha: 0.2),
+                        labelStyle: TextStyle(
+                          color: category == 'barangay' ? const Color(0xFFB7791F) : Colors.black87,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('Market Meat Dealer'),
+                        selected: category == 'market',
+                        onSelected: (_) => setDialogState(() => category = 'market'),
+                        selectedColor: const Color(0xFF2B6CB0).withValues(alpha: 0.2),
+                        labelStyle: TextStyle(
+                          color: category == 'market' ? const Color(0xFF2B6CB0) : Colors.black87,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Permanent Assigned Marking *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      TextButton.icon(
+                        icon: const Icon(Icons.auto_awesome, size: 14),
+                        label: const Text('Auto-Suggest', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          if (nameCtrl.text.trim().isNotEmpty) {
+                            setDialogState(() {
+                              markingCtrl.text = dealersService.suggestMarkingForName(nameCtrl.text);
+                            });
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  TextField(
+                    controller: markingCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. JB, VM, JDC-2 (Permanent on carcass)',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text('Contact Phone Number (Optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: phoneCtrl,
+                    decoration: const InputDecoration(
+                      hintText: '0912 345 6789',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check, size: 16),
+              label: Text(isEditing ? 'Save Changes' : 'Register Dealer'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(ctx);
+                final name = nameCtrl.text.trim();
+                final marking = markingCtrl.text.trim();
+                final phone = phoneCtrl.text.trim();
+
+                if (name.isEmpty) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Please enter dealer name'), backgroundColor: Colors.redAccent),
+                  );
+                  return;
+                }
+                if (marking.isEmpty) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Please enter or auto-suggest a permanent marking'), backgroundColor: Colors.redAccent),
+                  );
+                  return;
+                }
+
+                if (isEditing) {
+                  final updated = editDealer.copyWith(
+                    name: name.toUpperCase(),
+                    markings: marking.toUpperCase(),
+                    category: category,
+                    phone: phone.isNotEmpty ? phone : null,
+                  );
+                  await dealersService.updateDealer(updated);
+                } else {
+                  await dealersService.addDealerManually(
+                    name: name,
+                    markings: marking,
+                    category: category,
+                    phone: phone.isNotEmpty ? phone : null,
+                  );
+                }
+
+                if (mounted) setState(() {});
+                navigator.pop();
+
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(isEditing ? 'Dealer updated successfully!' : 'Meat Dealer $name registered successfully!'),
+                    backgroundColor: const Color(0xFF2D6A4F),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMeatDealersDirectoryTab() {
+    final dealersService = RegularDealersService.instance;
+    final allDealers = dealersService.allDealers;
+    final headsMap = _calcDealerLifetimeHeads();
+
+    final filteredDealers = allDealers.where((d) {
+      final q = _dealerSearchQuery.toLowerCase().trim();
+      final matchesQuery = q.isEmpty ||
+          d.name.toLowerCase().contains(q) ||
+          d.markings.toLowerCase().contains(q);
+
+      bool matchesCat = true;
+      if (_dealerCategoryFilter == 'Market') {
+        matchesCat = d.category == 'market';
+      } else if (_dealerCategoryFilter == 'Barangay') {
+        matchesCat = d.category == 'barangay';
+      } else if (_dealerCategoryFilter == 'New') {
+        matchesCat = d.isNew;
+      }
+
+      return matchesQuery && matchesCat;
+    }).toList();
+
+    final totalDealers = allDealers.length;
+    final marketCount = dealersService.marketDealers.length;
+    final brgyCount = dealersService.barangayDealers.length;
+    final newCount = allDealers.where((d) => d.isNew).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Header Card with Actions
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Official Meat Dealers Directory & Registration Roster',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Official registry of regular and newly enrolled meat dealers, permanent carcass markings, categories, and lifetime slaughter records.',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.picture_as_pdf, size: 16),
+                    label: const Text('Export Directory (PDF)'),
+                    onPressed: () async {
+                      final messenger = ScaffoldMessenger.of(context);
+                      try {
+                        final bytes = await NmicReportPdfGenerator.generateDealersDirectoryPdf(
+                          dealers: filteredDealers,
+                          dealerHeadsCount: headsMap,
+                        );
+                        await Printing.sharePdf(bytes: bytes, filename: 'NMIS_Meat_Dealers_Directory.pdf');
+                      } catch (e) {
+                        messenger.showSnackBar(
+                          SnackBar(content: Text('Failed to generate PDF: $e'), backgroundColor: Colors.redAccent),
+                        );
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF2D6A4F),
+                      side: const BorderSide(color: Color(0xFF2D6A4F)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.person_add, size: 16),
+                    label: const Text('+ Register Meat Dealer'),
+                    onPressed: () => _openRegisterDealerDialog(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D6A4F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // KPI Summary Cards
+        Row(
+          children: [
+            _buildKpiCard('Total Registered Dealers', '$totalDealers dealers', const Color(0xFF2D6A4F), Icons.people_alt_outlined),
+            const SizedBox(width: 16),
+            _buildKpiCard('Market Dealers', '$marketCount dealers', const Color(0xFF2B6CB0), Icons.storefront),
+            const SizedBox(width: 16),
+            _buildKpiCard('Barangay Dealers', '$brgyCount dealers', const Color(0xFFD69E2E), Icons.home_work_outlined),
+            const SizedBox(width: 16),
+            _buildKpiCard('New Dealers (Last 30 Days)', '$newCount newly registered', const Color(0xFF38A169), Icons.fiber_new_rounded),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Filter & Search Controls
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Search by dealer name or permanent marking...',
+                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                  ),
+                  onChanged: (v) => setState(() => _dealerSearchQuery = v),
+                ),
+              ),
+              const SizedBox(width: 16),
+              const Text('Filter Category:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(width: 8),
+              DropdownButton<String>(
+                value: _dealerCategoryFilter,
+                items: const [
+                  DropdownMenuItem(value: 'All', child: Text('All Dealers')),
+                  DropdownMenuItem(value: 'Market', child: Text('Market Dealers')),
+                  DropdownMenuItem(value: 'Barangay', child: Text('Barangay Dealers')),
+                  DropdownMenuItem(value: 'New', child: Text('New Dealers (30 Days)')),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _dealerCategoryFilter = v);
+                },
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Data Table Card
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Meat Dealers Registry Table (${filteredDealers.length} records)',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
+                  ),
+                  const Text('Click "Edit" to modify contact or marking details', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                  columnSpacing: 28,
+                  columns: const [
+                    DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Meat Dealer Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Permanent Marking', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Lifetime Heads', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Status / Badge', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                  ],
+                  rows: filteredDealers.asMap().entries.map((entry) {
+                    final idx = entry.key + 1;
+                    final d = entry.value;
+                    final heads = headsMap[d.name.toLowerCase().trim()] ?? 0;
+
+                    return DataRow(cells: [
+                      DataCell(Text(idx.toString(), style: const TextStyle(fontSize: 12, color: Colors.grey))),
+                      DataCell(
+                        Text(
+                          d.name,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D3748)),
+                        ),
+                      ),
+                      DataCell(
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE6F9F0),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
+                          ),
+                          child: Text(
+                            d.markings,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2D6A4F)),
+                          ),
+                        ),
+                      ),
+                      DataCell(
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: d.category == 'market' ? const Color(0xFFEBF8FF) : const Color(0xFFFEFCBF),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            d.category == 'market' ? 'Market' : 'Barangay',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: d.category == 'market' ? const Color(0xFF2B6CB0) : const Color(0xFFB7791F),
+                            ),
+                          ),
+                        ),
+                      ),
+                      DataCell(Text(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', style: const TextStyle(fontSize: 12))),
+                      DataCell(
+                        Row(
+                          children: [
+                            const Icon(Icons.pets, size: 14, color: Color(0xFF2D6A4F)),
+                            const SizedBox(width: 4),
+                            Text('$heads heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                      DataCell(
+                        Row(
+                          children: [
+                            if (d.isNew)
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDEF7EC),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFF31C48D)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.star, size: 11, color: Color(0xFF046C4E)),
+                                    SizedBox(width: 2),
+                                    Text('New Dealer', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E))),
+                                  ],
+                                ),
+                              ),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: d.isActive ? Colors.green : Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(d.isActive ? 'Active' : 'Inactive', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                      DataCell(
+                        OutlinedButton(
+                          onPressed: () => _openRegisterDealerDialog(editDealer: d),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            minimumSize: const Size(0, 30),
+                          ),
+                          child: const Text('Edit', style: TextStyle(fontSize: 11)),
+                        ),
+                      ),
+                    ]);
+                  }).toList(),
+                ),
+              ),
+              if (filteredDealers.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(
+                    child: Text('No meat dealers match the selected search or filter.', style: TextStyle(color: Colors.grey)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

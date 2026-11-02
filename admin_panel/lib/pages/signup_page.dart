@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/app_settings_service.dart';
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -44,17 +46,106 @@ class _SignupPageState extends State<SignupPage> {
     setState(() => _isLoading = true);
 
     try {
+      // First-User Bootstrap: Check if a Super Admin account already exists.
+      // If no Super Admin exists yet, the first registered account becomes 'superadmin'.
+      // All subsequent accounts registered via Signup become regular 'admin'.
+      bool hasExistingSuperAdmin = false;
+      final prefs = await SharedPreferences.getInstance();
+
+      try {
+        final settingRow = await _supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'superadmin_account')
+            .maybeSingle();
+        if (settingRow != null && settingRow['value'] != null) {
+          hasExistingSuperAdmin = true;
+        }
+      } catch (_) {}
+
+      if (!hasExistingSuperAdmin) {
+        try {
+          final existingSuperAdmins = await _supabase
+              .from('profiles')
+              .select('id')
+              .inFilter('role', ['superadmin', 'Super Admin'])
+              .limit(1);
+          if ((existingSuperAdmins as List).isNotEmpty) {
+            hasExistingSuperAdmin = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!hasExistingSuperAdmin) {
+        final hasSuperInStaff = AppSettingsService.instance.staffAccounts
+            .any((s) => s.role == 'Super Admin' || s.role.toLowerCase() == 'superadmin');
+        if (hasSuperInStaff || (prefs.getBool('superadmin_provisioned') ?? false)) {
+          hasExistingSuperAdmin = true;
+        }
+      }
+
+      final assignedRole = hasExistingSuperAdmin ? 'admin' : 'superadmin';
+      final displayRole = assignedRole == 'superadmin' ? 'Super Admin' : 'Admin';
+      final defaultFullName = email.contains('@') ? email.split('@').first : email;
+
       final response = await _supabase.auth.signUp(
         email: email,
         password: password,
-        data: {'role': 'admin'},
+        data: {
+          'role': assignedRole,
+          'full_name': defaultFullName,
+        },
       );
       if (mounted) {
         if (response.user != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Registration successful! Welcome aboard.'), backgroundColor: Colors.green),
-          );
-          Navigator.pushReplacementNamed(context, '/dashboard');
+          final user = response.user!;
+
+          if (assignedRole == 'superadmin') {
+            await prefs.setBool('superadmin_provisioned', true);
+            try {
+              await _supabase.from('system_settings').upsert({
+                'key': 'superadmin_account',
+                'value': {
+                  'id': user.id,
+                  'email': email,
+                  'role': 'superadmin',
+                  'created_at': DateTime.now().toIso8601String(),
+                },
+              });
+            } catch (_) {}
+          }
+
+          // Sync with AppSettingsService and add to Staff Accounts list if not present
+          final existsInStaff = AppSettingsService.instance.staffAccounts
+              .any((s) => s.email.toLowerCase() == email.toLowerCase());
+          if (!existsInStaff) {
+            await AppSettingsService.instance.addStaffAccount(
+              StaffAccount(
+                id: user.id,
+                fullName: defaultFullName,
+                email: email,
+                role: displayRole,
+                isActive: true,
+                createdAt: DateTime.now(),
+              ),
+            );
+          }
+
+          AppSettingsService.instance.syncWithAuthUser(user);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  assignedRole == 'superadmin'
+                      ? 'First account registered as Super Admin! Welcome aboard.'
+                      : 'Admin account registered! Welcome aboard.',
+                ),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pushReplacementNamed(context, '/dashboard');
+          }
         }
       }
     } on AuthException catch (error) {

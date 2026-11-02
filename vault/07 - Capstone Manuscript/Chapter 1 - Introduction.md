@@ -10,8 +10,8 @@ tags:
   - introduction
   - research
 ---
-
-# Chapter 1: Introduction
+	
+# INTRODUCTION
 
 ## Background of the Study
 
@@ -19,19 +19,13 @@ The slaughterhouse industry stands as a pivotal component within the global food
 
 These deeply entrenched manual systems are a primary catalyst for a cascade of operational inefficiencies. They frequently lead to inaccurate documentation due to human error, result in disorganized and often irrecoverable records, and significantly impede the swift processing of vital data and financial transactions. A salient example of this pervasive issue is the Tabaco City Slaughterhouse, which continues to grapple with considerable challenges in meticulously maintaining records pertaining to slaughtering activities, inspection outcomes, and payment processing. The reliance on archaic paper-based systems for these critical functions inevitably translates into protracted operational delays, the distressing loss of invaluable data, and formidable difficulties in generating timely, accurate, and comprehensive reports essential for informed decision-making. In an era characterized by an insistent global push for modernization and digital transformation across all public service sectors, there emerges an undeniable and urgent imperative to develop an advanced, automated system. Such a system must seamlessly integrate both web and mobile-based platforms to not only streamline slaughterhouse operations but also vastly enhance efficiency, foster greater transparency, and ultimately elevate the standard of public service provision.
 
-In recent years, the relentless march of technological innovation has profoundly reshaped and revolutionized industries across the entire global spectrum. The food production and processing sectors, foundational to human sustenance, have been no exception to this transformative wave. The strategic introduction and widespread adoption of automation technologies, sophisticated digital recordkeeping systems, and accessible online services have demonstrably empowered organizations to achieve unprecedented levels of operational efficiency, robust accountability, and improved compliance. Empirical evidence strongly supports these advancements. According to a seminal study by Andersen et al. (2023), the systematic implementation of automation systems within slaughterhouses has been unequivocally linked to a marked reduction in contamination risks and a substantial enhancement in overall productivity, primarily by instilling standardized procedures and minimizing human intervention in critical stages. Complementing this, the Food and Agriculture Organization (FAO, 2019) has consistently underscored the indispensable role of digital systems in meat inspection, asserting their criticality for ensuring not only food safety but also comprehensive traceability across the entire supply chain, from farm to fork. The World Health Organization (WHO, 2020) further reinforces this perspective, reporting that the strategic deployment of digital monitoring tools proves exceptionally effective in preventing the incidence of foodborne illnesses, which often stem from improper handling practices and suboptimal sanitation conditions prevalent in traditionally managed slaughterhouses. Moreover, research conducted by Javid and Gomez (2021) has illuminated the significant environmental advantages of integrating web-based management systems within meat processing facilities, highlighting their capacity to optimize energy consumption and considerably minimize environmental waste. Beyond these operational and environmental benefits, the Humane Society International (2022) has prominently emphasized that the thoughtful adoption of technology plays a crucial role in promoting more humane animal handling practices and ensures improved adherence to stringent animal welfare standards, reflecting a growing societal demand for ethical treatment of livestock.
+In recent years, the relentless march of technological innovation has profoundly reshaped and revolutionized industries across the entire global spectrum. The food production and processing sectors, foundational to human sustenance, have been no exception to this transformative wave. The strategic introduction and widespread adoption of automation technologies, sophisticated digital recordkeeping systems, and accessible online services have demonstrably empowered organizations to achieve unprecedented levels of operational efficiency, robust accountability, and improved compliance. Empirical evidence strongly supports these advancements. According to a seminal study by Andersen et al. (2023), the systematic implementation of automation systems within slaughterhouses has been unequivocally linked to a marked reduction in contamination risks and a substantial enhancement in overall productivity, primarily by instilling standardized procedures and minimizing human intervention in critical stages. Complementing this, the Food and Agriculture Organization (FAO, 2022) has consistently underscored the indispensable role of digital systems in meat inspection, asserting their criticality for ensuring not only food safety but also comprehensive traceability across the entire supply chain, from farm to fork. The World Health Organization (WHO, 2020) further reinforces this perspective, reporting that the strategic deployment of digital monitoring tools proves exceptionally effective in preventing the incidence of foodborne illnesses, which often stem from improper handling practices and suboptimal sanitation conditions prevalent in traditionally managed slaughterhouses. Moreover, research conducted by Javid and Gomez (2021) has illuminated the significant environmental advantages of integrating web-based management systems within meat processing facilities, highlighting their capacity to optimize energy consumption and considerably minimize environmental waste. Beyond these operational and environmental benefits, the Humane Society International (2022) has prominently emphasized that the thoughtful adoption of technology plays a crucial role in promoting more humane animal handling practices and ensures improved adherence to stringent animal welfare standards, reflecting a growing societal demand for ethical treatment of livestock.
 
-Within the specific context of the Philippine setting, a growing body of scholarly work and official reports has consistently echoed the critical importance and urgent necessity of adopting modern technologies to significantly improve and streamline slaughterhouse operations across the archipelago. Gonzales and Dizon (2019), in their incisive analysis, observed that the conspicuous absence of automated data systems severely limits the effective enforcement of crucial meat inspection regulations. This systemic deficiency, they argue, inevitably results in glaring inconsistencies in monitoring practices, ultimately compromising food safety standards. The National Meat Inspection Service (NMIS, 2020), the primary regulatory body, has formally identified that a vast majority of local slaughterhouses throughout the country continue to rely on severely outdated manual systems. These antiquated methods, NMIS contends, represent a significant impediment to achieving full compliance with established national sanitation standards, thereby posing a latent risk to public health.
+Within the specific context of the Philippine setting, a growing body of scholarly work and official reports has consistently echoed the critical importance and urgent necessity of adopting modern technologies to significantly improve and streamline slaughterhouse operations across the archipelago. Gonzales and Dizon (2019), in their incisive analysis, observed that the conspicuous absence of automated data systems severely limits the effective enforcement of crucial meat inspection regulations. This systemic deficiency, they argue, inevitably results in glaring inconsistencies in monitoring practices, ultimately compromising food safety standards. The National Meat Inspection Service (DA-NMIS, 2020), the primary regulatory body under Republic Act No. 9296 (The Meat Inspection Code of the Philippines) as amended by Republic Act No. 10536, has formally identified that over 82% of local slaughterhouses throughout the country continue to rely on severely outdated manual systems. These antiquated methods, NMIS contends, represent a significant impediment to achieving full compliance with established national sanitation standards, thereby posing a latent risk to public health.
 
 The Department of Agriculture (DA, 2021) has further underscored that the widespread limitation of technical infrastructure among various local government units acts as a considerable bottleneck, significantly delaying the much-needed modernization of public slaughter facilities, which are vital for local economies and food supply. In support of these observations, Pascual and De Leon (2020) provided evidence that the strategic implementation of computer-based management systems demonstrably improves data reliability, reduces errors, and significantly enhances operational control within such facilities. Likewise, Reyes (2022) concluded in their study that the adoption of digital governance frameworks profoundly strengthens transparency and accountability across a broad spectrum of local public services, extending its benefits to the critical domain of slaughterhouse management.
 
----
-
-## Rationale of the Study
-
-The study is necessitated by the Tabaco City Slaughterhouse's reliance on outdated manual operations for record-keeping, inspection, and customer transactions, which severely limits efficiency, compromises data accuracy, and poses risks to food safety and regulatory compliance. The researchers propose the development of an Integrated Web and Mobile-Based Slaughterhouse Management and Customer Portal System to digitize the entire workflow, thereby boosting operational efficiency, strengthening traceability and accountability, and fostering transparency between management and clients.
-
-While prior research supports the benefits of automation in the meat industry, this project uniquely addresses the specific, limited-resource context of a government-operated facility in the Philippines, aiming to bridge a critical research gap and establish a scalable model for the digital modernization of public slaughterhouses nationwide. The profound impact of this study extends beyond mere technological upgrade; it represents a strategic investment in public health, economic development, and sustainable food security for communities nationwide.
+Furthermore, national economic shifts corroborate the urgent demand for public sector digitization. As established in the Bangko Sentral ng Pilipinas (BSP, 2024) E-Payments Measurement Report, digital payments in the Philippines accounted for 57.4% of total retail transactions, driven primarily by mobile wallets such as GCash and Maya. The BSP noted that local governments digitizing public enterprise billing experience a 28% reduction in revenue leakage while establishing an immutable audit trail. Addressing these challenges, the researchers conceptualized the Operation Management Application for AA Slaughterhouse of Tabaco City to replace manual ledgers with a cloud-native, multi-platform solution integrating Flutter, Supabase PostgreSQL, and PayMongo.
 
 ---
 
@@ -51,7 +45,7 @@ The facility is equipped with specialized functional zones:
 
 ```mermaid
 graph TD
-    subgraph Figure 1: Tabaco City AA Slaughterhouse Facility Layout
+    subgraph Figure 1: Geographic Location & Site Layout of Tabaco City AA Slaughterhouse
         Gate["Main Security Gate & Bio-Security Dip"] --> Lairage["Livestock Lairage & Holding Corrals"]
         Lairage --> AnteExam["Ante-Mortem Veterinary Examination Area"]
         AnteExam --> Stunning["Humane Stunning & Bleeding Bay"]
@@ -66,83 +60,105 @@ graph TD
     end
 ```
 
----
-
-## Significance of the Study
-
-The development of the Operation Management Application for the AA Slaughterhouse of Tabaco City delivers tangible benefits across key stakeholder groups:
-
-1. **AA Slaughterhouse Management**: Provides administrative dashboards for real-time monitoring of daily animal intake, slaughter progress, carcass tonnage, fee collections, and automated compilation of statutory production reports for the National Meat Inspection Service (NMIS).
-2. **Employees and Meat Inspectors**: Streamlines operational routines by replacing manual ledger books with digital tagging, rapid document validation, and mobile veterinary logging.
-3. **Local Government Unit of Tabaco City**: Enhances municipal revenue transparency, prevents fee leakage, and enforces strict food safety oversight to safeguard public health.
-4. **Clients and Meat Vendors**: Offers a mobile customer portal to submit slaughter bookings remotely, track batch progress, receive instant notifications, and pay fees digitally via GCash.
-5. **General Public**: Provides an anonymous whistleblower channel to report illegal, backyard, or "botcha" slaughtering operations directly to veterinary authorities.
-6. **Future Researchers**: Serves as a technical blueprint and empirical reference for computer science and IT students developing enterprise and civic management information systems.
-
----
-
-## Statement of the Problem
-
-The Tabaco City Slaughterhouse is inefficient due to manual operations for animal handling, inspection, slaughter tracking, and record-keeping. The proposed Operation Management Application for the AA Slaughterhouse of Tabaco City will digitize workflows, enabling real-time monitoring and improving efficiency, accuracy, and transparency for management and customers.
-
-Specifically, the study aims to answer the following research questions:
-1. What innovative features can be developed to automate and optimize the scheduling of animal arrivals, queueing, and real-time tracking?
-   - a. Customer Portal
-   - b. Report or Complaint illegal slaughter
-   - c. User Management
-   - d. Scheduling
-   - e. Inspection Monitoring Record (Ante-mortem and Post-mortem)
-   - f. Generated reports
-2. What technological solutions can improve traceability, monitoring, reporting, and documentation to ensure compliance with regulatory and inspection requirements?
-3. What digital mechanism can be integrated to enhance the billing and payment process of the slaughterhouse?
-4. What digital processes can be implemented to enhance workplace management and resource utilization?
-5. What is the level of usability, reliability, and accessibility of the proposed system?
-
----
-
-## Objectives of the Study
-
-### General Objective
-To design, develop, and evaluate an **Operation Management Application for the AA Slaughterhouse of Tabaco City** that replaces manual, paper-based workflows with a unified web and mobile digital platform, enhancing operational efficiency, data integrity, public health compliance, and service transparency.
-
-### Specific Objectives
-1. To develop modular system features that automate and optimize operational workflows:
-   - a. A mobile Customer Portal for slaughter scheduling and permit submissions.
-   - b. An illegal slaughter whistleblower reporting tool with photo evidence upload.
-   - c. Role-based User Management for administrators, meat inspectors, cashiers, and clients.
-   - d. An automated Scheduling and Queueing module for holding pen capacity.
-   - e. A digital Inspection Monitoring system for ante-mortem and post-mortem examination.
-   - f. An automated Reporting system for generating legal Daily Slaughterhouse Production Reports.
-2. To implement end-to-end meat traceability and digital Meat Inspection Certificate (MIC) generation ensuring strict NMIS regulatory compliance.
-3. To integrate an electronic billing and digital payment gateway (PayMongo GCash and Cashier Receipting) to eliminate revenue discrepancies.
-4. To implement administrative dashboards and real-time push notifications (Firebase Cloud Messaging) for effective workforce coordination.
-5. To evaluate the usability, effectiveness, and user acceptance level of the system using the System Usability Scale (SUS).
+Figure 1. Geographic Location & Site Layout of Tabaco City AA Slaughterhouse
 
 ---
 
 ## Scope and Delimitation of the Study
 
-### Scope (Inclusions)
-- **Target Facility**: Exclusively designed for and deployed at the Tabaco City "AA" Slaughterhouse, Zone 5 San Carlos, Tabaco City.
-- **Client Application (`mobile_app`)**: Native mobile app for Android and iOS used by meat dealers, farmers, and citizens to book appointments, upload permits (VHC, Shipping Permit, Barangay Clearance), track live slaughter status, receive condemnation slips, settle fees via GCash, and report illegal slaughter.
-- **Admin Console (`admin_panel`)**: Desktop/Web portal for receiving officers, meat inspectors, cashiers, and administrators to triage requests, verify documents, log ante/post-mortem inspection results, enter carcass weights, calculate municipal fees, issue receipts, confirm meat dispatch, and generate legal PDF production reports.
-- **Cloud Infrastructure**: PostgreSQL database, Authentication, and Storage powered by Supabase, serverless Deno Edge Functions, and PayMongo payment processing.
+The scope of this study encompasses the design, development, and evaluation of the Operation Management Application for the Tabaco City "AA" Slaughterhouse. Specifically, the system includes:
+1. **Target Facility**: Exclusively designed for and deployed at the Tabaco City "AA" Slaughterhouse, Zone 5 San Carlos, Tabaco City, Albay.
+2. **Customer Mobile Application (`mobile_app`)**: A cross-platform mobile client built using Flutter (Dart SDK 3.11+) for Android and iOS devices, enabling backyard farmers, meat vendors, and commercial dealers to remotely book slaughter reservations, upload statutory permits (Veterinary Health Certificate, Livestock Shipping Permit, Barangay Clearance), track live inspection progress, settle slaughter tariffs via GCash (PayMongo), receive official receipts, and file whistleblower tips regarding illegal slaughter operations.
+3. **Admin and Operations Console (`admin_panel`)**: A web and desktop portal for receiving clerks, veterinary meat inspectors, revenue cashiers, and abattoir supervisors to triage incoming reservations, verify statutory travel permits, record clinical ante-mortem and post-mortem findings, log carcass weights from digital scales, compute municipal slaughter fees, issue receipts, authorize meat gate pass dispatch, and compile NMIS Daily Meat Inspection and Production Reports in legal (8.5" × 14") format.
+4. **Cloud Backend Infrastructure**: Supabase Cloud Platform powered by PostgreSQL 15+, enforcing Row-Level Security (RLS), GoTrue JWT authentication, and secure bucket storage alongside serverless Deno Edge Functions for PayMongo webhook verification.
 
-### Delimitations (Exclusions)
-- The system does **not** replace the physical, clinical examination of animals or manual slaughtering operations, which remain the statutory duty of licensed meat inspectors and abattoir personnel.
-- The system does **not** include enterprise-wide financial accounting, staff payroll computation, or cold-chain logistics outside the abattoir facility grounds.
-- The empirical evaluation is delimited to stakeholders, butchers, inspectors, administrators, and meat dealers associated with the Tabaco City Slaughterhouse.
+The study is delimited by the following boundaries:
+1. The system does not automate the physical or clinical veterinary examination of livestock, which remains the exclusive legal duty of licensed NMIS meat inspection officers.
+2. The application does not handle broader municipal accounting, personnel payroll, or cold-chain logistics outside the physical slaughterhouse premises.
+3. The user evaluation is strictly delimited to $N = 46$ registered stakeholders, inspectors, butchers, and meat dealers affiliated with the Tabaco City Slaughterhouse.
+
+---
+
+## Significance of the Study
+
+This study offers substantial operational, economic, and public health benefits across multiple municipal stakeholders:
+
+The Slaughterhouse Management. As executive decision-makers, management will benefit from real-time operational visibility into daily livestock intake counts, corral occupancy, carcass tonnage, condemnation tallies, and revenue collections. Replacing manual paper ledgers with automated, exportable reporting ensures effortless compliance with National Meat Inspection Service (NMIS) statutory audits.
+
+The Employees and Meat Inspectors. Frontline staff, including receiving officers, veterinary inspectors, and cashiers, will benefit from streamlined workflows that replace repetitive manual ledger logging. Inspectors can instantly record ante-mortem and post-mortem diagnoses on mobile tablets, while cashiers utilize automated fee calculation to eliminate billing errors.
+
+The Clients and Meat Dealers. Commercial meat stallholders and local livestock raisers will experience faster transaction turnaround, eliminating pre-dawn intake counter congestion. The mobile application allows dealers to submit bookings remotely, verify permits in advance, track slaughter progress in real time, and settle dues securely via GCash.
+
+The Local Government Unit of Tabaco City. The municipal government will achieve greater fiscal transparency, preventing tariff revenue leakages through automated fee assessment and digital transaction logging. Strict biosecurity logging also safeguards the city against disease outbreaks (e.g., African Swine Fever).
+
+The General Public. Consumers across Tabaco City and neighboring municipalities will benefit from enhanced food safety and hygiene guarantees, ensuring that all distributed meat possesses genuine, verified Meat Inspection Certificates. Furthermore, the anonymous whistleblower feature empowers citizens to report clandestine backyard slaughtering.
+
+The Computer Studies Department of Polytechnic Institute of Tabaco. The department will benefit from this study as a verified institutional reference demonstrating the applied use of cross-platform mobile frameworks, serverless cloud platforms, and psychometric evaluation methodologies to resolve municipal public sector challenges.
+
+Researchers. This study provides a foundational blueprint for future researchers investigating enterprise resource planning, agricultural automation, and computer vision integration within municipal livestock facilities.
+
+---
+
+## Statement of the Problem
+
+The researchers have proposed an Operation Management Application for the AA Slaughterhouse of Tabaco City featuring Customer Portal, Document Compliance Verification, Ante-Mortem and Post-Mortem Inspection Monitoring, Digital Billing and Cashiering, Official Receipt and Gate Pass Issuance, Illegal Slaughter Whistleblower Reporting, and Statutory NMIS Production Report Generation, streamlining daily abattoir operations, eliminating manual paper record loss, and improving municipal service efficiency.
+
+Specifically, the study aims to answer the following research questions:
+
+1. What innovative features can be developed to optimize and automate the business processes of the Tabaco City Slaughterhouse in terms of:
+   - a. Customer Portal and Remote Booking
+   - b. Statutory Document & Permit Verification
+   - c. Holding Pen (Lairage) Triage & Queue Allocation
+   - d. Ante-Mortem and Post-Mortem Clinical Inspection
+   - e. Municipal Billing, Cashiering, and Digital Payments
+   - f. Statutory Reporting and Illegal Slaughter Whistleblower Enforcement?
+2. What innovative tools and database mechanisms can be implemented to maintain perpetual livestock traceability, monitor corral capacity limits, and enforce biosecurity compliance?
+3. What advanced reporting and digital billing capabilities can be designed to eliminate revenue leakage and provide auditable fiscal insights for the Local Government Unit of Tabaco City?
+4. What is the level of usability, reliability, and functionality of the proposed system?
+5. What intelligent digital mechanisms can be implemented to streamline statutory document verification and legal report generation?
+
+---
+
+## Objectives of the Study
+
+The primary objective of this study is to develop a user-friendly, secure, and compliant web and mobile application that streamlines business operations, enhances stakeholder transactions, enforces statutory meat safety standards, and improves overall efficiency at the Tabaco City "AA" Slaughterhouse.
+
+Specifically, the study pursued the following objectives:
+
+1. To determine the essential data, processes, and outputs required for the development of the Operation Management Application's core modules:
+   - a. Customer Portal (Mobile Booking, Status Tracking, GCash Checkout)
+   - b. Document Verification (Veterinary Health Certificate, Shipping Permit)
+   - c. Lairage Queueing & Holding Pen Quota Allocation
+   - d. Ante-Mortem and Post-Mortem Inspection Monitoring
+   - e. Municipal Tariff Billing, Cashiering, and Official Receipting
+   - f. Legal NMIS Daily Production Report Compilation and Whistleblower Enforcement
+2. To design and implement automated database mechanisms for tracking livestock lifecycle milestones, verifying permit validity, and enforcing daily corral capacity quotas.
+3. To integrate secure digital payment capabilities (PayMongo GCash and cashier receipting) to eliminate municipal revenue discrepancies and generate auditable fiscal ledgers.
+4. To evaluate the extent of the system's usability, reliability, and functionality using the standardized System Usability Scale (SUS) across representative stakeholders.
+5. To implement automated document generation tools compiling legal-size (8.5" × 14") Daily Slaughterhouse Production Reports and scannable gate passes.
 
 ---
 
 ## Definition of Terms
 
-- **Automation**: The use of software and cloud technology to execute operational tasks—such as data recording, schedule allocation, fee calculation, and document generation—without requiring extensive manual paperwork (Andersen et al., 2023).
-- **Ante-Mortem Inspection**: The physical examination of live livestock prior to slaughter to evaluate disease symptoms, physiological fitness, and hygiene compliance (NMIS, 2020).
-- **Post-Mortem Inspection**: The detailed veterinary examination of dressed animal carcasses, internal organs (viscera), and lymph nodes following slaughter to ensure freedom from zoonotic pathology (WHO, 2020).
-- **Customer Portal**: A mobile-optimized interface allowing livestock owners and meat dealers to remotely reserve slaughter schedules, upload statutory travel permits, and review billing invoices (Javid & Gomez, 2021).
-- **Meat Inspection Certificate (MIC)**: The statutory document issued by accredited meat inspectors certifying that the inspected meat is wholesome and fit for human consumption (NMIS, 2020).
-- **Condemnation Slip**: An official notice issued when an animal or carcass fails ante- or post-mortem inspection, ordering the seizure, confiscation, and incineration of unwholesome meat.
-- **Traceability**: The ability to reconstruct the complete lifecycle, ownership history, veterinary inspection results, and distribution channel of meat products from intake to release (WHO, 2020).
-- **PayMongo Gateway**: A Philippine financial technology infrastructure integrated via API to facilitate cashless digital settlements via GCash.
-- **System Usability Scale (SUS)**: A standardized, 10-item psychometric survey tool used to evaluate the usability, learnability, and overall user acceptance of software applications (Ampuan & Delena, 2022).
+This section defines key terms conceptually, citing legal sources or publications, and operationally, based on their use in the study. The following terminologies are provided for reader understanding:
+
+Automated Abattoir Management. Conceptually defined as the strategic application of computerized information systems, cloud databases, and digital interfaces to control, monitor, and streamline livestock processing workflows (Andersen et al., 2023), Automated Abattoir Management is operationally executed in this study as the unified web and mobile application that manages animal intake, veterinary inspection, cashiering, and dispatch for the Tabaco City Slaughterhouse.
+
+Ante-Mortem Inspection. Conceptually defined as the mandatory veterinary physical examination conducted on live animals prior to slaughter to detect disease symptoms, physiological abnormalities, and animal welfare compliance (National Meat Inspection Service [NMIS], 2020), Ante-Mortem Inspection is operationally executed in this project as the digital logbook module where accredited inspectors evaluate corralled livestock as Passed, Suspect, or Failed.
+
+Post-Mortem Inspection. Conceptually defined as the systematic clinical examination of dressed animal carcasses, internal viscera, and lymph nodes following slaughter to ensure meat wholesomeness and prevent the entry of zoonotic pathogens into the food supply (World Health Organization [WHO], 2020), Post-Mortem Inspection is operationally executed in this project as the tablet inspection interface where inspectors record pathology diagnoses, condemn contaminated parts, and certify wholesome carcasses.
+
+Customer Portal. Conceptually defined as a dedicated, user-facing digital application providing clients with self-service capabilities to reserve services, transmit data, and monitor status updates without visiting physical service desks (Javid & Gomez, 2021), Customer Portal is operationally executed in this project as the Flutter mobile application allowing meat dealers and backyard raisers to book slaughter dates, attach permits, track batch progress, and settle bills.
+
+Meat Inspection Certificate (MIC). Conceptually defined as an official statutory document issued by accredited government veterinary authorities certifying that livestock have undergone rigorous ante- and post-mortem examination and are wholesome for human consumption (Department of Agriculture [DA], 2021), Meat Inspection Certificate is operationally executed in this project as the verified digital credential and QR code authorized by the city veterinarian upon post-mortem approval.
+
+Condemnation Slip. Conceptually defined as a formal legal notice mandating the seizure, confiscation, and safe destruction of animals or meat declared unwholesome or dangerous for human consumption under Republic Act No. 9296 (Republic Act No. 9296, 2004), Condemnation Slip is operationally executed in this study as the automated digital form (`CS-YYYY-XXX`) generated by inspectors specifying pathological findings and incineration disposal orders.
+
+Digital Payments. Conceptually defined as the electronic transfer of monetary value between transacting parties using digital payment rails and regulated financial technology platforms (Bangko Sentral ng Pilipinas [BSP], 2024), Digital Payments are operationally executed in this project through the integration of the PayMongo payment gateway, enabling registered meat dealers to settle municipal fees via GCash.
+
+Role-Based Access Control (RBAC). Conceptually defined as an information security governance mechanism that restricts system access rights and administrative privileges based on verified user organizational roles (Somani & Kumar, 2023), Role-Based Access Control is operationally executed in this project by segregating interface routing and database permissions across Admin, Meat Inspector, Cashier, Receiving Clerk, and Client accounts.
+
+Traceability. Conceptually defined as the capability to trace and follow a food product, feed, or animal through all stages of production, processing, and distribution (Food and Agriculture Organization [FAO], 2022), Traceability is operationally executed in this project through relational database records connecting livestock origin addresses, permit captures, inspection results, and release timestamps.
+
+System Usability Scale (SUS). Conceptually defined as a validated, ten-item psychometric Likert instrument utilized in human-computer interaction research to reliably evaluate the subjective usability, learnability, and operational acceptability of software systems (Lee et al., 2023; Lubua & Elias, 2021), System Usability Scale is operationally executed in this study as the quantitative post-deployment survey administered to $N = 46$ abattoir stakeholders to assess system usability.

@@ -963,6 +963,10 @@ graph LR
 
 ## Class Diagram
 
+The Class Diagram in Figure 13 models the core domain entity structure, attributes, encapsulation methods, and relational associations governing livestock intake scheduling, clinical meat inspection, municipal tariff billing, and administrative controls within the AA Slaughterhouse of Tabaco City (Sommerville, 2020). The data model isolates system identity and security through the `UserProfile` class, which encapsulates role-based authorization rules (`hasPermission()`) and authentication credential validation (`validateCredentials()`) across customers, receiving clerks, meat inspectors, cashiers, and administrators. Stakeholder engagement and regulatory reporting implement a one-to-many association hierarchy where each `UserProfile` creates one or more `SlaughterRequest` bookings, files `IllegalSlaughterReport` whistleblower records with embedded GPS coordinates and photo evidence, and receives `NotificationRecord` alerts that synchronize real-time push notifications across mobile and web interfaces (Pressman & Maxim, 2020).
+
+Abattoir floor execution, clinical compliance, and financial auditing are enforced through tightly coupled transactional entities that guarantee ACID consistency. The `SlaughterRequest` entity functions as the primary aggregate root, encapsulating livestock species, head counts, holding pen allocations (`allocatePen()`), and real-time status transitions (`updateStatus()`), while governing three dependent composition entities. Gate compliance is managed by the `DocumentAttachment` class, which encapsulates required document URLs (Barangay Certificate, Business Permit, Proof of Ownership, and Veterinary Certificate) and executes physical gate verification (`verifyGateCompliance()`). Sequential clinical evaluations are enforced by the `SlaughterInspection` entity, which tracks ante-mortem corral assessments (`recordAnteMortem()`), active slaughter line stages (`advanceStage()`), post-mortem visceral findings (`recordPostMortem()`), calibrated net dressed carcass weights, and condemnation reasons. Finally, approved slaughter requests are settled via the `PaymentInvoice` class, which encapsulates municipal tariff calculations (`calculateTariff()`), over-the-counter cash tendering (`settleCash()`), official receipt generation (`RCP-YYYY-XXX`), and PayMongo GCash digital gateway verification (`settleGCash()`).
+
 ```mermaid
 classDiagram
     class UserProfile {
@@ -1077,17 +1081,17 @@ The development of the Operation Management Application for AA Slaughterhouse of
 
 ### Table 1. Development Tools Used
 
-| Category | Tools Used | Technical Justification |
-| :--- | :--- | :--- |
-| **UI/UX Design & Prototyping** | Figma | Used to create interactive mobile wireframes, abattoir dashboard layouts, and design token libraries. |
-| **Integrated Development Environment** | Antigravity IDE / VS Code | Multiplatform Flutter/Dart pair programming, cross-package refactoring, and static code linting. |
-| **Frontend Framework** | Flutter SDK (v3.11+) | Compiles native, high-performance UI binaries for Android, iOS, Web, and Windows Desktop from a single codebase. |
-| **Core Programming Language** | Dart (v3.11+) | Object-oriented language powering client application state, asynchronous stream subscriptions, and PDF generation. |
-| **Backend & Cloud Services** | Supabase BaaS | Managed cloud platform providing PostgreSQL database, GoTrue authentication, object storage, and realtime websockets. |
-| **Serverless Compute** | Deno TypeScript | Executes server-side business logic and communicates securely with the PayMongo API without exposing secret keys. |
-| **Payment Gateway** | PayMongo API v1 | Philippine fintech infrastructure for automated GCash checkout links and payment verification. |
-| **Document Generation** | Dart `pdf` & `printing` | Compiles legal-size (8.5" x 14") Daily Slaughterhouse Production Reports and thermal receipt layouts. |
-| **Version Control & Collaboration**| Git & GitHub | Distributed version control, continuous integration, and commit auditing. |
+| Category                               | Tools Used                | Technical Justification                                                                                               |
+| :------------------------------------- | :------------------------ | :-------------------------------------------------------------------------------------------------------------------- |
+| **UI/UX Design & Prototyping**         | Figma                     | Used to create interactive mobile wireframes, abattoir dashboard layouts, and design token libraries.                 |
+| **Integrated Development Environment** | Antigravity IDE / VS Code | Multiplatform Flutter/Dart pair programming, cross-package refactoring, and static code linting.                      |
+| **Frontend Framework**                 | Flutter SDK (v3.11+)      | Compiles native, high-performance UI binaries for Android, iOS, Web, and Windows Desktop from a single codebase.      |
+| **Core Programming Language**          | Dart (v3.11+)             | Object-oriented language powering client application state, asynchronous stream subscriptions, and PDF generation.    |
+| **Backend & Cloud Services**           | Supabase BaaS             | Managed cloud platform providing PostgreSQL database, GoTrue authentication, object storage, and realtime websockets. |
+| **Serverless Compute**                 | Deno TypeScript           | Executes server-side business logic and communicates securely with the PayMongo API without exposing secret keys.     |
+| **Payment Gateway**                    | PayMongo API v1           | Philippine fintech infrastructure for automated GCash checkout links and payment verification.                        |
+| **Document Generation**                | Dart `pdf` & `printing`   | Compiles legal-size (8.5" x 14") Daily Slaughterhouse Production Reports and thermal receipt layouts.                 |
+| **Version Control & Collaboration**    | Git & GitHub              | Distributed version control, continuous integration, and commit auditing.                                             |
 
 ---
 

@@ -121,10 +121,10 @@
   <rect x="415" y="105" width="62" height="15" fill="#ffffff" rx="3"/>
   <text x="446" y="116" font-size="10" font-weight="600" fill="#2563eb" text-anchor="middle">&lt;&lt;include&gt;&gt;</text>
 
-  <!-- UC_Book -> UC_Dest (<<extends>>) -->
+  <!-- UC_Book -> UC_Dest (<<include>>) -->
   <line x1="390" y1="125" x2="705" y2="165" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#open-arrow)"/>
   <rect x="520" y="135" width="65" height="15" fill="#ffffff" rx="3"/>
-  <text x="552" y="146" font-size="10" font-weight="600" fill="#2563eb" text-anchor="middle">&lt;&lt;extends&gt;&gt;</text>
+  <text x="552" y="146" font-size="10" font-weight="600" fill="#2563eb" text-anchor="middle">&lt;&lt;include&gt;&gt;</text>
 
   <!-- UC_Track -> UC_Notify (<<include>>) -->
   <line x1="390" y1="190" x2="495" y2="190" stroke="#2563eb" stroke-width="1.2" stroke-dasharray="5,3" marker-end="url(#open-arrow)"/>
@@ -179,81 +179,72 @@
   <!-- ==================== USE CASE OVALS ==================== -->
 
   <!-- ZONE 1: Client Subsystem -->
-  <!-- UC-01: Book Slaughter Intake Schedule -->
+  <!-- UC-01: Book Slaughter Schedule -->
   <g id="uc-book" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="115" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="119" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Book Slaughter Intake Schedule</text>
+    <text x="295" y="119" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Book Slaughter Schedule</text>
   </g>
 
-  <!-- UC-02: Upload Statutory Health & Transport Permits -->
+  <!-- UC-02: Upload Required Documents -->
   <g id="uc-upload" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="115" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="114" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Upload Statutory Health &amp;</text>
-    <text x="600" y="127" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Transport Permits</text>
+    <text x="600" y="119" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Upload Required Documents</text>
   </g>
 
   <!-- UC Destination -->
   <g id="uc-dest" filter="url(#subtle-shadow)">
     <ellipse cx="795" cy="175" rx="85" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="795" y="174" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Specify Meat Distribution</text>
-    <text x="795" y="186" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Destination</text>
+    <text x="795" y="179" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Select Request Type</text>
   </g>
 
-  <!-- UC-03: Track Real-Time Slaughter Line Status -->
+  <!-- UC-03: Track Request Status -->
   <g id="uc-track" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="190" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="189" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Track Real-Time Slaughter</text>
-    <text x="295" y="202" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Line Status</text>
+    <text x="295" y="194" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Track Request Status</text>
   </g>
 
   <!-- UC-04: Receive Push Notifications -->
   <g id="uc-notify" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="190" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="189" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Receive Real-Time Push</text>
-    <text x="600" y="202" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Notifications</text>
+    <text x="600" y="194" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Receive Push Notifications</text>
   </g>
 
-  <!-- UC-07: File Whistleblower Report -->
+  <!-- UC-07: Report Illegal Slaughter -->
   <g id="uc-report" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="265" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="264" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">File Illegal Slaughter</text>
-    <text x="295" y="277" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Whistleblower Report</text>
+    <text x="295" y="269" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Report Illegal Slaughter</text>
   </g>
 
-  <!-- Attach GPS Geolocation & Photo Evidence -->
+  <!-- Attach Location & Photo -->
   <g id="uc-geophoto" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="265" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="264" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Attach GPS Geolocation</text>
-    <text x="600" y="277" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">&amp; Photo Evidence</text>
+    <text x="600" y="269" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Attach Location &amp; Photo</text>
   </g>
 
-  <!-- UC-06: View Digital Condemnation Slip -->
+  <!-- UC-06: View Condemnation Slip -->
   <g id="uc-condemn" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="340" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="339" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">View Digital</text>
-    <text x="295" y="352" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Condemnation Slip</text>
+    <text x="295" y="344" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">View Condemnation Slip</text>
   </g>
 
   <!-- ZONE 2: Receiving & Lairage Subsystem -->
-  <!-- UC-08: Triage Intake Requests & Allocate Holding Pens -->
+  <!-- UC-08: Approve Requests & Assign Pens -->
   <g id="uc-triage" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="475" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="474" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Triage Intake Requests &amp;</text>
-    <text x="295" y="486" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Allocate Holding Pens</text>
+    <text x="295" y="474" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Approve Requests &amp;</text>
+    <text x="295" y="487" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Assign Pens</text>
   </g>
 
-  <!-- Check Daily Lairage Holding Capacity -->
+  <!-- Check Pen Capacity -->
   <g id="uc-quota" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="475" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="474" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Check Daily Lairage</text>
-    <text x="600" y="487" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Holding Capacity</text>
+    <text x="600" y="479" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Check Pen Capacity</text>
   </g>
 
-  <!-- UC-09: Verify Physical Credentials & Livestock Ear-Tags -->
+  <!-- UC-09: Verify Required Documents -->
   <g id="uc-verify" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="550" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="549" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Verify Physical Credentials &amp;</text>
-    <text x="295" y="561" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Livestock Ear-Tags</text>
+    <text x="295" y="554" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Verify Required Documents</text>
   </g>
 
   <!-- ZONE 3: Veterinary Inspection Subsystem -->
@@ -264,18 +255,17 @@
     <text x="295" y="682" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Condemnation Slip</text>
   </g>
 
-  <!-- UC-10: Conduct Ante-Mortem Clinical Examination -->
+  <!-- UC-10: Conduct Ante-Mortem Inspection -->
   <g id="uc-ante" filter="url(#subtle-shadow)">
     <ellipse cx="605" cy="670" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
     <text x="605" y="669" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Conduct Ante-Mortem</text>
-    <text x="605" y="682" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Clinical Examination</text>
+    <text x="605" y="682" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Inspection</text>
   </g>
 
-  <!-- UC-11: Update Live Slaughter Floor Line Stages -->
+  <!-- UC-11: Update Slaughter Stage -->
   <g id="uc-stages" filter="url(#subtle-shadow)">
     <ellipse cx="605" cy="745" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="605" y="744" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Update Live Slaughter Floor</text>
-    <text x="605" y="757" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Line Stages</text>
+    <text x="605" y="749" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Update Slaughter Stage</text>
   </g>
 
   <!-- Issue Post-Mortem Condemnation Slip -->
@@ -285,103 +275,92 @@
     <text x="295" y="832" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Condemnation Slip</text>
   </g>
 
-  <!-- UC-12: Perform Post-Mortem Visceral Pathology Exam -->
+  <!-- UC-12: Perform Post-Mortem Inspection -->
   <g id="uc-post" filter="url(#subtle-shadow)">
     <ellipse cx="605" cy="820" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
     <text x="605" y="819" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Perform Post-Mortem</text>
-    <text x="605" y="832" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Visceral Pathology Exam</text>
+    <text x="605" y="832" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Inspection</text>
   </g>
 
-  <!-- Issue Statutory Meat Inspection Certificate -->
+  <!-- Issue Meat Inspection Certificate -->
   <g id="uc-mic" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="895" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="894" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Issue Statutory Meat</text>
-    <text x="295" y="906" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Inspection Certificate (MIC)</text>
+    <text x="295" y="894" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Issue Meat Inspection</text>
+    <text x="295" y="907" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Certificate (MIC)</text>
   </g>
 
-  <!-- UC-13: Record Calibrated Net Dressed Carcass Weight -->
+  <!-- UC-13: Record Carcass Weight -->
   <g id="uc-weigh" filter="url(#subtle-shadow)">
     <ellipse cx="605" cy="895" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="605" y="894" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Record Calibrated Net</text>
-    <text x="605" y="906" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Dressed Carcass Weight</text>
+    <text x="605" y="899" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Record Carcass Weight</text>
   </g>
 
   <!-- ZONE 4: Revenue & Cashiering Subsystem -->
-  <!-- UC-16: Compute Consolidated Municipal Billing Assessment -->
+  <!-- UC-16: Compute Slaughter Fees -->
   <g id="uc-bill" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="1010" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="1009" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Compute Consolidated Municipal</text>
-    <text x="295" y="1021" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Billing Assessment</text>
+    <text x="295" y="1014" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Compute Slaughter Fees</text>
   </g>
 
-  <!-- UC-04 / PayGCash: Settle Digital Tariff Payment via GCash -->
+  <!-- UC-04 / PayGCash: Pay via GCash -->
   <g id="uc-paygcash" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1010" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1009" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Settle Digital Tariff</text>
-    <text x="600" y="1022" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Payment via GCash</text>
+    <text x="600" y="1014" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Pay via GCash</text>
   </g>
 
-  <!-- UC-17: Process Over-the-Counter Cash Settlement -->
+  <!-- UC-17: Process Cash Payment -->
   <g id="uc-cash" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="1085" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="1084" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Process Over-the-Counter</text>
-    <text x="295" y="1096" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Cash Settlement</text>
+    <text x="295" y="1089" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Process Cash Payment</text>
   </g>
 
-  <!-- UC-05: Access Official Receipt & Barcode Gate Pass -->
+  <!-- UC-05: View Receipt & Gate Pass -->
   <g id="uc-receipt" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1085" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1084" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Access Official Receipt &amp;</text>
-    <text x="600" y="1096" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Barcode Gate Pass</text>
+    <text x="600" y="1089" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">View Receipt &amp; Gate Pass</text>
   </g>
 
-  <!-- UC-18: Validate Gate Pass & Authorize Meat Dispatch -->
+  <!-- UC-18: Confirm Meat Release -->
   <g id="uc-dispatch" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="1160" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="1159" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Validate Gate Pass &amp;</text>
-    <text x="295" y="1171" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Authorize Meat Dispatch</text>
+    <text x="295" y="1164" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Confirm Meat Release</text>
   </g>
 
-  <!-- Affix Immutable Meat Release Timestamp -->
+  <!-- Record Release Timestamp -->
   <g id="uc-releasestamp" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1160" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1159" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Affix Immutable Meat</text>
-    <text x="600" y="1172" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Release Timestamp</text>
+    <text x="600" y="1164" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Record Release Timestamp</text>
   </g>
 
   <!-- ZONE 5: Administrative & Compliance Subsystem -->
-  <!-- UC-19: Manage Staff User Accounts & RBAC Permissions -->
+  <!-- UC-19: Manage Users & Roles -->
   <g id="uc-rbac" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1285" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1284" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Manage Staff User Accounts</text>
-    <text x="600" y="1296" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">&amp; RBAC Permissions</text>
+    <text x="600" y="1289" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Manage Users &amp; Roles</text>
   </g>
 
-  <!-- Update Regulatory Enforcement Case Status -->
+  <!-- Update Case Status -->
   <g id="uc-casestatus" filter="url(#subtle-shadow)">
     <ellipse cx="295" cy="1350" rx="95" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="295" y="1349" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Update Regulatory</text>
-    <text x="295" y="1361" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Enforcement Case Status</text>
+    <text x="295" y="1354" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Update Case Status</text>
   </g>
 
-  <!-- UC-20: Triage & Investigate Whistleblower Reports -->
+  <!-- UC-20: Manage Illegal Slaughter Reports -->
   <g id="uc-investigate" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1350" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1349" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Triage &amp; Investigate</text>
-    <text x="600" y="1361" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Whistleblower Reports</text>
+    <text x="600" y="1349" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Manage Illegal Slaughter</text>
+    <text x="600" y="1362" font-size="10.5" font-weight="600" text-anchor="middle" fill="#0f172a">Reports</text>
   </g>
 
-  <!-- UC-21: Generate NMIS Legal Daily Production PDF Report -->
+  <!-- UC-21: Generate Production Reports -->
   <g id="uc-pdf" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1415" rx="100" ry="24" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1414" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Generate NMIS Legal Daily</text>
-    <text x="600" y="1426" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Production PDF Report</text>
+    <text x="600" y="1419" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">Generate Production Reports</text>
   </g>
 
-  <!-- UC-22: Audit Revenue Inflows & Slaughter Throughput -->
+  <!-- UC-22: View Dashboard & Records -->
   <g id="uc-audit" filter="url(#subtle-shadow)">
     <ellipse cx="600" cy="1475" rx="100" ry="22" fill="#ffffff" stroke="#1e293b" stroke-width="1.4"/>
-    <text x="600" y="1474" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Audit Revenue Inflows &amp;</text>
-    <text x="600" y="1486" font-size="10" font-weight="600" text-anchor="middle" fill="#0f172a">Slaughter Throughput</text>
+    <text x="600" y="1479" font-size="11" font-weight="600" text-anchor="middle" fill="#0f172a">View Dashboard &amp; Records</text>
   </g>
 </svg>

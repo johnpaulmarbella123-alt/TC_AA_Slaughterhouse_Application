@@ -5,6 +5,7 @@ import 'auth/auth_gate.dart';
 import 'pages/home_page.dart';
 import 'screen/welcome.dart';
 import 'pages/login_page.dart';
+import 'pages/forgot_password_page.dart';
 import 'pages/signup_page.dart';
 import 'screen/how_it_works.dart';
 import 'services/livestock_fee_service.dart';
@@ -38,6 +39,7 @@ class MyApp extends StatelessWidget {
       routes: {
         '/WELCOME': (context) => const WelcomeScreen(),
         '/LOGIN': (context) => const LoginScreen(),
+        '/FORGOT_PASSWORD': (context) => const ForgotPasswordScreen(),
         '/SIGNUP': (context) => const SignupPages(),
         '/HOME': (context) => const HomeScreen(),
         '/HOW_IT_WORKS': (context) => const HowItWorksScreen(),

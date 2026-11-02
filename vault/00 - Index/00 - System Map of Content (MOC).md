@@ -112,16 +112,16 @@ Standardized templates for ongoing development logging and issue tracking:
 
 ## Section 07: Academic Capstone Manuscript (Full Draft)
 
-Complete formal thesis manuscript for **Polytechnic Institute of Tabaco (BSIT)**:
+Complete formal thesis manuscript for **Polytechnic Institute of Tabaco (BSIT)** following the institutional IMRaD format:
 
-- [[00 - Preliminaries|Academic Preliminaries]] — Title page, Approval sheets, Panel ratings, Acknowledgement, Abstract, and Table of Contents.
-- [[Chapter 1 - Introduction|Chapter 1: Introduction]] — Background, Rationale, Company Profile, Problem Statement, Objectives, Scope & Delimitation.
-- [[Chapter 2 - Review of Related Literature and Technical Background|Chapter 2: Literature Review & System Design]] — Related literature, IPO Framework, RAD Model, MVC Architecture, Existing vs. Proposed Flowcharts, Use Case Analysis, Physical Deployment, Technology Stack.
-- [[Chapter 3 - Methodology|Chapter 3: Methodology]] — Data sources, Data gathering techniques (Interviews, Surveys, Document Analysis), Data analysis tools (SPSS, Excel, Looker Studio), Purposive Sampling ($n = 46$).
-- [[Chapter 4 - Results and Discussion|Chapter 4: Results and Discussion]] — Information requirements, System feature walkthrough with technical flowcharts, Usability evaluation (SUS Score: 85.8 / 100, Grade A+).
-- [[Chapter 5 - Summary, Conclusions, and Recommendations|Chapter 5: Summary, Conclusions, and Recommendations]] — Summary of findings, Conclusions, Institutional recommendations, and Future research directions.
+- [[00 - Preliminaries|Academic Preliminaries]] — Title page, Approval sheets, Panel ratings, Editor certificate, Acceptance sheet, Acknowledgement, Abstract, Table of Contents, List of Tables (1 to 10), and List of Figures (1 to 27).
+- [[Chapter 1 - Introduction|INTRODUCTION]] — Background of the Study (integrated literature and systems synthesis), Company Profile (Facility Layout Figure 1), Scope & Delimitation, Significance of the Study, Problem Statement, Objectives, and Dual Conceptual/Operational Definition of Terms.
+- [[Chapter 3 - Methodology|METHODS]] — Software Development Methodology (Rapid Application Development Model Figure 2), Data Gathering Techniques (Interviews, Questionnaires, Surveys, Document Analysis), Sources of Data, Tools for Data Analysis (Purposive Sampling, Google Forms, Google Sheets, SPSS 28, SUS Mathematical Formulation).
+- [[Chapter 4 - Results and Discussion|RESULTS]] — Information Requirements (Tables 1, 2, 3), System Features & Walkthroughs (Figures 3 to 18), System Design (Conceptual Design Figure 19, Proposed Flowchart Figure 20, Use Case Figure 21, Class Diagram Figure 22, Sequence Diagram Figure 23, Package Diagram Figure 24), Physical Design (MVC Architecture Figure 25, User Interfaces), System Architecture (Architectural Design Figure 26, Deployment Diagram Figure 27), Recommended Hardware & Software Requirements (Technologies Used, Table 4 Development Tools, Table 5 Software Requirements, Table 6 Hardware Requirements), and User Acceptance Level (Tables 7, 8, 9, 10 SUS Psychometrics).
+- [[Chapter 5 - Summary, Conclusions, and Recommendations|DISCUSSION]] — Systematic Findings aligned with SOP 1 to SOP 5, Thematic Conclusions, Actionable Recommendations (1 to 5), and Areas for Further Studies.
+- [[Chapter 2 - Review of Related Literature and Technical Background|Literature Review & Technical Background (Archival Monograph)]] — In-depth extended comparative literature and related systems monograph.
 - [[References|References (APA 7th Edition)]] — Complete academic bibliography.
-- [[Appendices|Appendices (A to G)]] — Communication letter, Technical Data Dictionary, User's Manual Guide, Information Flow DFDs, Implementation Gantt Chart, Interview Guide, and SUS Instrument.
+- [[Appendices|Appendices (A to I)]] — Communication letter, Technical Data Dictionary, User's Manual Guide, Information Flow DFDs, Implementation Gantt Chart, Evaluation Tool / Questionnaire, SUS Instrument & Results, Data Gathering Photos, Monorepo Source Code Architecture, and Curriculum Vitae.
 
 ---
 

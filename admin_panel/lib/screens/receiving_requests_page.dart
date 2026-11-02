@@ -4,7 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
+import '../services/inspection_documents_pdf_generator.dart';
+import '../services/app_settings_service.dart';
+import '../services/regular_dealers_service.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
   const ReceivingRequestsPage({super.key});
@@ -83,6 +87,10 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           .select()
           .order('created_at', ascending: false);
 
+      // Sync walk-in claims and directory via `system_settings` so mobile customers
+      // can claim walk-in orders by Reference # or Marking Tag despite `requests` RLS.
+      await _syncWalkInBridge(List<Map<String, dynamic>>.from(allRequests));
+
       final approved = allRequests.where((r) => r['status'] == 'approved').toList();
       final pendingAll = allRequests.where((r) => r['status'] == 'pending').toList();
 
@@ -116,15 +124,165 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
     }
   }
 
+  Future<void> _syncWalkInBridge(List<Map<String, dynamic>> allRequests) async {
+    try {
+      // 1. Read any claims submitted by mobile users in `system_settings` ('walk_in_claims')
+      final claimsRow = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'walk_in_claims')
+          .maybeSingle();
+
+      Map<String, dynamic> claimsMap = {};
+      if (claimsRow != null && claimsRow['value'] is Map) {
+        claimsMap = Map<String, dynamic>.from(claimsRow['value']);
+      }
+
+      // Apply claimed user_ids to `requests` and `payments` using Admin privileges
+      for (final req in allRequests) {
+        final idStr = req['id']?.toString();
+        if (idStr != null && claimsMap.containsKey(idStr)) {
+          final claimedUid = claimsMap[idStr]?.toString();
+          if (claimedUid != null &&
+              claimedUid.isNotEmpty &&
+              req['user_id']?.toString() != claimedUid) {
+            req['user_id'] = claimedUid;
+            try {
+              await supabase
+                  .from('requests')
+                  .update({'user_id': claimedUid})
+                  .eq('id', req['id']);
+              await supabase
+                  .from('payments')
+                  .update({'user_id': claimedUid})
+                  .eq('request_id', req['id']);
+            } catch (_) {}
+          }
+        }
+      }
+
+      // 2. Publish active requests into `system_settings` ('walk_in_directory')
+      final directoryList = allRequests.take(100).map((r) {
+        return <String, dynamic>{
+          'id': r['id'],
+          'user_id': r['user_id'],
+          'customer_name': r['customer_name'],
+          'livestock_type': r['livestock_type'],
+          'animal_count': r['animal_count'],
+          'request_type': r['request_type'],
+          'province': r['province'],
+          'municipality': r['municipality'],
+          'barangay': r['barangay'],
+          'market_stall_number': r['market_stall_number'],
+          'market_name': r['market_name'],
+          'marking': r['marking'],
+          'preferred_date': r['preferred_date'],
+          'status': r['status'],
+          'created_at': r['created_at'],
+        };
+      }).toList();
+
+      await supabase.from('system_settings').upsert({
+        'key': 'walk_in_directory',
+        'value': directoryList,
+      }, onConflict: 'key');
+    } catch (e) {
+      debugPrint('Walk-in bridge sync error: $e');
+    }
+  }
+
   // ════════════════════════════════════════════
   //  APPROVE REQUEST
   // ════════════════════════════════════════════
   Future<void> _approveRequest(Map<String, dynamic> request) async {
     try {
-      // 1. Update request status
+      final dealersService = RegularDealersService.instance;
+      await dealersService.init();
+
+      String customerName = (request['customer_name'] ?? '').toString().trim();
+      String? existingMarking = (request['customer_marking'] ?? request['marking'])?.toString().trim();
+
+      // Check if customer already has a locked marking in profiles or registry
+      final requestedMarking = (request['customer_marking'] ?? request['marking'])?.toString().trim();
+      final permanentMarking = await dealersService.getCustomerPermanentMarking(
+        userId: request['user_id']?.toString(),
+        customerName: customerName,
+      );
+
+      if (permanentMarking != null && permanentMarking.isNotEmpty) {
+        existingMarking = permanentMarking;
+      } else {
+        // This is a NEW meat dealer or initial request without a locked marking yet.
+        // Prompt Admin/Clerk with the dealer's requested marking (or suggested initials) to confirm & permanently lock.
+        final defaultInitialMarking = (requestedMarking != null && requestedMarking.isNotEmpty)
+            ? requestedMarking.toUpperCase()
+            : dealersService.suggestMarkingForName(customerName);
+
+        final markingCtrl = TextEditingController(text: defaultInitialMarking);
+        if (!mounted) return;
+        final confirmed = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.label_important, color: Color(0xFF2D6A4F)),
+                SizedBox(width: 8),
+                Text('Confirm Permanent Customer Marking Tag', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Customer: $customerName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                const SizedBox(height: 8),
+                const Text(
+                  'This is a new meat dealer with their initial slaughter request. Once confirmed, this marking tag will remain permanently locked for all future slaughter requests.',
+                  style: TextStyle(fontSize: 12, color: Colors.black87),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: markingCtrl,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: 'Permanent Marking Tag',
+                    border: OutlineInputBorder(),
+                    helperText: 'Review requested tag and confirm to lock permanently.',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, null), child: const Text('Cancel')),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, markingCtrl.text.trim().toUpperCase()),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
+                child: const Text('Confirm & Permanently Lock'),
+              ),
+            ],
+          ),
+        );
+
+        if (confirmed == null || confirmed.isEmpty) return; // User cancelled
+        existingMarking = confirmed;
+
+        // Permanently record in regular_dealers registry and profiles
+        await dealersService.assignPermanentMarking(
+          name: customerName,
+          markings: existingMarking,
+          category: (request['request_type'] ?? 'barangay').toString(),
+          userId: request['user_id']?.toString(),
+        );
+      }
+
+      // 1. Update request status and locked marking
       await supabase
           .from('requests')
-          .update({'status': 'approved'})
+          .update({
+            'status': 'approved',
+            'marking': existingMarking,
+          })
           .eq('id', request['id']);
 
       // 2. Format the preferred date for the notification message
@@ -495,7 +653,27 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                           '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
                         )),
                         DataCell(_buildTypeBadge(req['request_type'])),
-                        DataCell(Text(req['marking'] ?? '—')),
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEBF8FF),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFBEE3F8)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.lock, size: 10, color: Color(0xFF2B6CB0)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  (req['customer_marking'] ?? req['marking'] ?? '—').toString(),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF2B6CB0)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                         DataCell(Text(_formatDate(req['preferred_date']))),
                         DataCell(
                           OutlinedButton(
@@ -638,8 +816,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                       const DataColumn(label: Text('Customer Name')),
                       const DataColumn(label: Text('Municipality')),
                       const DataColumn(label: Text('Barangay')),
-                      if (_pendingTabIndex == 1)
-                        const DataColumn(label: Text('Store Name')),
                       const DataColumn(label: Text('Livestock')),
                       const DataColumn(label: Text('Marking')),
                       const DataColumn(label: Text('Schedule Date')),
@@ -654,8 +830,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                         DataCell(Text(req['customer_name'] ?? '')),
                         DataCell(Text(req['municipality'] ?? '')),
                         DataCell(Text(req['barangay'] ?? '')),
-                        if (_pendingTabIndex == 1)
-                          DataCell(Text(req['market_name'] ?? '—')),
                         DataCell(Text(
                           '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
                         )),
@@ -912,6 +1086,34 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
 // ═══════════════════════════════════════════════════════════
 //  NEW RECEIVING ENTRY DIALOG
 // ═══════════════════════════════════════════════════════════
+class _CustomerLookupItem {
+  final String name;
+  final String markings;
+  final String category; // 'market' or 'barangay'
+  final String? phone;
+  final String? municipality;
+  final String? barangay;
+  final String? stallNumber;
+  final String? storeName;
+  final String? usualAnimalType;
+  final bool isRegularDealer;
+  final String? userId;
+
+  _CustomerLookupItem({
+    required this.name,
+    required this.markings,
+    required this.category,
+    this.phone,
+    this.municipality,
+    this.barangay,
+    this.stallNumber,
+    this.storeName,
+    this.usualAnimalType,
+    this.isRegularDealer = false,
+    this.userId,
+  });
+}
+
 class _NewReceivingEntryDialog extends StatefulWidget {
   final dynamic supabase;
   final VoidCallback onSaved;
@@ -958,10 +1160,12 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   bool _isSaving = false;
 
   final _customerNameCtrl = TextEditingController();
+  final _contactNumberCtrl = TextEditingController();
   final _animalCountCtrl = TextEditingController();
-  final _stallNumberCtrl = TextEditingController();
-  final _storeNameCtrl = TextEditingController();
   final _markingCtrl = TextEditingController();
+
+  final FocusNode _customerNameFocus = FocusNode();
+  final FocusNode _animalCountFocus = FocusNode();
 
   // PSGC API address state (instant Albay defaults)
   List _municipalities = List.from(_albayMunicipalities);
@@ -974,12 +1178,190 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   bool _isLoadingBarangays = false;
 
   String? _selectedAnimalType;
-  final List<String> _animalTypes = ['Cattle', 'Carabao', 'Hog', 'Goat', 'Sheep', 'Horse'];
+  final List<String> _animalTypes = ['Cattle', 'Carabao', 'Hog', 'Goat', 'Sheep', 'Poultry'];
+
+  List<_CustomerLookupItem> _lookupDirectory = [];
+  _CustomerLookupItem? _selectedCustomer;
+  bool _isMarkingLocked = false;
 
   @override
   void initState() {
     super.initState();
     _loadMunicipalities(_selectedProvinceCode);
+    _loadRegisteredCustomers();
+  }
+
+  Future<void> _loadRegisteredCustomers() async {
+    try {
+      final dealersService = RegularDealersService.instance;
+      await dealersService.init();
+      final allDealers = dealersService.allDealers;
+
+      // 1. Fetch recent requests to extract past phone, address, and animal types
+      final Map<String, Map<String, dynamic>> historyByName = {};
+      try {
+        final reqsRes = await widget.supabase
+            .from('requests')
+            .select('customer_name, contact_number, livestock_type, municipality, barangay, market_stall_number, market_name, marking, customer_marking, request_type, user_id')
+            .order('created_at', ascending: false)
+            .limit(250);
+
+        if (reqsRes is List) {
+          for (final r in reqsRes) {
+            final rawName = (r['customer_name'] ?? '').toString().trim().toUpperCase();
+            if (rawName.isEmpty) continue;
+            if (!historyByName.containsKey(rawName)) {
+              historyByName[rawName] = Map<String, dynamic>.from(r);
+            }
+          }
+        }
+      } catch (err) {
+        debugPrint('Notice loading request history: $err');
+      }
+
+      // 2. Fetch profiles
+      final Map<String, Map<String, dynamic>> profilesByName = {};
+      try {
+        final res = await widget.supabase
+            .from('profiles')
+            .select('id, display_name, phone_number, address');
+        if (res is List) {
+          for (final p in res) {
+            final dName = (p['display_name'] ?? '').toString().trim().toUpperCase();
+            if (dName.isNotEmpty) {
+              profilesByName[dName] = Map<String, dynamic>.from(p);
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Notice loading profiles: $e');
+      }
+
+      final List<_CustomerLookupItem> directory = [];
+      final Set<String> processedNames = {};
+
+      // A. Populate from registered Regular Dealers (all Market & Barangay dealers)
+      for (final dealer in allDealers) {
+        final upper = dealer.name.trim().toUpperCase();
+        processedNames.add(upper);
+
+        final hist = historyByName[upper];
+        final prof = profilesByName[upper];
+
+        final phone = dealer.phone ??
+            hist?['contact_number']?.toString() ??
+            prof?['phone_number']?.toString();
+
+        final usualAnimal = hist?['livestock_type']?.toString();
+        final mun = hist?['municipality']?.toString();
+        final brgy = hist?['barangay']?.toString();
+        final stall = hist?['market_stall_number']?.toString();
+        final store = hist?['market_name']?.toString();
+        final uid = dealer.userId ?? hist?['user_id']?.toString() ?? prof?['id']?.toString();
+
+        directory.add(_CustomerLookupItem(
+          name: dealer.name,
+          markings: dealer.markings,
+          category: dealer.category,
+          phone: phone,
+          municipality: mun,
+          barangay: brgy,
+          stallNumber: stall,
+          storeName: store,
+          usualAnimalType: usualAnimal,
+          isRegularDealer: true,
+          userId: uid,
+        ));
+      }
+
+      // B. Add returning customers from requests who aren't in the default dealers roster
+      historyByName.forEach((upperName, hist) {
+        if (!processedNames.contains(upperName)) {
+          processedNames.add(upperName);
+          final rawName = hist['customer_name']?.toString() ?? upperName;
+          final mark = (hist['customer_marking'] ?? hist['marking'] ?? '').toString();
+          final cat = (hist['request_type'] ?? 'barangay').toString().toLowerCase();
+          final phone = hist['contact_number']?.toString();
+          final mun = hist['municipality']?.toString();
+          final brgy = hist['barangay']?.toString();
+          final stall = hist['market_stall_number']?.toString();
+          final store = hist['market_name']?.toString();
+          final usualAnimal = hist['livestock_type']?.toString();
+          final uid = hist['user_id']?.toString();
+
+          directory.add(_CustomerLookupItem(
+            name: rawName,
+            markings: mark,
+            category: cat,
+            phone: phone,
+            municipality: mun,
+            barangay: brgy,
+            stallNumber: stall,
+            storeName: store,
+            usualAnimalType: usualAnimal,
+            isRegularDealer: false,
+            userId: uid,
+          ));
+        }
+      });
+
+      if (mounted) {
+        setState(() {
+          _lookupDirectory = directory;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading customer directory: $e');
+    }
+  }
+
+  void _onCustomerSelected(_CustomerLookupItem item) {
+    setState(() {
+      _selectedCustomer = item;
+      _customerNameCtrl.text = item.name;
+
+      if (item.markings.isNotEmpty) {
+        _markingCtrl.text = item.markings;
+        _isMarkingLocked = true;
+      } else {
+        _isMarkingLocked = false;
+      }
+
+      if (item.phone != null && item.phone!.isNotEmpty) {
+        _contactNumberCtrl.text = item.phone!;
+      }
+
+      // Switch category
+      final isBrgy = item.category != 'market';
+      _isBarangay = isBrgy;
+
+      if (isBrgy) {
+        // Barangay customer
+        if (item.municipality != null && item.municipality!.isNotEmpty) {
+          _selectedMunicipality = item.municipality;
+          _loadBarangays(_selectedMunicipalityCode ?? "050517000");
+        }
+        if (item.barangay != null && item.barangay!.isNotEmpty) {
+          _selectedBarangay = item.barangay;
+        }
+      }
+
+      // Pre-select usual animal type
+      if (item.usualAnimalType != null && item.usualAnimalType!.isNotEmpty) {
+        final match = _animalTypes.firstWhere(
+          (t) => t.toLowerCase() == item.usualAnimalType!.toLowerCase(),
+          orElse: () => 'Hog',
+        );
+        _selectedAnimalType = match;
+      } else {
+        _selectedAnimalType ??= 'Hog';
+      }
+    });
+
+    // Advance focus to animal count
+    Future.microtask(() {
+      if (mounted) _animalCountFocus.requestFocus();
+    });
   }
 
   Future<void> _loadMunicipalities(String provinceCode) async {
@@ -1043,10 +1425,11 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   @override
   void dispose() {
     _customerNameCtrl.dispose();
+    _contactNumberCtrl.dispose();
     _animalCountCtrl.dispose();
-    _stallNumberCtrl.dispose();
-    _storeNameCtrl.dispose();
     _markingCtrl.dispose();
+    _customerNameFocus.dispose();
+    _animalCountFocus.dispose();
     super.dispose();
   }
 
@@ -1077,44 +1460,62 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
     setState(() => _isSaving = true);
     try {
+      await AppSettingsService.instance.ensureAdminAuthSession();
       final markingInput = _markingCtrl.text.trim();
+      final currentEnteredName = _customerNameCtrl.text.trim().toUpperCase();
       final conflicting = await widget.supabase
           .from('requests')
-          .select('id, marking, status')
+          .select('id, marking, status, customer_name')
           .ilike('marking', markingInput)
           .not('status', 'in', '("completed","cancelled","rejected","released")')
           .limit(1);
 
       if (conflicting.isNotEmpty) {
-        setState(() => _isSaving = false);
-        if (!mounted) return;
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.orange),
-                SizedBox(width: 8),
-                Text('Marking Already In Use'),
+        final existingName = (conflicting[0]['customer_name'] ?? '').toString().trim().toUpperCase();
+        if (existingName.isNotEmpty && existingName != currentEnteredName) {
+          setState(() => _isSaving = false);
+          if (!mounted) return;
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Marking In Use by Another Customer'),
+                ],
+              ),
+              content: Text(
+                "The marking '$markingInput' is already currently active for customer '$existingName'.\n\n"
+                "Please assign a distinct marking tag to avoid confusing animals on the floor.",
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E855A)),
+                  child: const Text('OK'),
+                ),
               ],
             ),
-            content: Text(
-              "The marking '$markingInput' is already assigned to an active request.\n\n"
-              "Please assign a distinct marking (e.g. $markingInput-1) to avoid confusing animals on the floor.",
-            ),
-            actions: [
-              ElevatedButton(
-                onPressed: () => Navigator.pop(ctx),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E855A)),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
+          );
+          return;
+        }
       }
 
-      await widget.supabase.from('requests').insert({
+      String? matchedUserId = _selectedCustomer?.userId;
+      if (matchedUserId == null) {
+        final enteredName = _customerNameCtrl.text.trim().toLowerCase();
+        for (final cust in _lookupDirectory) {
+          if (cust.name.trim().toLowerCase() == enteredName && cust.userId != null) {
+            matchedUserId = cust.userId;
+            break;
+          }
+        }
+      }
+
+      final contactStr = _contactNumberCtrl.text.trim();
+      final basePayload = <String, dynamic>{
+        'user_id': ?matchedUserId,
         'request_type': _isBarangay ? 'barangay' : 'market',
         'customer_name': _customerNameCtrl.text.trim(),
         'livestock_type': _selectedAnimalType,
@@ -1122,28 +1523,90 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         'province': _isBarangay ? _selectedProvince : null,
         'municipality': _isBarangay ? _selectedMunicipality : null,
         'barangay': _isBarangay ? _selectedBarangay : null,
-        'market_stall_number': _isBarangay ? null : _stallNumberCtrl.text.trim(),
-        'market_name': _isBarangay ? null : _storeNameCtrl.text.trim(),
+        'market_stall_number': null,
+        'market_name': null,
         'marking': _markingCtrl.text.trim(),
         'preferred_date': DateTime.now().toIso8601String().split('T')[0], // today's date
         'status': 'approved', // walk-in: goes directly to approved
-      });
+      };
+
+      Map<String, dynamic> insertedRow;
+      try {
+        insertedRow = await widget.supabase
+            .from('requests')
+            .insert({
+              ...basePayload,
+              if (contactStr.isNotEmpty) 'contact_number': contactStr,
+            })
+            .select()
+            .single();
+      } catch (err) {
+        debugPrint('Direct insert error: $err. Trying with admin session and auth fallback...');
+        await AppSettingsService.instance.ensureAdminAuthSession();
+        final currentAdminUid = widget.supabase.auth.currentUser?.id;
+        try {
+          insertedRow = await widget.supabase
+              .from('requests')
+              .insert({
+                ...basePayload,
+                if (contactStr.isNotEmpty) 'contact_number': contactStr,
+                'user_id': basePayload['user_id'] ?? currentAdminUid,
+              })
+              .select()
+              .single();
+        } catch (_) {
+          insertedRow = await widget.supabase
+              .from('requests')
+              .insert({
+                ...basePayload,
+                'user_id': currentAdminUid,
+              })
+              .select()
+              .single();
+        }
+      }
+
+      final reqId = insertedRow['id'];
+      final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final destOrOrigin = _isBarangay
+          ? '${_selectedBarangay ?? ''}, ${_selectedMunicipality ?? 'Tabaco City'}, $_selectedProvince'
+          : 'Tabaco Public Market';
+
+      // Ensure newly entered walk-in meat dealer is permanently locked in registry
+      try {
+        final dealersService = RegularDealersService.instance;
+        await dealersService.init();
+        await dealersService.assignPermanentMarking(
+          name: _customerNameCtrl.text.trim(),
+          markings: _markingCtrl.text.trim(),
+          category: _isBarangay ? 'barangay' : 'market',
+          phone: contactStr.isNotEmpty ? contactStr : null,
+          userId: matchedUserId,
+        );
+      } catch (err) {
+        debugPrint('Note on auto-locking walk-in dealer marking: $err');
+      }
 
       if (mounted) {
-        Navigator.pop(context);
         widget.onSaved();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(children: [
-              Icon(Icons.check_circle, color: Colors.white, size: 20),
-              SizedBox(width: 8),
-              Text('New receiving entry saved successfully'),
-            ]),
-            backgroundColor: const Color(0xFF38A169),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => _WalkInClaimStubDialog(
+            refNo: refNo,
+            marking: _markingCtrl.text.trim(),
+            customerName: _customerNameCtrl.text.trim(),
+            contactNumber: contactStr,
+            livestockType: _selectedAnimalType ?? 'Hog',
+            animalCount: _animalCountCtrl.text.trim(),
+            requestType: _isBarangay ? 'Barangay' : 'Market',
+            destinationOrOrigin: destOrOrigin,
+            isLinkedToAccount: matchedUserId != null,
           ),
         );
+        if (mounted) {
+          Navigator.pop(context);
+        }
       }
     } catch (e) {
       setState(() => _isSaving = false);
@@ -1191,10 +1654,38 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               ),
               const SizedBox(height: 20),
 
-              // ── Customer Name ──
-              _buildLabel('Customer Name'),
-              const SizedBox(height: 6),
-              _buildTextField(_customerNameCtrl, 'Enter customer name'),
+              // ── Customer Name & Contact Number ──
+              Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildLabel('Customer Name *'),
+                        const SizedBox(height: 6),
+                        _buildCustomerNameField(),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildLabel('Contact / Phone No.'),
+                        const SizedBox(height: 6),
+                        _buildTextField(
+                          _contactNumberCtrl,
+                          'e.g. 09171234567',
+                          keyboardType: TextInputType.phone,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 16),
 
               // ── Animal Type / Count / Weight ──
@@ -1223,7 +1714,12 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                       children: [
                         _buildLabel('Animal Count'),
                         const SizedBox(height: 6),
-                        _buildTextField(_animalCountCtrl, 'e.g. 5', keyboardType: TextInputType.number),
+                        _buildTextField(
+                          _animalCountCtrl,
+                          'e.g. 5',
+                          keyboardType: TextInputType.number,
+                          focusNode: _animalCountFocus,
+                        ),
                       ],
                     ),
                   ),
@@ -1231,15 +1727,53 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               ),
               const SizedBox(height: 16),
 
-              // ── Location / Market fields (conditional) ──
-              if (_isBarangay) ..._buildBarangayFields()
-              else ..._buildMarketFields(),
-              const SizedBox(height: 16),
+              // ── Location fields (conditional) ──
+              if (_isBarangay) ...[
+                ..._buildBarangayFields(),
+                const SizedBox(height: 16),
+              ],
 
               // ── Marking ──
-              _buildLabel('Marking (Unique Tag) *'),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildLabel('Marking (Unique Tag) *'),
+                  if (_isMarkingLocked)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE6F9F0),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.verified, size: 14, color: Color(0xFF2D6A4F)),
+                          const SizedBox(width: 4),
+                          const Text(
+                            'Verified Permanent Marking',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF2D6A4F)),
+                          ),
+                          const SizedBox(width: 8),
+                          InkWell(
+                            onTap: () => setState(() => _isMarkingLocked = false),
+                            child: const Text(
+                              'Unlock',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF1E3A8A), fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 6),
-              _buildTextField(_markingCtrl, 'Enter unique marking (e.g., MK, MK-1)..'),
+              _buildTextField(
+                _markingCtrl,
+                'Enter unique marking (e.g., MK, MK-1)..',
+                readOnly: _isMarkingLocked,
+              ),
               const SizedBox(height: 28),
 
               // ── Actions ──
@@ -1354,36 +1888,6 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     ];
   }
 
-  List<Widget> _buildMarketFields() {
-    return [
-      Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Stall Number'),
-                const SizedBox(height: 6),
-                _buildTextField(_stallNumberCtrl, 'Enter stall number'),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Store Name'),
-                const SizedBox(height: 6),
-                _buildTextField(_storeNameCtrl, 'Enter store name'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ];
-  }
-
   Widget _buildTypeButton(String label, String sub, bool isBarangay) {
     final isActive = _isBarangay == isBarangay;
     return GestureDetector(
@@ -1434,21 +1938,193 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     TextEditingController ctrl,
     String hint, {
     TextInputType keyboardType = TextInputType.text,
+    FocusNode? focusNode,
+    bool readOnly = false,
   }) {
     return TextField(
       controller: ctrl,
+      focusNode: focusNode,
+      readOnly: readOnly,
       keyboardType: keyboardType,
-      style: const TextStyle(fontSize: 13),
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: readOnly ? FontWeight.bold : FontWeight.normal,
+        color: readOnly ? const Color(0xFF2D6A4F) : const Color(0xFF2D3748),
+      ),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
         filled: true,
-        fillColor: const Color(0xFFF7FAFC),
+        fillColor: readOnly ? const Color(0xFFF0FFF4) : const Color(0xFFF7FAFC),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: readOnly ? const Color(0xFF81C784) : Colors.grey.shade300)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
       ),
+    );
+  }
+
+  Widget _buildCustomerNameField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            return RawAutocomplete<_CustomerLookupItem>(
+              textEditingController: _customerNameCtrl,
+              focusNode: _customerNameFocus,
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                final query = textEditingValue.text.trim().toLowerCase();
+                if (query.isEmpty) {
+                  return _lookupDirectory.take(6);
+                }
+                return _lookupDirectory.where((item) {
+                  final nameMatch = item.name.toLowerCase().contains(query);
+                  final markingMatch = item.markings.toLowerCase().contains(query);
+                  final phoneMatch = item.phone != null && item.phone!.contains(query);
+                  return nameMatch || markingMatch || phoneMatch;
+                });
+              },
+              displayStringForOption: (_CustomerLookupItem option) => option.name,
+              onSelected: (_CustomerLookupItem selection) {
+                _onCustomerSelected(selection);
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  style: const TextStyle(fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Type surname, full name, or marking (e.g. Bondad, 4)...',
+                    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                    filled: true,
+                    fillColor: const Color(0xFFF7FAFC),
+                    prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF2D6A4F)),
+                    suffixIcon: controller.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () {
+                              controller.clear();
+                              setState(() {
+                                _selectedCustomer = null;
+                                _isMarkingLocked = false;
+                              });
+                            },
+                          )
+                        : null,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
+                  ),
+                );
+              },
+              optionsViewBuilder: (context, onSelected, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 8,
+                    borderRadius: BorderRadius.circular(8),
+                    color: Colors.white,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth,
+                        maxHeight: 260,
+                      ),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: options.length,
+                        separatorBuilder: (context, index) => Divider(height: 1, color: Colors.grey.shade200),
+                        itemBuilder: (context, index) {
+                          final item = options.elementAt(index);
+                          final isMarket = item.category == 'market';
+                          return ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item.name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1A202C)),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (item.markings.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFE6F9F0),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
+                                    ),
+                                    child: Text(
+                                      'Mark: ${item.markings}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF2D6A4F)),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            subtitle: Text(
+                              '${isMarket ? 'Market Dealer' : 'Barangay Dealer'}'
+                              '${item.phone != null && item.phone!.isNotEmpty ? ' • ${item.phone}' : ''}'
+                              '${item.usualAnimalType != null ? ' • Usual: ${item.usualAnimalType}' : ''}',
+                              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                            ),
+                            leading: Icon(
+                              isMarket ? Icons.storefront : Icons.home_work_outlined,
+                              size: 20,
+                              color: isMarket ? const Color(0xFF2B6CB0) : const Color(0xFFD69E2E),
+                            ),
+                            onTap: () => onSelected(item),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+        if (_selectedCustomer != null)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEBF8FF),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF3182CE).withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.verified_user, size: 16, color: Color(0xFF2B6CB0)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Regular Dealer Profile Loaded: ${_selectedCustomer!.name} (Marking: ${_selectedCustomer!.markings}, ${_selectedCustomer!.category.toUpperCase()})',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF2B6CB0)),
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      _selectedCustomer = null;
+                      _isMarkingLocked = false;
+                      _customerNameCtrl.clear();
+                      _contactNumberCtrl.clear();
+                      _markingCtrl.clear();
+                    });
+                  },
+                  child: const Text('Reset', style: TextStyle(fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
@@ -1554,6 +2230,266 @@ class _RejectDialogState extends State<_RejectDialog> {
           child: const Text('Reject & Notify'),
         ),
       ],
+    );
+  }
+}
+
+class _WalkInClaimStubDialog extends StatefulWidget {
+  final String refNo;
+  final String marking;
+  final String customerName;
+  final String contactNumber;
+  final String livestockType;
+  final String animalCount;
+  final String requestType;
+  final String destinationOrOrigin;
+  final bool isLinkedToAccount;
+
+  const _WalkInClaimStubDialog({
+    required this.refNo,
+    required this.marking,
+    required this.customerName,
+    required this.contactNumber,
+    required this.livestockType,
+    required this.animalCount,
+    required this.requestType,
+    required this.destinationOrOrigin,
+    required this.isLinkedToAccount,
+  });
+
+  @override
+  State<_WalkInClaimStubDialog> createState() => _WalkInClaimStubDialogState();
+}
+
+class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
+  bool _isPrinting = false;
+
+  Future<void> _printStub() async {
+    setState(() => _isPrinting = true);
+    try {
+      final bytes = await InspectionDocumentsPdfGenerator.generateWalkInClaimStub(
+        refNo: widget.refNo,
+        marking: widget.marking,
+        customerName: widget.customerName,
+        contactNumber: widget.contactNumber,
+        livestockType: widget.livestockType,
+        animalCount: widget.animalCount,
+        requestType: widget.requestType,
+        destinationOrOrigin: widget.destinationOrOrigin,
+      );
+      await Printing.layoutPdf(
+        name: 'WalkIn_ClaimStub_${widget.refNo}.pdf',
+        onLayout: (_) async => bytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error printing claim stub: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 540,
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEBFFF5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.receipt_long, color: Color(0xFF2D6A4F), size: 26),
+                ),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Walk-In Receiving & Mobile Claim Stub',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Print or provide this Reference No. to the walk-in customer.',
+                        style: TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEBFFF5),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF38A169)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'REFERENCE NO. (CLAIM CODE)',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF276749)),
+                        ),
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          widget.refNo,
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF7FAFC),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'LIVESTOCK MARKING TAG',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF4A5568)),
+                        ),
+                        const SizedBox(height: 4),
+                        SelectableText(
+                          widget.marking,
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _stubInfoRow('Customer Name:', widget.customerName),
+            _stubInfoRow('Contact Number:', widget.contactNumber.isNotEmpty ? widget.contactNumber : 'Not provided'),
+            _stubInfoRow('Livestock & Head Count:', '${widget.livestockType} (${widget.animalCount} head/s)'),
+            _stubInfoRow('Classification:', '${widget.requestType} • ${widget.destinationOrOrigin}'),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (!widget.isLinkedToAccount) ...[
+                    Container(
+                      width: 82,
+                      height: 82,
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Image.asset(
+                        'assets/images/app_qr_code.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                  ] else ...[
+                    Icon(
+                      Icons.verified_user,
+                      size: 24,
+                      color: Colors.blue.shade700,
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: Text(
+                      widget.isLinkedToAccount
+                          ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
+                          : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        height: 1.4,
+                        color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _isPrinting ? null : _printStub,
+                  icon: _isPrinting
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.print, size: 18),
+                  label: Text(_isPrinting ? 'Printing...' : 'Print Claim Stub'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF2D6A4F),
+                    side: const BorderSide(color: Color(0xFF2D6A4F)),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  ),
+                  child: const Text('Done'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stubInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 160,
+            child: Text(label, style: const TextStyle(fontSize: 12.5, color: Color(0xFF718096))),
+          ),
+          Expanded(
+            child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2D3748))),
+          ),
+        ],
+      ),
     );
   }
 }

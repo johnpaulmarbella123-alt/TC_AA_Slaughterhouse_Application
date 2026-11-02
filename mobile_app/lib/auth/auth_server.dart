@@ -124,6 +124,87 @@ Future<AuthResponse> signUp(
   }
 
   // =========================
+  // RESET PASSWORD - SEND OTP (EMAIL OR PHONE)
+  // =========================
+  Future<void> sendPasswordResetOtp(String emailOrPhone) async {
+    final identifier = emailOrPhone.trim();
+    if (identifier.contains('@')) {
+      await _supabase.auth.resetPasswordForEmail(identifier);
+    } else {
+      String phone = identifier;
+      if (phone.startsWith('09')) {
+        phone = '+63${phone.substring(1)}';
+      }
+      await _supabase.auth.signInWithOtp(phone: phone);
+    }
+  }
+
+  // =========================
+  // RESET PASSWORD - VERIFY & UPDATE (EMAIL OR PHONE)
+  // =========================
+  Future<void> resetPasswordWithOtp({
+    required String emailOrPhone,
+    required String token,
+    required String newPassword,
+  }) async {
+    final identifier = emailOrPhone.trim();
+    if (identifier.contains('@')) {
+      // 1. Verify recovery OTP token for email
+      await _supabase.auth.verifyOTP(
+        email: identifier,
+        token: token.trim(),
+        type: OtpType.recovery,
+      );
+    } else {
+      String phone = identifier;
+      if (phone.startsWith('09')) {
+        phone = '+63${phone.substring(1)}';
+      }
+      // 1. Verify SMS OTP token for phone
+      await _supabase.auth.verifyOTP(
+        phone: phone,
+        token: token.trim(),
+        type: OtpType.sms,
+      );
+    }
+
+    // 2. Update user's password
+    await _supabase.auth.updateUser(
+      UserAttributes(password: newPassword.trim()),
+    );
+
+    // 3. Sign out of the temporary session so user can log in with new password
+    await _supabase.auth.signOut();
+  }
+
+  // =========================
+  // FIND EMAIL FOR PHONE (FALLBACK)
+  // =========================
+  Future<String?> findEmailForPhone(String phoneInput) async {
+    try {
+      String clean = phoneInput.trim().replaceAll(RegExp(r'\s+|-'), '');
+      String intl = clean.startsWith('09')
+          ? '+63${clean.substring(1)}'
+          : (clean.startsWith('+63') ? clean : '+63$clean');
+      String local = clean.startsWith('+63')
+          ? '0${clean.substring(3)}'
+          : (clean.startsWith('09') ? clean : '0$clean');
+
+      final data = await _supabase
+          .from('profiles')
+          .select('email')
+          .or('phone.eq.$intl,phone.eq.$local,phone.eq.$clean')
+          .not('email', 'is', null)
+          .limit(1)
+          .maybeSingle();
+
+      return data?['email'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // =========================
   // GET USER EMAIL
   // =========================
   String? getUserEmail() {

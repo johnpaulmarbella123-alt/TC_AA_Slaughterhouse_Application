@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'pages/home_page.dart';
 
 class OtpScreen extends StatefulWidget {
@@ -96,6 +97,12 @@ class _OtpScreenState extends State<OtpScreen> {
               backgroundColor: Color(0xFF2D6A4F),
             ),
           );
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('has_previously_logged_in', true);
+          } catch (_) {}
+
+          if (!mounted) return;
           globalAvatarUrl.value = null;
           Navigator.pushNamedAndRemoveUntil(
             context,

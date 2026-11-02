@@ -95,10 +95,11 @@ class StaffAccount {
   final String id;
   String fullName;
   String email;
-  String role; // 'Admin', 'Receiving Clerk', 'Document Verifier', 'Inspector', 'Cashier', 'Releasing Officer'
+  String role; // 'Super Admin', 'Admin', 'Clerk', 'Inspector'
   bool isActive;
   DateTime createdAt;
   String? avatarUrl;
+  String? password;
 
   StaffAccount({
     required this.id,
@@ -108,28 +109,46 @@ class StaffAccount {
     this.isActive = true,
     required this.createdAt,
     this.avatarUrl,
+    this.password,
   });
+
+  static String normalizeRole(String rawRole) {
+    final r = rawRole.trim().toLowerCase();
+    if (r == 'super admin' || r == 'superadmin') return 'Super Admin';
+    if (r == 'admin') return 'Admin';
+    if (r.contains('inspector')) return 'Inspector';
+    if (r == 'clerk' ||
+        r == 'receiving clerk' ||
+        r == 'document verifier' ||
+        r == 'cashier' ||
+        r == 'releasing officer') {
+      return 'Clerk';
+    }
+    return 'Admin';
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
         'fullName': fullName,
         'email': email,
-        'role': role,
+        'role': normalizeRole(role),
         'isActive': isActive,
         'createdAt': createdAt.toIso8601String(),
         'avatarUrl': avatarUrl,
+        if (password != null && password!.isNotEmpty) 'password': password,
       };
 
   factory StaffAccount.fromJson(Map<String, dynamic> json) => StaffAccount(
         id: json['id']?.toString() ?? UniqueKey().toString(),
         fullName: json['fullName']?.toString() ?? 'Staff Member',
         email: json['email']?.toString() ?? '',
-        role: json['role']?.toString() ?? 'Admin',
+        role: normalizeRole(json['role']?.toString() ?? 'Admin'),
         isActive: json['isActive'] as bool? ?? true,
         createdAt: json['createdAt'] != null
             ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
             : DateTime.now(),
         avatarUrl: json['avatarUrl']?.toString(),
+        password: json['password']?.toString(),
       );
 }
 
@@ -395,11 +414,13 @@ class AppSettingsService extends ChangeNotifier {
 
   Future<void> _ensureAdminAuth() async {
     final client = Supabase.instance.client;
-    if (client.auth.currentSession == null) {
+    final session = client.auth.currentSession;
+    final isExpired = session?.isExpired ?? true;
+    if (session == null || isExpired || session.user.email != 'tcaaslaughterhouse@gmail.com') {
       try {
         await client.auth.signInWithPassword(
-          email: 'admin.slaughterhouse@tabaco.gov.ph',
-          password: 'AdminPassword123!',
+          email: 'tcaaslaughterhouse@gmail.com',
+          password: 'tcaa1234',
         );
         debugPrint('AppSettingsService: Admin session authenticated.');
       } catch (e) {
@@ -407,6 +428,8 @@ class AppSettingsService extends ChangeNotifier {
       }
     }
   }
+
+  Future<void> ensureAdminAuthSession() => _ensureAdminAuth();
 
   Future<void> reloadFromSupabase() async {
     try {
@@ -506,58 +529,84 @@ class AppSettingsService extends ChangeNotifier {
       role: 'Admin',
       isActive: true,
       createdAt: DateTime(2025, 1, 10),
+      password: 'AdminPassword123!',
     ),
     StaffAccount(
       id: 'staff-2',
       fullName: 'Elena Santos',
-      email: 'receiving.santos@tabaco.gov.ph',
-      role: 'Receiving Clerk',
+      email: 'clerk@tabaco.gov.ph',
+      role: 'Clerk',
       isActive: true,
       createdAt: DateTime(2025, 2, 1),
-    ),
-    StaffAccount(
-      id: 'staff-3',
-      fullName: 'Mark Angelo Diaz',
-      email: 'verifier.diaz@tabaco.gov.ph',
-      role: 'Document Verifier',
-      isActive: true,
-      createdAt: DateTime(2025, 2, 5),
+      password: 'ClerkPassword123!',
     ),
     StaffAccount(
       id: 'staff-4',
       fullName: 'Dr. Maria Clara Reyes',
-      email: 'inspector.reyes@tabaco.gov.ph',
+      email: 'inspector@tabaco.gov.ph',
       role: 'Inspector',
       isActive: true,
       createdAt: DateTime(2025, 2, 12),
-    ),
-    StaffAccount(
-      id: 'staff-5',
-      fullName: 'Jose Mari Chan',
-      email: 'cashier.chan@tabaco.gov.ph',
-      role: 'Cashier',
-      isActive: true,
-      createdAt: DateTime(2025, 2, 15),
-    ),
-    StaffAccount(
-      id: 'staff-6',
-      fullName: 'Arthur Pendelton',
-      email: 'releasing.arthur@tabaco.gov.ph',
-      role: 'Releasing Officer',
-      isActive: true,
-      createdAt: DateTime(2025, 2, 18),
+      password: 'InspectorPassword123!',
     ),
   ];
 
   List<StaffAccount> get staffAccounts => List.unmodifiable(_staffAccounts);
 
+  String? _activeStaffOverrideEmail;
+  String? get activeStaffOverrideEmail => _activeStaffOverrideEmail;
+  bool get hasActiveStaffSession =>
+      _activeStaffOverrideEmail != null && _activeStaffOverrideEmail!.isNotEmpty;
+
+  /// Returns all active inspector names based on staff accounts & roles configured in the system.
+  List<String> get configuredInspectors {
+    final inspectors = _staffAccounts
+        .where((s) => s.isActive && s.role.trim().toLowerCase() == 'inspector')
+        .map((s) => s.fullName.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList();
+
+    if (inspectors.isNotEmpty) return inspectors;
+
+    // Fallback: search for any staff whose role contains 'inspector'
+    final fallback = _staffAccounts
+        .where((s) => s.isActive && s.role.toLowerCase().contains('inspector'))
+        .map((s) => s.fullName.trim())
+        .where((name) => name.isNotEmpty)
+        .toSet()
+        .toList();
+    if (fallback.isNotEmpty) return fallback;
+
+    // Standard default if no staff has inspector role yet
+    return ['Dr. Maria Clara Reyes'];
+  }
+
   String _currentRole = 'Admin';
   String get currentRole => _currentRole;
+  bool get isSuperAdmin => _currentRole == 'Super Admin';
+  bool get isAdminOrSuperAdmin => _currentRole == 'Super Admin' || _currentRole == 'Admin';
 
   void setCurrentRole(String role) {
-    _currentRole = role;
+    _currentRole = StaffAccount.normalizeRole(role);
     notifyListeners();
     _saveProfileToPrefs();
+  }
+
+  Future<void> setActiveStaffSession(StaffAccount? staff) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (staff == null) {
+      _activeStaffOverrideEmail = null;
+      await prefs.remove('active_staff_override_email');
+    } else {
+      _activeStaffOverrideEmail = staff.email;
+      _profileName = staff.fullName;
+      _profileEmail = staff.email;
+      _currentRole = StaffAccount.normalizeRole(staff.role);
+      await prefs.setString('active_staff_override_email', staff.email);
+      await _saveProfileToPrefs();
+      notifyListeners();
+    }
   }
 
   Future<void> addStaffAccount(StaffAccount staff) async {
@@ -578,7 +627,16 @@ class AppSettingsService extends ChangeNotifier {
   Future<void> updateStaffRole(String id, String newRole) async {
     final idx = _staffAccounts.indexWhere((s) => s.id == id);
     if (idx != -1) {
-      _staffAccounts[idx].role = newRole;
+      _staffAccounts[idx].role = StaffAccount.normalizeRole(newRole);
+      notifyListeners();
+      await _saveStaffToPrefs();
+    }
+  }
+
+  Future<void> updateStaffPassword(String id, String newPassword) async {
+    final idx = _staffAccounts.indexWhere((s) => s.id == id);
+    if (idx != -1) {
+      _staffAccounts[idx].password = newPassword;
       notifyListeners();
       await _saveStaffToPrefs();
     }
@@ -592,31 +650,28 @@ class AppSettingsService extends ChangeNotifier {
 
   /// Determines whether a sidebar navigation index is permitted for the active role.
   /// Module indices:
-  /// 0: Dashboard
+  /// 0: Dashboard (Role-specific: Admin Dashboard, Clerk Dashboard, or Inspector Dashboard)
   /// 1: Receiving & New Requests
   /// 2: Document Verification
   /// 3: Slaughter & Inspection
   /// 4: Payment & Cashiering
   /// 5: Meat Releasing
   /// 6: Reports & Records
-  /// 7: Settings
+  /// 7: Settings (Full Settings for Admin/Super Admin, My Profile for Clerk/Inspector)
   bool isModuleAllowed(int moduleIndex) {
-    if (_currentRole == 'Admin') return true;
+    final normalized = StaffAccount.normalizeRole(_currentRole);
+    if (normalized == 'Super Admin' || normalized == 'Admin') return true;
 
-    // All roles can access Settings (Profile tab) and Dashboard
+    // All roles can access Dashboard (0) and Settings / My Profile (7)
     if (moduleIndex == 0 || moduleIndex == 7) return true;
 
-    switch (_currentRole) {
-      case 'Receiving Clerk':
-        return moduleIndex == 1;
-      case 'Document Verifier':
-        return moduleIndex == 2;
+    switch (normalized) {
+      case 'Clerk':
+        // Clerk handles: Receiving (1), Document Verification (2), Payment & Cashiering (4), Meat Releasing (5)
+        return moduleIndex == 1 || moduleIndex == 2 || moduleIndex == 4 || moduleIndex == 5;
       case 'Inspector':
+        // Inspector handles: Slaughter & Inspection (3)
         return moduleIndex == 3;
-      case 'Cashier':
-        return moduleIndex == 4;
-      case 'Releasing Officer':
-        return moduleIndex == 5;
       default:
         return true;
     }
@@ -705,11 +760,43 @@ class AppSettingsService extends ChangeNotifier {
   }
 
   void syncWithAuthUser([User? authUser]) {
+    // If a Clerk or Inspector logged in using their StaffAccount session override,
+    // keep their exclusive staff identity and role locked.
+    if (_activeStaffOverrideEmail != null && _activeStaffOverrideEmail!.isNotEmpty) {
+      final idx = _staffAccounts.indexWhere(
+        (s) => s.email.toLowerCase() == _activeStaffOverrideEmail!.toLowerCase(),
+      );
+      if (idx != -1) {
+        final staff = _staffAccounts[idx];
+        _profileName = staff.fullName;
+        _profileEmail = staff.email;
+        _currentRole = StaffAccount.normalizeRole(staff.role);
+        notifyListeners();
+        return;
+      }
+    }
+
     final user = authUser ?? Supabase.instance.client.auth.currentUser;
     if (user != null) {
       if (user.email != null && user.email!.isNotEmpty) {
         _profileEmail = user.email!;
       }
+
+      // Check if the authenticated user's email matches a StaffAccount in Settings -> Staff & Roles
+      final matchedIdx = _staffAccounts.indexWhere(
+        (s) => s.email.toLowerCase() == _profileEmail.toLowerCase(),
+      );
+      if (matchedIdx != -1) {
+        final staff = _staffAccounts[matchedIdx];
+        _profileName = staff.fullName;
+        _currentRole = StaffAccount.normalizeRole(staff.role);
+        if (staff.avatarUrl != null && staff.avatarUrl!.isNotEmpty) {
+          _profilePhotoUrl = staff.avatarUrl;
+        }
+        notifyListeners();
+        return;
+      }
+
       final meta = user.userMetadata;
       if (meta != null) {
         if (meta['full_name'] != null && meta['full_name'].toString().trim().isNotEmpty) {
@@ -719,8 +806,7 @@ class AppSettingsService extends ChangeNotifier {
           _profilePhotoUrl = meta['avatar_url'].toString().trim();
         }
         if (meta['role'] != null) {
-          final r = meta['role'].toString();
-          if (r == 'admin') _currentRole = 'Admin';
+          _currentRole = StaffAccount.normalizeRole(meta['role'].toString());
         }
       }
       notifyListeners();
@@ -731,6 +817,45 @@ class AppSettingsService extends ChangeNotifier {
     required String currentPassword,
     required String newPassword,
   }) async {
+    // A) If a StaffAccount session override is active (e.g. Clerk or Inspector)
+    if (_activeStaffOverrideEmail != null && _activeStaffOverrideEmail!.isNotEmpty) {
+      final idx = _staffAccounts.indexWhere(
+        (s) => s.email.toLowerCase() == _activeStaffOverrideEmail!.toLowerCase(),
+      );
+
+      if (idx != -1) {
+        final staff = _staffAccounts[idx];
+        final configuredPass = staff.password?.trim() ?? '';
+
+        if (configuredPass.isNotEmpty && currentPassword != configuredPass) {
+          throw const AuthException('The existing / current password you entered is incorrect.');
+        }
+
+        // 1. Update the StaffAccount's configured password in local and Supabase system_settings
+        staff.password = newPassword;
+        notifyListeners();
+        await _saveStaffToPrefs();
+
+        // 2. Also try updating their Supabase Auth password if their email exists as an independent Auth user
+        final client = Supabase.instance.client;
+        try {
+          final res = await client.auth.signInWithPassword(
+            email: staff.email,
+            password: currentPassword,
+          );
+          if (res.user != null) {
+            await client.auth.updateUser(UserAttributes(password: newPassword));
+          }
+        } catch (_) {
+          // If not a separate Supabase Auth user, the StaffAccount update above is authoritative.
+        }
+
+        debugPrint('Staff password updated successfully for: ${staff.email}');
+        return true;
+      }
+    }
+
+    // B) Standard Supabase Auth sign-in / Admin account
     final client = Supabase.instance.client;
     final user = client.auth.currentUser;
 
@@ -754,6 +879,16 @@ class AppSettingsService extends ChangeNotifier {
 
       if (response.user == null) {
         throw const AuthException('Failed to update password in Supabase.');
+      }
+
+      // 3. Keep StaffAccount in sync if matching
+      final matchIdx = _staffAccounts.indexWhere(
+        (s) => s.email.toLowerCase() == user.email!.toLowerCase(),
+      );
+      if (matchIdx != -1) {
+        _staffAccounts[matchIdx].password = newPassword;
+        notifyListeners();
+        await _saveStaffToPrefs();
       }
 
       debugPrint('Password updated successfully for: ${user.email}');
@@ -857,12 +992,28 @@ class AppSettingsService extends ChangeNotifier {
         _currentRole = savedRole;
       }
 
+      final savedStaffEmail = prefs.getString('active_staff_override_email');
+      if (savedStaffEmail != null && savedStaffEmail.isNotEmpty) {
+        _activeStaffOverrideEmail = savedStaffEmail;
+        final idx = _staffAccounts.indexWhere(
+          (s) => s.email.toLowerCase() == savedStaffEmail.toLowerCase(),
+        );
+        if (idx != -1) {
+          final staff = _staffAccounts[idx];
+          _profileName = staff.fullName;
+          _profileEmail = staff.email;
+          _currentRole = StaffAccount.normalizeRole(staff.role);
+        }
+      }
+
       // Check current Supabase auth user
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        _profileEmail = user.email ?? _profileEmail;
+        if (_activeStaffOverrideEmail == null) {
+          _profileEmail = user.email ?? _profileEmail;
+        }
         final meta = user.userMetadata;
-        if (meta != null) {
+        if (meta != null && _activeStaffOverrideEmail == null) {
           if (meta['full_name'] != null && _profileName == 'Slaughterhouse Administrator') {
             _profileName = meta['full_name'].toString();
           }
@@ -870,8 +1021,12 @@ class AppSettingsService extends ChangeNotifier {
             _profilePhotoUrl = meta['avatar_url'].toString();
           }
           if (meta['role'] != null) {
-            final r = meta['role'].toString();
-            if (r == 'admin') _currentRole = 'Admin';
+            final r = meta['role'].toString().toLowerCase();
+            if (r == 'superadmin' || r == 'super admin') {
+              _currentRole = 'Super Admin';
+            } else if (r == 'admin') {
+              _currentRole = 'Admin';
+            }
           }
         }
       }
@@ -1043,13 +1198,15 @@ class AppSettingsService extends ChangeNotifier {
       // Persist to Supabase system_settings
       await _ensureAdminAuth();
       final client = Supabase.instance.client;
-      if (client.auth.currentSession != null) {
+      try {
         await client.from('system_settings').upsert({
           'key': 'staff_accounts',
           'value': list,
           'updated_at': DateTime.now().toIso8601String(),
         });
         debugPrint('Saved staff_accounts to Supabase system_settings successfully.');
+      } catch (upsertErr) {
+        debugPrint('Error upserting staff_accounts to Supabase: $upsertErr');
       }
     } catch (e) {
       debugPrint('Error saving staff: $e');

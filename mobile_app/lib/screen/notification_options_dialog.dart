@@ -103,6 +103,31 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
           'anti_mortem_response': choice,
           'anti_mortem_response_at': DateTime.now().toIso8601String(),
         }).eq('id', requestId);
+
+        // Record alert in system_settings for admin panel modal notification
+        try {
+          final existing = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'ante_mortem_alerts')
+              .maybeSingle();
+          Map<String, dynamic> alerts = {};
+          if (existing != null && existing['value'] is Map) {
+            alerts = Map<String, dynamic>.from(existing['value']);
+          }
+          alerts[requestId.toString()] = {
+            'request_id': requestId,
+            'choice': choice,
+            'livestock_type': widget.data['livestock_type'] ?? 'Livestock',
+            'responded_at': DateTime.now().toIso8601String(),
+            'acknowledged': false,
+          };
+          await supabase.from('system_settings').upsert({
+            'key': 'ante_mortem_alerts',
+            'value': alerts,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
       }
 
       if (mounted) {
@@ -490,6 +515,31 @@ class _DelayedOperationDialogState extends State<_DelayedOperationDialog> {
           'anti_mortem_response': choice,
           'anti_mortem_response_at': DateTime.now().toIso8601String(),
         }).eq('id', requestId);
+
+        // Record alert in system_settings for admin panel modal notification
+        try {
+          final existing = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'ante_mortem_alerts')
+              .maybeSingle();
+          Map<String, dynamic> alerts = {};
+          if (existing != null && existing['value'] is Map) {
+            alerts = Map<String, dynamic>.from(existing['value']);
+          }
+          alerts[requestId.toString()] = {
+            'request_id': requestId,
+            'choice': choice,
+            'livestock_type': widget.data['livestock_type'] ?? 'Livestock',
+            'responded_at': DateTime.now().toIso8601String(),
+            'acknowledged': false,
+          };
+          await supabase.from('system_settings').upsert({
+            'key': 'ante_mortem_alerts',
+            'value': alerts,
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
       }
 
       if (mounted) {

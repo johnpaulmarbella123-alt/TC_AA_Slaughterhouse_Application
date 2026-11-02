@@ -32,11 +32,12 @@ void main() async {
   // Initialize App Settings (loads persisted fees, roles, schedule, appearance, theme)
   await AppSettingsService.instance.initialize();
 
-  // If "Keep me logged in" was NOT checked on last login, sign out now
-  // so the user must log in again on every app launch.
+  // If staff session is active, ensure background admin auth session is active for DB operations
   final prefs = await SharedPreferences.getInstance();
   final keepLoggedIn = prefs.getBool('keepMeLoggedIn') ?? false;
-  if (!keepLoggedIn && Supabase.instance.client.auth.currentSession != null) {
+  if (AppSettingsService.instance.hasActiveStaffSession) {
+    await AppSettingsService.instance.ensureAdminAuthSession();
+  } else if (!keepLoggedIn && Supabase.instance.client.auth.currentSession != null) {
     await Supabase.instance.client.auth.signOut();
   }
 
@@ -57,7 +58,10 @@ class MyApp extends StatelessWidget {
           darkTheme: AppTheme.darkTheme,
           themeMode: AppSettingsService.instance.themeMode,
           debugShowCheckedModeBanner: false,
-          initialRoute: Supabase.instance.client.auth.currentSession == null ? '/' : '/dashboard',
+          initialRoute: (Supabase.instance.client.auth.currentSession == null &&
+                  !AppSettingsService.instance.hasActiveStaffSession)
+              ? '/'
+              : '/dashboard',
           routes: {
             '/': (context) => const HeroSection(),
             '/login': (context) => const LoginPage(),
