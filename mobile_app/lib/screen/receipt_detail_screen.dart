@@ -487,13 +487,13 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text("Awaiting Payment Verification",
+                              const Text("Waiting for Cashier Payment",
                                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF856404))),
                               const SizedBox(height: 2),
                               Text(
                                 _payment!['payment_method'].toString() == 'GCash'
-                                    ? "Your GCash payment is being verified by the admin. You'll be notified once confirmed."
-                                    : "Cash on Pickup selected. Your payment will be confirmed once the cashier verifies it at pickup.",
+                                    ? "Your GCash payment is being verified by the cashier. You'll be notified once confirmed."
+                                    : "Cash-on-Pickup selected. Please settle payment at the cashier counter upon arrival before carcass release.",
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF856404)),
                               ),
                             ],
@@ -605,9 +605,17 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         padding: const EdgeInsets.only(bottom: 5),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                value,
+                textAlign: TextAlign.end,
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            ),
           ],
         ),
       );
@@ -616,8 +624,10 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         padding: const EdgeInsets.only(bottom: 4),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Flexible(child: Text(label, style: const TextStyle(fontSize: 12))),
+            const SizedBox(width: 8),
             Text(amount, style: const TextStyle(fontSize: 12)),
           ],
         ),
@@ -727,9 +737,17 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
       padding: const EdgeInsets.only(bottom: 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('$label:', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF2D3748))),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF2D3748)),
+            ),
+          ),
         ],
       ),
     );

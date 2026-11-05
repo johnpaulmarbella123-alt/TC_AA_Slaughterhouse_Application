@@ -207,7 +207,14 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
       final permanentMarking = await dealersService.getCustomerPermanentMarking(
         userId: request['user_id']?.toString(),
         customerName: customerName,
+        requestedMarking: requestedMarking,
       );
+
+      final matchedDealer = dealersService.findDealerByName(customerName) ??
+          (requestedMarking != null ? dealersService.findDealerByMarking(requestedMarking) : null);
+      if (matchedDealer != null) {
+        customerName = matchedDealer.name; // Keep as official abattoir record name (e.g. D. CERILLO)
+      }
 
       if (permanentMarking != null && permanentMarking.isNotEmpty) {
         existingMarking = permanentMarking;
@@ -825,15 +832,78 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     ],
                     rows: currentList.map((req) {
                       final refNo = _buildRefNo(req);
+                      final cName = (req['customer_name'] ?? '').toString();
+                      final mMark = (req['marking'] ?? req['customer_marking'] ?? '').toString();
+                      final uId = req['user_id']?.toString();
+                      final isReg = RegularDealersService.instance.isRegularDealer(
+                        userId: uId,
+                        customerName: cName,
+                        marking: mMark,
+                      );
                       return DataRow(cells: [
                         DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.w600))),
-                        DataCell(Text(req['customer_name'] ?? '')),
+                        DataCell(
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(cName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                              if (isReg) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE8F5E9),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFF81C784)),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.verified, size: 10, color: Color(0xFF2E7D32)),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Regular Dealer',
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                         DataCell(Text(req['municipality'] ?? '')),
                         DataCell(Text(req['barangay'] ?? '')),
                         DataCell(Text(
                           '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
                         )),
-                        DataCell(Text(req['marking'] ?? '—')),
+                        DataCell(
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: isReg ? const Color(0xFFE8F5E9) : const Color(0xFFF7FAFC),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: isReg ? const Color(0xFFA5D6A7) : const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isReg) ...[
+                                  const Icon(Icons.lock, size: 10, color: Color(0xFF2E7D32)),
+                                  const SizedBox(width: 4),
+                                ],
+                                Text(
+                                  mMark.isNotEmpty ? mMark : '—',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    color: isReg ? const Color(0xFF2E7D32) : const Color(0xFF2D3748),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                         DataCell(
                           Column(
                             mainAxisAlignment: MainAxisAlignment.center,

@@ -157,11 +157,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       }
       return 'Out for Delivery';
     }
-    if (req['request_type'] == 'market' && !_isPaid(req)) {
-      return 'Awaiting Payment Verification';
-    }
-    if (req['request_type'] == 'barangay' && !_isPaid(req)) {
-      return 'Awaiting Cashier Payment';
+    if (!_isPaid(req)) {
+      return 'Waiting for Cashier Payment';
     }
     return 'Ready';
   }
@@ -721,10 +718,11 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       bgColor = const Color(0xFFFFFBEB);
       borderColor = const Color(0xFFFCD34D);
       textColor = const Color(0xFFB45309);
-    } else if (status == 'Awaiting Cashier Payment' || status == 'Awaiting Payment Verification') {
+    } else if (status == 'Waiting for Cashier Payment' || status == 'Awaiting Cashier Payment' || status == 'Awaiting Payment Verification') {
       bgColor = const Color(0xFFFEF3C7);
       borderColor = const Color(0xFFFCD34D);
       textColor = const Color(0xFFB45309);
+      label = 'Waiting for Cashier Payment';
     } else if (isOverdue) {
       bgColor = const Color(0xFFFFF5F5);
       borderColor = const Color(0xFFFEB2B2);
@@ -881,13 +879,13 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
 
   Widget _buildAwaitingPaymentButton(Map<String, dynamic> req) {
     return Tooltip(
-      message: 'Claimant must settle cash payment at the Cashier window first',
+      message: 'Claimant must settle payment at the Cashier window first before carcass handover',
       child: OutlinedButton.icon(
         icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first.'),
+              content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first before carcass release.'),
               backgroundColor: Color(0xFFD97706),
             ),
           );
@@ -900,7 +898,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           side: const BorderSide(color: Color(0xFFFCD34D)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
-        label: const Text('Awaiting Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+        label: const Text('Waiting for Cashier Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
       ),
     );
   }

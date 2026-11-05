@@ -227,28 +227,22 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
           final total = (widget.fees['total'] ?? 0).toDouble();
           final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
 
-          // 1. Mark payment as paid in database
+          // 1. Mark payment as verification_pending for cashier clearance (Cashier Verification Gate)
           await supabase.from('payments').update({
             'payment_method': 'GCash',
-            'status': 'paid',
-            'balance': 0,
-            'cashier_name': 'Online (PayMongo GCash)',
+            'status': 'verification_pending',
+            'transaction_ref': _paymongoLinkId ?? widget.receiptNo,
             'receipt_number': widget.receiptNo,
           }).eq('request_id', reqId);
 
-          // 2. Update request status to paid
-          await supabase.from('requests').update({
-            'status': 'paid',
-          }).eq('id', reqId);
-
-          // 3. Send payment_verified notification
+          // 2. Send notification for record
           if (userId != null) {
             try {
               await supabase.from('notifications').insert({
                 'user_id': userId,
-                'title': 'Payment Confirmed',
-                'message': 'Your payment of \u20b1${total.toStringAsFixed(2)} via GCash has been confirmed. Carcass is ready for release scheduling.',
-                'type': 'payment_verified',
+                'title': 'GCash Payment Submitted',
+                'message': 'Your online payment of \u20b1${total.toStringAsFixed(2)} via GCash was recorded. Waiting for abattoir cashier verification for release clearance.',
+                'type': 'payment_pending',
                 'is_read': false,
                 'data': {
                   'request_id': reqId,
@@ -297,13 +291,13 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
             ),
             const SizedBox(height: 14),
             const Text(
-              'Payment Successful!',
+              'Online Payment Submitted!',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been successfully verified and confirmed. Your carcass is now ready for release scheduling.',
+              'Your $method transaction of \u20b1${total.toStringAsFixed(2)} has been recorded. Present your receipt reference at the cashier window or show it upon collection to finalize release clearance.',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
               textAlign: TextAlign.center,
             ),

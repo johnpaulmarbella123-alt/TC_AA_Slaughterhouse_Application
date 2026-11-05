@@ -1,4 +1,5 @@
 /// <reference types="https://esm.sh/@supabase/functions-js/src/edge-runtime.d.ts" />
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
 Deno.serve(async (req: Request) => {
   const corsHeaders = {
@@ -12,16 +13,57 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // ─── 1. Authenticate Caller via Supabase JWT ───
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Missing or invalid authorization token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const token = authHeader.replace("Bearer ", "");
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Unauthorized: Invalid or expired session" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ─── 2. RBAC: Verify Caller is Staff (Admin or Inspector) ───
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role, display_name")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    const userRole = (profile?.role || "").toLowerCase();
+    const isAuthorized = ["admin", "superadmin", "inspector"].includes(userRole);
+
+    if (!isAuthorized) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Forbidden: Only Administrators and Meat Inspectors can transmit NMIC reports." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const body = await req.json();
-    const { apiKey, sender, to, subject, text, attachments } = body;
+    const { apiKey, sender, to, subject, text, attachments, reportType, periodLabel } = body;
 
     const resendKey = apiKey || Deno.env.get("RESEND_API_KEY");
     if (!resendKey) {
       return new Response(
-        JSON.stringify({ success: false, error: "Resend API key is not provided or configured." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ success: false, error: "Resend API key is not configured on the abattoir server." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    const recipientList = Array.isArray(to) ? to : [to];
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -31,7 +73,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         from: sender || "TCAA Slaughterhouse <onboarding@resend.dev>",
-        to: Array.isArray(to) ? to : [to],
+        to: recipientList,
         subject: subject,
         text: text,
         attachments: attachments || [],
@@ -40,6 +82,21 @@ Deno.serve(async (req: Request) => {
 
     const data = await res.json();
     if (res.ok) {
+      // ─── 3. Log into nmic_transmissions Audit Trail ───
+      try {
+        await supabase.from("nmic_transmissions").insert({
+          report_type: reportType || "official_transmission",
+          period_label: periodLabel || new Date().toISOString().split("T")[0],
+          recipient_email: recipientList.join(", "),
+          transmittal_subject: subject,
+          transmittal_body: text,
+          sent_by: profile?.display_name || user.email || "Authorized Staff",
+          status: "sent",
+        });
+      } catch (logErr) {
+        console.warn("Failed to log transmission audit record:", logErr);
+      }
+
       return new Response(
         JSON.stringify({ success: true, id: data.id, data }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -51,11 +108,11 @@ Deno.serve(async (req: Request) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     return new Response(
-      JSON.stringify({ success: false, error: `Server exception: ${err?.message || err}` }),
+      JSON.stringify({ success: false, error: `Server exception: ${message}` }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
-

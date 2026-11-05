@@ -522,9 +522,33 @@ class RegularDealersService {
 
   RegularDealer? findDealerByName(String name) {
     final clean = name.trim().toLowerCase();
+    if (clean.isEmpty) return null;
+
+    // 1. Exact match
     for (var d in _dealers) {
       if (d.name.toLowerCase().trim() == clean) return d;
     }
+
+    // 2. Initial + Surname match (e.g. "Danilo Cerillo" -> "D. CERILLO")
+    final parts = clean.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2) {
+      final firstInitial = parts.first[0];
+      final lastName = parts.last;
+      for (var d in _dealers) {
+        final dClean = d.name.toLowerCase().replaceAll(RegExp(r'[^a-zA-Z\s]'), '');
+        final dParts = dClean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+        if (dParts.length >= 2 && dParts.first[0] == firstInitial && dParts.last == lastName) {
+          return d;
+        }
+      }
+    }
+
+    // 3. Substring / contains match
+    for (var d in _dealers) {
+      final dName = d.name.toLowerCase().trim();
+      if (dName.contains(clean) || clean.contains(dName)) return d;
+    }
+
     return null;
   }
 
@@ -536,8 +560,22 @@ class RegularDealersService {
     return null;
   }
 
+  /// Checks if a customer or marking belongs to an official regular meat dealer
+  bool isRegularDealer({String? userId, String? customerName, String? marking}) {
+    if (userId != null && userId.isNotEmpty) {
+      if (_dealers.any((d) => d.userId == userId)) return true;
+    }
+    if (customerName != null && customerName.isNotEmpty) {
+      if (findDealerByName(customerName) != null) return true;
+    }
+    if (marking != null && marking.isNotEmpty) {
+      if (findDealerByMarking(marking) != null) return true;
+    }
+    return false;
+  }
+
   /// Checks if a customer already has a locked marking
-  Future<String?> getCustomerPermanentMarking({String? userId, String? customerName}) async {
+  Future<String?> getCustomerPermanentMarking({String? userId, String? customerName, String? requestedMarking}) async {
     if (userId != null && userId.isNotEmpty) {
       try {
         final profile = await supabase
@@ -556,6 +594,11 @@ class RegularDealersService {
 
     if (customerName != null && customerName.isNotEmpty) {
       final d = findDealerByName(customerName);
+      if (d != null && d.markings.isNotEmpty) return d.markings;
+    }
+
+    if (requestedMarking != null && requestedMarking.isNotEmpty) {
+      final d = findDealerByMarking(requestedMarking);
       if (d != null && d.markings.isNotEmpty) return d.markings;
     }
 

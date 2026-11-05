@@ -373,6 +373,64 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
             const SizedBox(height: 16),
           ],
 
+          if ((req['status'] ?? '').toString().toLowerCase() == 'releasable' && !isPaid) ...[
+            Builder(builder: (ctx) {
+              final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
+              return Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFCD34D)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          isMarket ? Icons.local_shipping_outlined : Icons.payment,
+                          color: const Color(0xFFB45309),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            isMarket ? 'Ready for Delivery — Payment Required' : 'Waiting for Cashier Payment',
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      isMarket
+                          ? 'Market delivery scheduled. Please settle payment via GCash or cashier to clear your carcass for delivery dispatch.'
+                          : 'Your carcass has passed inspection and is hooked in the releasing bay. Under Cash-on-Pickup, please settle ₱${totalAmount.toStringAsFixed(2)} at the abattoir cashier counter upon arrival (or pay online via GCash in the Payment tab) before claiming your carcass. The dispatcher can only release the meat once payment is recorded by the cashier.',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF92400E), height: 1.4),
+                    ),
+                    if (!isMarket) ...[
+                      const SizedBox(height: 8),
+                      const Row(
+                        children: [
+                          Icon(Icons.schedule, size: 14, color: Color(0xFFB45309)),
+                          SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Reminder: Claim before 5:00 PM to avoid cold storage preservation fees.',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFB45309)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }),
+            const SizedBox(height: 16),
+          ],
+
           // ── CARD 1: REQUEST DETAILS ──────────────────────────────
           Container(
             padding: const EdgeInsets.all(18),
@@ -554,6 +612,10 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
   Widget _buildProcessTimeline() {
     final status = (_request?['status'] ?? '').toString().toLowerCase();
     final createdAt = _request?['created_at'];
+    final isPaid = _payment != null &&
+        ((_payment!['status'] ?? '').toString().toLowerCase() == 'paid' ||
+         (_payment!['payment_status'] ?? '').toString().toLowerCase() == 'paid');
+    final isMarket = (_request?['request_type'] ?? '').toString().toLowerCase() == 'market';
 
     // Map status into stage completion level:
     // 0: Request Received
@@ -561,7 +623,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     // 2: Slaughter Inspection
     // 3: Slaughter Operation
     // 4: Processing Complete
-    // 5: Ready for Pickup
+    // 5: Ready for Delivery / Ready for Pickup
     int currentStageIndex = 0;
     if (['doc_verified', 'doc_approved'].contains(status)) {
       currentStageIndex = 1;
@@ -569,7 +631,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
       currentStageIndex = 3;
     } else if (status == 'releasable') {
       currentStageIndex = 4;
-    } else if (['payment_pending', 'paid', 'released', 'completed'].contains(status)) {
+    } else if (['payment_pending', 'paid', 'out_for_delivery', 'released', 'completed'].contains(status)) {
       currentStageIndex = 5;
     } else if (['post_mortem_failed', 'condemned'].contains(status)) {
       currentStageIndex = 3;
@@ -577,6 +639,25 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
       currentStageIndex = 2;
     } else if (status == 'approved') {
       currentStageIndex = 0;
+    }
+
+    String step5Title;
+    bool step5Completed;
+
+    if (isMarket) {
+      if (status == 'released') {
+        step5Title = 'Delivered to Market Stall';
+        step5Completed = true;
+      } else if (status == 'out_for_delivery') {
+        step5Title = 'Out for Delivery';
+        step5Completed = true;
+      } else {
+        step5Title = 'Ready for Delivery';
+        step5Completed = currentStageIndex >= 5 && isPaid;
+      }
+    } else {
+      step5Title = isPaid ? 'Ready for Pickup' : 'Waiting for Cashier Payment';
+      step5Completed = currentStageIndex >= 5 && isPaid;
     }
 
     final reqTimeStr = _formatDateTime(createdAt);
@@ -623,12 +704,12 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
         isCompleted: currentStageIndex >= 4,
       ),
       _ProcessStep(
-        title: 'Ready for Pickup',
+        title: step5Title,
         time: currentStageIndex >= 5
             ? DateFormat('yyyy-MM-dd  hh:mm a')
                 .format(baseDate.add(const Duration(hours: 42)))
             : '',
-        isCompleted: currentStageIndex >= 5,
+        isCompleted: step5Completed,
       ),
     ];
 

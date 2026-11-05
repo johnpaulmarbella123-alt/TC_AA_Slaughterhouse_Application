@@ -416,15 +416,12 @@ class AppSettingsService extends ChangeNotifier {
     final client = Supabase.instance.client;
     final session = client.auth.currentSession;
     final isExpired = session?.isExpired ?? true;
-    if (session == null || isExpired || session.user.email != 'tcaaslaughterhouse@gmail.com') {
+    if (session == null || isExpired) {
       try {
-        await client.auth.signInWithPassword(
-          email: 'tcaaslaughterhouse@gmail.com',
-          password: 'tcaa1234',
-        );
-        debugPrint('AppSettingsService: Admin session authenticated.');
+        await client.auth.refreshSession();
+        debugPrint('AppSettingsService: Active staff session refreshed.');
       } catch (e) {
-        debugPrint('AppSettingsService: Admin auth note: $e');
+        debugPrint('AppSettingsService: Session refresh note: $e');
       }
     }
   }

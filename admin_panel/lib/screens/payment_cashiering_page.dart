@@ -1378,6 +1378,8 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                           ),
                           child: Text(
                             _customerName.isNotEmpty ? _customerName : '\u2014',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(fontSize: 14, fontWeight: _customerName.isNotEmpty ? FontWeight.w600 : FontWeight.normal, color: _customerName.isNotEmpty ? Colors.black87 : Colors.grey),
                           ),
                         ),

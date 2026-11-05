@@ -7,6 +7,7 @@ import 'condemnation_slip_screen.dart';
 import 'notification_options_dialog.dart';
 import 'receipt_detail_screen.dart';
 import 'view_status_update_screen.dart';
+import '../services/walk_in_claim_helper.dart';
 
 class NotifyPage extends StatefulWidget {
   /// Callback to switch bottom-nav tab (e.g. index 1 = Requests).
@@ -504,128 +505,130 @@ class _NotifyPageState extends State<NotifyPage> {
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message,
-              style: const TextStyle(fontSize: 13, color: Colors.black87),
-            ),
-            if (isWithin30MinsOfPickup) ...[
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFF87171)),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.timer_outlined, color: Color(0xFFDC2626), size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'URGENT: Less than 30 mins left before 5:00 PM pickup deadline! Claim immediately to avoid the \u20b1150.00 cold storage fee.',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
-                      ),
-                    ),
-                  ],
-                ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message,
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
               ),
-            ] else if (isPast5Pm) ...[
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFEF2F2),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFF87171)),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.ac_unit, color: Color(0xFFDC2626), size: 18),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'NOTICE: 5:00 PM deadline has passed. Carcass is safely preserved in abattoir cold storage. A \u20b1150.00 preservation fee applies upon release.',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (refNo.isNotEmpty || receiptNo.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDelivery ? const Color(0xFFE6F1FB) : const Color(0xFFFFF7E6),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isDelivery ? const Color(0xFFB6D8F6) : const Color(0xFFFFE0A3),
+              if (isWithin30MinsOfPickup) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF87171)),
                   ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (refNo.isNotEmpty) _pickupRow('Reference #', refNo),
-                    if (receiptNo.isNotEmpty) _pickupRow('Receipt #', receiptNo),
-                    _pickupRow('Method', isDelivery ? 'Refrigerated Delivery Van' : 'Slaughterhouse Pickup'),
-                    if (isHandoverConfirmed) ...[
-                      if (claimantName.isNotEmpty)
-                        _pickupRow('Claimant', '$claimantName ($claimantType)'),
-                      if (claimantIdRef.isNotEmpty)
-                        _pickupRow('Claimant ID / Ref #', claimantIdRef),
-                      if (releasedBy.isNotEmpty)
-                        _pickupRow(
-                          'Verified By Clerk',
-                          dispatcherStaffId.isNotEmpty ? '$releasedBy (Staff ID: $dispatcherStaffId)' : 'Clerk $releasedBy',
+                  child: Row(
+                    children: const [
+                      Icon(Icons.timer_outlined, color: Color(0xFFDC2626), size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'URGENT: Less than 30 mins left before 5:00 PM pickup deadline! Claim immediately to avoid the \u20b1150.00 cold storage fee.',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
                         ),
-                      if (verifiedAt.isNotEmpty)
-                        _pickupRow('Handover Time', verifiedAt),
-                      if (coldStorageFee != null && (num.tryParse(coldStorageFee.toString()) ?? 0) > 0)
-                        _pickupRow('Cold Storage', '\u20b1${coldStorageFee.toString()} (Paid)'),
+                      ),
                     ],
+                  ),
+                ),
+              ] else if (isPast5Pm) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF87171)),
+                  ),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.ac_unit, color: Color(0xFFDC2626), size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'NOTICE: 5:00 PM deadline has passed. Carcass is safely preserved in abattoir cold storage. A \u20b1150.00 preservation fee applies upon release.',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (refNo.isNotEmpty || receiptNo.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isDelivery ? const Color(0xFFE6F1FB) : const Color(0xFFFFF7E6),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isDelivery ? const Color(0xFFB6D8F6) : const Color(0xFFFFE0A3),
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (refNo.isNotEmpty) _pickupRow('Reference #', refNo),
+                      if (receiptNo.isNotEmpty) _pickupRow('Receipt #', receiptNo),
+                      _pickupRow('Method', isDelivery ? 'Refrigerated Delivery Van' : 'Slaughterhouse Pickup'),
+                      if (isHandoverConfirmed) ...[
+                        if (claimantName.isNotEmpty)
+                          _pickupRow('Claimant', '$claimantName ($claimantType)'),
+                        if (claimantIdRef.isNotEmpty)
+                          _pickupRow('Claimant ID / Ref #', claimantIdRef),
+                        if (releasedBy.isNotEmpty)
+                          _pickupRow(
+                            'Verified By Clerk',
+                            dispatcherStaffId.isNotEmpty ? '$releasedBy (Staff ID: $dispatcherStaffId)' : 'Clerk $releasedBy',
+                          ),
+                        if (verifiedAt.isNotEmpty)
+                          _pickupRow('Handover Time', verifiedAt),
+                        if (coldStorageFee != null && (num.tryParse(coldStorageFee.toString()) ?? 0) > 0)
+                          _pickupRow('Cold Storage', '\u20b1${coldStorageFee.toString()} (Paid)'),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+              if (!isDelivery && !isHandoverConfirmed) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: const [
+                    Icon(Icons.badge_outlined, size: 14, color: Color(0xFF4A5568)),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Cannot pick up personally? You can designate an Authorized Representative in the Receipt screen.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF4A5568), fontStyle: FontStyle.italic),
+                      ),
+                    ),
                   ],
                 ),
-              ),
-            ],
-            if (!isDelivery && !isHandoverConfirmed) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: const [
-                  Icon(Icons.badge_outlined, size: 14, color: Color(0xFF4A5568)),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Cannot pick up personally? You can designate an Authorized Representative in the Receipt screen.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF4A5568), fontStyle: FontStyle.italic),
+              ] else if (isDelivery && !isHandoverConfirmed) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: const [
+                    Icon(Icons.local_shipping, size: 14, color: Color(0xFF185FA5)),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Refrigerated van delivers directly to your stall. No pick-up authorization needed.',
+                        style: TextStyle(fontSize: 11, color: Color(0xFF185FA5), fontStyle: FontStyle.italic),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ] else if (isDelivery && !isHandoverConfirmed) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: const [
-                  Icon(Icons.local_shipping, size: 14, color: Color(0xFF185FA5)),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Refrigerated van delivers directly to your stall. No pick-up authorization needed.',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF185FA5), fontStyle: FontStyle.italic),
-                    ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
         actions: [
           if (requestId != null)
@@ -717,9 +720,11 @@ class _NotifyPageState extends State<NotifyPage> {
             ),
           ],
         ),
-        content: Text(
-          message,
-          style: const TextStyle(fontSize: 13, color: Colors.black87),
+        content: SingleChildScrollView(
+          child: Text(
+            message,
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          ),
         ),
         actions: [
           TextButton(
@@ -786,36 +791,38 @@ class _NotifyPageState extends State<NotifyPage> {
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              (notif['message'] ?? '').toString(),
-              style: const TextStyle(fontSize: 13, color: Colors.black87),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.green.shade200),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                (notif['message'] ?? '').toString(),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _pickupRow('Livestock', livestock),
-                  _pickupRow('Pickup Date', formattedDate),
-                  _pickupRow('Pickup Time', pickupTime),
-                  _pickupRow('Location', 'Tabaco City Slaughterhouse'),
-                  if (adminNotes.toString().isNotEmpty)
-                    _pickupRow('Notes', adminNotes.toString()),
-                ],
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _pickupRow('Livestock', livestock),
+                    _pickupRow('Pickup Date', formattedDate),
+                    _pickupRow('Pickup Time', pickupTime),
+                    _pickupRow('Location', 'Tabaco City Slaughterhouse'),
+                    if (adminNotes.toString().isNotEmpty)
+                      _pickupRow('Notes', adminNotes.toString()),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -886,35 +893,37 @@ class _NotifyPageState extends State<NotifyPage> {
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              (notif['message'] ?? '').toString(),
-              style: const TextStyle(fontSize: 13, color: Colors.black87),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.blue.shade200),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                (notif['message'] ?? '').toString(),
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _pickupRow('Livestock', livestock),
-                  _pickupRow('New Schedule', formattedDate),
-                  _pickupRow('Location', 'Tabaco City Slaughterhouse'),
-                  if (adminNotes.toString().isNotEmpty)
-                    _pickupRow('Notes', adminNotes.toString()),
-                ],
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _pickupRow('Livestock', livestock),
+                    _pickupRow('New Schedule', formattedDate),
+                    _pickupRow('Location', 'Tabaco City Slaughterhouse'),
+                    if (adminNotes.toString().isNotEmpty)
+                      _pickupRow('Notes', adminNotes.toString()),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1293,16 +1302,18 @@ class _NotifyPageState extends State<NotifyPage> {
           actionColor: const Color(0xFF185FA5),
         );
       case 'slaughter_completed':
+        final isMarket = t.contains('delivery') ||
+            (data['request_type'] == 'market' || data['is_delivery'] == true);
         return _NotifStyle(
-          icon: Icons.check_circle,
-          iconColor: const Color(0xFF1A8C62),
-          iconBg: const Color(0xFFE4F8F0),
+          icon: isMarket ? Icons.local_shipping : Icons.payment,
+          iconColor: const Color(0xFFB45309),
+          iconBg: const Color(0xFFFFFBEB),
           imagePath: 'assets/images/slaughter_operation.png',
-          badge: 'Operation Complete',
-          badgeBg: const Color(0xFFE4F8F0),
-          badgeText: const Color(0xFF0A3D2E),
+          badge: isMarket ? 'Ready for Delivery' : 'Waiting for Cashier Payment',
+          badgeBg: const Color(0xFFFFFBEB),
+          badgeText: const Color(0xFFB45309),
           actionLabel: 'View Status',
-          actionColor: const Color(0xFF0F6E56),
+          actionColor: const Color(0xFFB45309),
         );
       case 'mic_generated':
         return const _NotifStyle(
@@ -1634,262 +1645,12 @@ class _NotifyPageState extends State<NotifyPage> {
   }
 
   Future<void> _showClaimWalkInDialog() async {
-    final codeCtrl = TextEditingController();
-    bool isClaiming = false;
-    String? errorText;
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.add_link, color: Color(0xFF1E855A)),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Claim Walk-In Order',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Enter the Reference Number (e.g., MI-2026-005) or Livestock Marking Tag (e.g., MK-1) from your Walk-In Claim Stub to receive live night-slaughter alerts, respond to inspection findings, and pay online.',
-                style: TextStyle(fontSize: 12.5, color: Colors.black87, height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: codeCtrl,
-                textCapitalization: TextCapitalization.characters,
-                decoration: InputDecoration(
-                  labelText: 'Reference No. or Marking Tag',
-                  hintText: 'e.g. MI-2026-005 or MK-1',
-                  errorText: errorText,
-                  filled: true,
-                  fillColor: const Color(0xFFF7FAFC),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: isClaiming ? null : () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: isClaiming
-                  ? null
-                  : () async {
-                      final raw = codeCtrl.text.trim();
-                      if (raw.isEmpty) {
-                        setDlgState(() => errorText = 'Please enter your Reference No. or Marking');
-                        return;
-                      }
-                      final user = supabase.auth.currentUser;
-                      if (user == null) return;
-
-                      setDlgState(() {
-                        isClaiming = true;
-                        errorText = null;
-                      });
-
-                      try {
-                        Map<String, dynamic>? matchedReq;
-                        final upper = raw.toUpperCase();
-                        final idMatch = RegExp(r'(?:MI-\d{4}-|RCP-\d{4}-|^)(\d+)$').firstMatch(upper);
-                        final int? parsedId = idMatch != null ? int.tryParse(idMatch.group(1)!) : null;
-
-                        try {
-                          if (parsedId != null) {
-                            final res = await supabase
-                                .from('requests')
-                                .select('*, slaughter_inspection(*)')
-                                .eq('id', parsedId)
-                                .maybeSingle();
-                            if (res != null) matchedReq = Map<String, dynamic>.from(res);
-                          }
-
-                          if (matchedReq == null) {
-                            final byMarking = await supabase
-                                .from('requests')
-                                .select('*, slaughter_inspection(*)')
-                                .ilike('marking', raw)
-                                .order('created_at', ascending: false)
-                                .limit(1);
-                            if ((byMarking as List).isNotEmpty) {
-                              matchedReq = Map<String, dynamic>.from(byMarking.first);
-                            }
-                          }
-                        } catch (_) {}
-
-                        // Fallback: lookup in `system_settings` ('walk_in_directory') which bypasses RLS on unclaimed rows
-                        if (matchedReq == null) {
-                          final dirRow = await supabase
-                              .from('system_settings')
-                              .select('value')
-                              .eq('key', 'walk_in_directory')
-                              .maybeSingle();
-                          if (dirRow != null && dirRow['value'] is List) {
-                            final dirList = List<dynamic>.from(dirRow['value']);
-                            for (int i = 0; i < dirList.length; i++) {
-                              final item = dirList[i];
-                              if (item is Map) {
-                                final itemId = int.tryParse(item['id']?.toString() ?? '');
-                                final itemMarking = (item['marking'] ?? '').toString().trim();
-                                final itemRef = itemId != null
-                                    ? 'MI-${DateTime.now().year}-${itemId.toString().padLeft(3, '0')}'
-                                    : '';
-                                final idMatches = parsedId != null && itemId == parsedId;
-                                final markingMatches = itemMarking.isNotEmpty &&
-                                    itemMarking.toLowerCase() == raw.toLowerCase();
-                                final refMatches = itemRef.isNotEmpty &&
-                                    itemRef.toUpperCase() == upper;
-
-                                if (idMatches || markingMatches || refMatches) {
-                                  matchedReq = Map<String, dynamic>.from(item);
-                                  matchedReq['user_id'] = user.id;
-                                  dirList[i] = matchedReq;
-                                  try {
-                                    await supabase.from('system_settings').upsert({
-                                      'key': 'walk_in_directory',
-                                      'value': dirList,
-                                    }, onConflict: 'key');
-                                  } catch (_) {}
-                                  break;
-                                }
-                              }
-                            }
-                          }
-                        }
-
-                        if (matchedReq == null) {
-                          setDlgState(() {
-                            isClaiming = false;
-                            errorText = 'No walk-in order found with that Reference No. or Marking.';
-                          });
-                          return;
-                        }
-
-                        final reqId = matchedReq['id'];
-
-                        // Save claim in `system_settings` ('walk_in_claims') so Admin Panel & NotificationService link user_id
-                        try {
-                          final claimsRow = await supabase
-                              .from('system_settings')
-                              .select('value')
-                              .eq('key', 'walk_in_claims')
-                              .maybeSingle();
-                          final Map<String, dynamic> claimsMap =
-                              (claimsRow != null && claimsRow['value'] is Map)
-                                  ? Map<String, dynamic>.from(claimsRow['value'])
-                                  : <String, dynamic>{};
-                          claimsMap[reqId.toString()] = user.id;
-                          await supabase.from('system_settings').upsert({
-                            'key': 'walk_in_claims',
-                            'value': claimsMap,
-                          }, onConflict: 'key');
-                        } catch (_) {}
-
-                        try {
-                          await supabase
-                              .from('requests')
-                              .update({'user_id': user.id})
-                              .eq('id', reqId);
-                        } catch (_) {}
-
-                        try {
-                          await supabase
-                              .from('payments')
-                              .update({'user_id': user.id})
-                              .eq('request_id', reqId);
-                        } catch (_) {}
-
-                        // Generate a current-status notification so the user can interact immediately
-                        final status = (matchedReq['status'] ?? 'approved').toString();
-                        final livestock = matchedReq['livestock_type'] ?? 'Livestock';
-                        final count = matchedReq['animal_count'] ?? 1;
-                        final refStr = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
-
-                        String notifTitle = 'Walk-In Order Linked ($refStr)';
-                        String notifMsg = 'Your walk-in order for $count head(s) of $livestock is now linked to your mobile account.';
-                        String notifType = 'request_approved';
-                        Map<String, dynamic> notifData = {
-                          'request_id': reqId,
-                          'livestock_type': livestock,
-                          'animal_count': count,
-                        };
-
-                        if (status == 'anti_mortem_failed') {
-                          notifTitle = '$livestock — Health Issue Detected';
-                          notifMsg = 'Ante-mortem inspection failed. Please tap Respond to choose whether to Confine or Take Back your livestock.';
-                          notifType = 'anti_mortem_failed';
-                        } else if (status == 'delay_error') {
-                          notifTitle = '$livestock Operation Delayed';
-                          notifMsg = '$livestock slaughter was delayed due to a technical error. Please review and respond in your app.';
-                          notifType = 'operation_failed';
-                          notifData['penalty_fee'] = 500.0;
-                          notifData['is_delayed'] = true;
-                        } else if (status == 'condemned' || status == 'post_mortem_failed') {
-                          notifTitle = 'Slaughter Condemned — Condemnation Slip Issued';
-                          notifMsg = 'A condemnation slip has been issued for your livestock ($livestock). Tap to view details.';
-                          notifType = 'condemnation_slip';
-                        } else if (status == 'releasable' || status == 'mic_generated') {
-                          notifTitle = 'Slaughter Operation Complete';
-                          notifMsg = 'Your $count head(s) of $livestock ($refStr) passed post-mortem inspection and is ready for payment and release.';
-                          notifType = 'slaughter_completed';
-                        }
-
-                        try {
-                          await supabase.from('notifications').insert({
-                            'user_id': user.id,
-                            'title': notifTitle,
-                            'message': notifMsg,
-                            'type': notifType,
-                            'is_read': false,
-                            'data': notifData,
-                          });
-                        } catch (_) {}
-
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        await _loadActiveRequest();
-                        await _loadNotifications();
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Walk-in order $refStr linked to your account!'),
-                              backgroundColor: const Color(0xFF1E855A),
-                            ),
-                          );
-                        }
-                      } catch (e) {
-                        setDlgState(() {
-                          isClaiming = false;
-                          errorText = 'Could not link order: $e';
-                        });
-                      }
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E855A),
-                foregroundColor: Colors.white,
-              ),
-              child: isClaiming
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
-                  : const Text('Link Order'),
-            ),
-          ],
-        ),
-      ),
+    await WalkInClaimHelper.showClaimDialog(
+      context,
+      onClaimSuccess: () async {
+        await _loadActiveRequest();
+        await _loadNotifications();
+      },
     );
   }
 

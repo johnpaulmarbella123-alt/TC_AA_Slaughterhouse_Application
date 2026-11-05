@@ -87,8 +87,14 @@ class DocumentUploadHelper {
               contentType: contentType,
             ),
           );
-      resolvedUrl =
-          supabase.storage.from('request-documents').getPublicUrl(storagePath);
+      try {
+        resolvedUrl = await supabase.storage
+            .from('request-documents')
+            .createSignedUrl(storagePath, 60 * 60 * 24 * 30);
+      } catch (_) {
+        resolvedUrl =
+            supabase.storage.from('request-documents').getPublicUrl(storagePath);
+      }
     } catch (_) {
       resolvedUrl = 'data:$contentType;base64,${base64Encode(bytes)}';
     }

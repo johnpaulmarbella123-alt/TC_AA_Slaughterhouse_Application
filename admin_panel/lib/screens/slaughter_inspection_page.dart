@@ -1658,8 +1658,14 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         final weight = _carcassCtrl.text.trim();
         final weightInfo = weight.isNotEmpty ? ' with a carcass weight of $weight kg' : '';
 
-        notifTitle = 'Slaughter Operation Complete';
-        notifMessage = 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. The meat is now releasable.';
+        final isMarket = (widget.request['request_type'] ?? '').toString().toLowerCase() == 'market';
+        if (isMarket) {
+          notifTitle = 'Meat Ready for Delivery — Payment Required';
+          notifMessage = 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. Market delivery is scheduled — please settle payment via GCash or cashier to clear your carcass for delivery dispatch.';
+        } else {
+          notifTitle = 'Meat Ready for Collection — Payment Required';
+          notifMessage = 'Your $animalCount head(s) of $livestockType ($refNo) has been successfully slaughtered and passed post-mortem inspection$weightInfo. Under Cash-on-Pickup, please settle payment at the cashier counter upon arrival before carcass release. Reminder: Claim before 5:00 PM to avoid cold storage preservation fees.';
+        }
         notifType = 'slaughter_completed';
         notifData = {
           'request_id': reqId,
@@ -2902,11 +2908,19 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
       }
 
       // 3. Notify customer
+      final isMarketOrder = (widget.request['request_type'] ?? '').toString().toLowerCase() == 'market';
+      final delayTitle = isMarketOrder
+          ? '$livestockType — Slaughter Complete & Ready for Delivery'
+          : '$livestockType — Slaughter Complete & Ready for Collection';
+      final delayMessage = isMarketOrder
+          ? 'Your $animalCount head(s) of $livestockType ($refNo) slaughter has resumed and completed successfully. Market delivery is scheduled — please settle payment via GCash or cashier to clear your carcass for delivery dispatch.'
+          : 'Your $animalCount head(s) of $livestockType ($refNo) slaughter has resumed and completed successfully. Under Cash-on-Pickup, please settle payment at the cashier counter upon arrival before carcass handover. Reminder: Claim before 5:00 PM to avoid cold storage preservation fees.';
+
       await NotificationService.sendNotificationSafely(
         widget.supabase,
         userId: userId,
-        title: '$livestockType — Slaughter Complete & Releasable',
-        message: 'Your $animalCount head(s) of $livestockType ($refNo) slaughter has resumed and completed successfully. The meat is now releasable. Penalty fee of ₱500.00 is reflected on your receipt.',
+        title: delayTitle,
+        message: delayMessage,
         type: 'slaughter_completed',
         data: {
           'request_id': reqId,

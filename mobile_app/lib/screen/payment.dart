@@ -297,6 +297,7 @@ class _ReceiptCard extends StatelessWidget {
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
@@ -308,7 +309,7 @@ class _ReceiptCard extends StatelessWidget {
                 child: Text(
                   isPaid
                       ? 'Paid'
-                      : (isAwaitingVerification ? 'Awaiting Verification' : 'Pending Payment'),
+                      : (isAwaitingVerification ? 'Waiting for Cashier Payment' : 'Pending Payment'),
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w500,

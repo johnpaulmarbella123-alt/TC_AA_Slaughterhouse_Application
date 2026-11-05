@@ -71,6 +71,8 @@ class _RequestsContentState extends State<RequestsContent> {
 
   String _customerName = '';
   bool _isMarkingLocked = false;
+  bool _isCustomerNameLocked = false;
+  bool _isRegularDealer = false;
   StreamSubscription<AuthState>? _authSubscription;
 
   String? selectedLivestock;
@@ -113,15 +115,79 @@ class _RequestsContentState extends State<RequestsContent> {
       // 1. Try immediate load from user metadata
       final meta = user.userMetadata;
       String? resolvedName = (meta?['display_name'] ?? meta?['full_name'] ?? meta?['name'])?.toString().trim();
+      String? resolvedMarking;
+      bool isLocked = false;
+      bool isCustNameLocked = false;
+      bool isRegular = false;
+      String? officialDealerName;
 
-      // 2. Fetch latest profile from DB
-      final profile = await supabase
-          .from('profiles')
-          .select('display_name, address')
-          .eq('id', user.id)
-          .maybeSingle();
+      // 2. Check if linked to an official regular dealer in system_settings
+      try {
+        final regRow = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'regular_dealers')
+            .maybeSingle();
 
-      if (profile != null && profile['display_name'] != null && profile['display_name'].toString().trim().isNotEmpty) {
+        if (regRow != null && regRow['value'] is List) {
+          final regList = List<dynamic>.from(regRow['value']);
+          for (var item in regList) {
+            if (item is Map) {
+              final uId = item['user_id']?.toString() ?? item['userId']?.toString();
+              if (uId != null && uId == user.id) {
+                officialDealerName = (item['name'] ?? '').toString().trim();
+                resolvedMarking = (item['markings'] ?? item['marking'] ?? '').toString().trim();
+                isRegular = true;
+                isLocked = true;
+                isCustNameLocked = true;
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 3. Fetch latest profile from DB
+      Map<String, dynamic>? profile;
+      try {
+        final res = await supabase
+            .from('profiles')
+            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (res != null) profile = Map<String, dynamic>.from(res);
+      } catch (_) {
+        // Fallback with standard columns if schema differs
+        try {
+          final res = await supabase
+              .from('profiles')
+              .select('display_name, address, assigned_marking, marking_locked')
+              .eq('id', user.id)
+              .maybeSingle();
+          if (res != null) profile = Map<String, dynamic>.from(res);
+        } catch (_) {}
+      }
+
+      if (profile != null) {
+        if (profile['official_dealer_name'] != null && profile['official_dealer_name'].toString().trim().isNotEmpty) {
+          officialDealerName = profile['official_dealer_name'].toString().trim();
+        }
+        if (profile['assigned_marking'] != null && profile['assigned_marking'].toString().trim().isNotEmpty) {
+          resolvedMarking = profile['assigned_marking'].toString().trim();
+        }
+        if (profile['marking_locked'] == true || profile['marking_locked'].toString() == 'true') {
+          isLocked = true;
+        }
+        if (profile['customer_type'] == 'regular' || isLocked) {
+          isRegular = true;
+          isCustNameLocked = true;
+        }
+      }
+
+      // Reconcile official name
+      if (officialDealerName != null && officialDealerName.isNotEmpty) {
+        resolvedName = officialDealerName;
+      } else if (profile != null && profile['display_name'] != null && profile['display_name'].toString().trim().isNotEmpty) {
         resolvedName = profile['display_name'].toString().trim();
       }
 
@@ -134,6 +200,8 @@ class _RequestsContentState extends State<RequestsContent> {
         setState(() {
           _customerName = resolvedName!;
           _customerNameController.text = resolvedName;
+          _isCustomerNameLocked = isCustNameLocked;
+          _isRegularDealer = isRegular;
         });
       }
 
@@ -147,24 +215,7 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       }
 
-      // 3. Load permanent assigned marking
-      String? resolvedMarking;
-      bool isLocked = false;
-      try {
-        final markProfile = await supabase
-            .from('profiles')
-            .select('assigned_marking, marking_locked')
-            .eq('id', user.id)
-            .maybeSingle();
-        if (markProfile != null &&
-            markProfile['assigned_marking'] != null &&
-            markProfile['assigned_marking'].toString().trim().isNotEmpty) {
-          resolvedMarking = markProfile['assigned_marking'].toString().trim();
-          isLocked = markProfile['marking_locked'] == true || markProfile['marking_locked'].toString() == 'true';
-        }
-      } catch (_) {}
-
-      // If not yet in profiles, check user's previous requests
+      // 4. If marking not yet loaded, check user's previous requests
       if (resolvedMarking == null || resolvedMarking.isEmpty) {
         try {
           final pastReq = await supabase
@@ -185,7 +236,7 @@ class _RequestsContentState extends State<RequestsContent> {
         } catch (_) {}
       }
 
-      // If still empty, suggest initials from customer name
+      // 5. If still empty, suggest initials from customer name
       if ((resolvedMarking == null || resolvedMarking.isEmpty) && resolvedName != null && resolvedName.isNotEmpty) {
         final clean = resolvedName.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '').trim();
         final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
@@ -384,7 +435,9 @@ class _RequestsContentState extends State<RequestsContent> {
     _marketStallController.clear();
     _marketNameController.clear();
     _specialInstructionsController.clear();
-    _markingController.clear();
+    if (!_isMarkingLocked) {
+      _markingController.clear();
+    }
     _dateController.clear();
     setState(() {
       selectedLivestock = null;
@@ -793,7 +846,14 @@ class _RequestsContentState extends State<RequestsContent> {
         selectedBytes,
         fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true),
       );
-      final url = supabase.storage.from('request-documents').getPublicUrl(filePath);
+      String url;
+      try {
+        url = await supabase.storage
+            .from('request-documents')
+            .createSignedUrl(filePath, 60 * 60 * 24 * 30);
+      } catch (_) {
+        url = supabase.storage.from('request-documents').getPublicUrl(filePath);
+      }
 
       setState(() {
         if (type == "Barangay Certificate") {
@@ -1011,24 +1071,68 @@ class _RequestsContentState extends State<RequestsContent> {
                       ),
                       const SizedBox(height: 24),
 
+                      if (_isRegularDealer) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F5E9),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF81C784)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.verified, color: Color(0xFF1E855A), size: 22),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Verified Regular Meat Dealer',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF1B5E20),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Official Record: ${_customerNameController.text.isNotEmpty ? _customerNameController.text : _customerName} • Permanent Tag: ${_markingController.text}',
+                                      style: const TextStyle(fontSize: 11, color: Color(0xFF2E7D32)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.lock, size: 16, color: Color(0xFF1E855A)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+
                       // 3. Form Fields
                       _buildTextField(
                         "Customer Name",
                         _customerName.isNotEmpty ? _customerName : "Enter customer name",
                         controller: _customerNameController,
-                        readOnly: _customerNameController.text.isNotEmpty,
+                        readOnly: _isCustomerNameLocked || _customerNameController.text.isNotEmpty,
                         prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF1E855A)),
                         suffixIcon: _customerNameController.text.isNotEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.only(right: 12),
+                            ? Padding(
+                                padding: const EdgeInsets.only(right: 12),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.check_circle, size: 16, color: Color(0xFF1E855A)),
-                                    SizedBox(width: 4),
+                                    Icon(
+                                      _isRegularDealer ? Icons.verified : Icons.check_circle,
+                                      size: 16,
+                                      color: const Color(0xFF1E855A),
+                                    ),
+                                    const SizedBox(width: 4),
                                     Text(
-                                      "Verified",
-                                      style: TextStyle(
+                                      _isRegularDealer ? "Regular Dealer" : "Verified",
+                                      style: const TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
                                         color: Color(0xFF1E855A),
@@ -1038,9 +1142,11 @@ class _RequestsContentState extends State<RequestsContent> {
                                 ),
                               )
                             : null,
-                        helperText: _customerNameController.text.isNotEmpty
-                            ? "Auto-filled from your registered account"
-                            : null,
+                        helperText: _isRegularDealer
+                            ? "Official verified abattoir record name (Locked to prevent duplicates)"
+                            : (_customerNameController.text.isNotEmpty
+                                ? "Auto-filled from your registered account"
+                                : null),
                       ),
 
                       const SizedBox(height: 16),
@@ -1197,9 +1303,11 @@ class _RequestsContentState extends State<RequestsContent> {
                         prefixIcon: _isMarkingLocked
                             ? const Icon(Icons.lock, color: Color(0xFF2D6A4F), size: 18)
                             : null,
-                        helperText: _isMarkingLocked
-                            ? "Official permanent marking recorded at Slaughterhouse (Locked)."
-                            : "Suggested from initials. Once recorded, this becomes your permanent marking.",
+                        helperText: _isRegularDealer
+                            ? "Official permanent marking for ${_customerNameController.text} (Permanently locked)."
+                            : (_isMarkingLocked
+                                ? "Official permanent marking recorded at Slaughterhouse (Locked)."
+                                : "Suggested from initials. Once recorded, this becomes your permanent marking."),
                       ),
                       const SizedBox(height: 32),
 
