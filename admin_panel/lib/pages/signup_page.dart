@@ -16,9 +16,72 @@ class _SignupPageState extends State<SignupPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _isLoading = false;
+  bool _isChecking = true;
+  bool _isAdminAlreadyProvisioned = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   final _supabase = Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAdminStatus();
+  }
+
+  Future<void> _checkAdminStatus() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
+
+      if (!provisioned) {
+        // 1. Check system_settings
+        try {
+          final settingRow = await _supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'admin_account_provisioned')
+              .maybeSingle();
+          if (settingRow != null && settingRow['value'] != null) {
+            provisioned = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!provisioned) {
+        // 2. Check profiles for existing admin role
+        try {
+          final res = await _supabase
+              .from('profiles')
+              .select('id, role')
+              .eq('role', 'admin')
+              .limit(1);
+          if ((res as List).isNotEmpty) {
+            provisioned = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!provisioned) {
+        // 3. Check staff accounts in AppSettingsService
+        final hasAdminInStaff = AppSettingsService.instance.staffAccounts
+            .any((s) => s.role == 'Admin' && s.email.toLowerCase() != 'admin@tabaco.gov.ph');
+        if (hasAdminInStaff) provisioned = true;
+      }
+
+      if (provisioned) {
+        await prefs.setBool('admin_account_provisioned', true);
+      }
+
+      if (mounted) {
+        setState(() {
+          _isAdminAlreadyProvisioned = provisioned;
+          _isChecking = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isChecking = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -38,120 +101,101 @@ class _SignupPageState extends State<SignupPage> {
       return;
     }
 
+    if (!email.contains('@') || !email.contains('.')) {
+      _showError('Please enter a valid, verified email address.');
+      return;
+    }
+
     if (password != confirmPassword) {
       _showError('Passwords do not match');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showError('Password must be at least 6 characters long');
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      // First-User Bootstrap: Check if a Super Admin account already exists.
-      // If no Super Admin exists yet, the first registered account becomes 'superadmin'.
-      // All subsequent accounts registered via Signup become regular 'admin'.
-      bool hasExistingSuperAdmin = false;
       final prefs = await SharedPreferences.getInstance();
+      final defaultFullName = email.split('@').first.toUpperCase();
 
-      try {
-        final settingRow = await _supabase
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'superadmin_account')
-            .maybeSingle();
-        if (settingRow != null && settingRow['value'] != null) {
-          hasExistingSuperAdmin = true;
-        }
-      } catch (_) {}
-
-      if (!hasExistingSuperAdmin) {
-        try {
-          final existingSuperAdmins = await _supabase
-              .from('profiles')
-              .select('id')
-              .inFilter('role', ['superadmin', 'Super Admin'])
-              .limit(1);
-          if ((existingSuperAdmins as List).isNotEmpty) {
-            hasExistingSuperAdmin = true;
-          }
-        } catch (_) {}
-      }
-
-      if (!hasExistingSuperAdmin) {
-        final hasSuperInStaff = AppSettingsService.instance.staffAccounts
-            .any((s) => s.role == 'Super Admin' || s.role.toLowerCase() == 'superadmin');
-        if (hasSuperInStaff || (prefs.getBool('superadmin_provisioned') ?? false)) {
-          hasExistingSuperAdmin = true;
-        }
-      }
-
-      final assignedRole = hasExistingSuperAdmin ? 'admin' : 'superadmin';
-      final displayRole = assignedRole == 'superadmin' ? 'Super Admin' : 'Admin';
-      final defaultFullName = email.contains('@') ? email.split('@').first : email;
-
+      // Sign up the primary administrator
       final response = await _supabase.auth.signUp(
         email: email,
         password: password,
         data: {
-          'role': assignedRole,
+          'role': 'admin',
           'full_name': defaultFullName,
         },
       );
-      if (mounted) {
-        if (response.user != null) {
-          final user = response.user!;
 
-          if (assignedRole == 'superadmin') {
-            await prefs.setBool('superadmin_provisioned', true);
-            try {
-              await _supabase.from('system_settings').upsert({
-                'key': 'superadmin_account',
-                'value': {
-                  'id': user.id,
-                  'email': email,
-                  'role': 'superadmin',
-                  'created_at': DateTime.now().toIso8601String(),
-                },
-              });
-            } catch (_) {}
-          }
+      if (mounted && response.user != null) {
+        final user = response.user!;
 
-          // Sync with AppSettingsService and add to Staff Accounts list if not present
-          final existsInStaff = AppSettingsService.instance.staffAccounts
-              .any((s) => s.email.toLowerCase() == email.toLowerCase());
-          if (!existsInStaff) {
-            await AppSettingsService.instance.addStaffAccount(
-              StaffAccount(
-                id: user.id,
-                fullName: defaultFullName,
-                email: email,
-                role: displayRole,
-                isActive: true,
-                createdAt: DateTime.now(),
-              ),
-            );
-          }
+        // 1. Mark admin as permanently provisioned in DB and local prefs
+        await prefs.setBool('admin_account_provisioned', true);
+        try {
+          await _supabase.from('system_settings').upsert({
+            'key': 'admin_account_provisioned',
+            'value': {
+              'id': user.id,
+              'email': email,
+              'role': 'admin',
+              'created_at': DateTime.now().toIso8601String(),
+            },
+          });
+        } catch (_) {}
 
-          AppSettingsService.instance.syncWithAuthUser(user);
+        // 2. Ensure profile in public.profiles table has role 'admin'
+        try {
+          await _supabase.from('profiles').upsert({
+            'id': user.id,
+            'full_name': defaultFullName,
+            'role': 'admin',
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
 
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  assignedRole == 'superadmin'
-                      ? 'First account registered as Super Admin! Welcome aboard.'
-                      : 'Admin account registered! Welcome aboard.',
-                ),
-                backgroundColor: Colors.green,
-              ),
-            );
-            Navigator.pushReplacementNamed(context, '/dashboard');
-          }
+        // 3. Sync with AppSettingsService and add to Staff Accounts list
+        AppSettingsService.instance.staffAccounts.removeWhere(
+          (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
+        );
+
+        final existsInStaff = AppSettingsService.instance.staffAccounts
+            .any((s) => s.email.toLowerCase() == email.toLowerCase());
+        if (!existsInStaff) {
+          await AppSettingsService.instance.addStaffAccount(
+            StaffAccount(
+              id: user.id,
+              fullName: defaultFullName,
+              email: email,
+              role: 'Admin',
+              isActive: true,
+              createdAt: DateTime.now(),
+              password: password,
+            ),
+          );
+        }
+
+        AppSettingsService.instance.syncWithAuthUser(user);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Administrator account registered successfully! Welcome aboard.'),
+              backgroundColor: Color(0xFF2D6A4F),
+            ),
+          );
+          Navigator.pushReplacementNamed(context, '/dashboard');
         }
       }
     } on AuthException catch (error) {
       _showError(error.message);
     } catch (error) {
-      _showError('An unexpected error occurred.');
+      _showError('An unexpected error occurred during registration.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -275,24 +319,82 @@ class _SignupPageState extends State<SignupPage> {
   }
 
   Widget _buildSignupForm() {
+    if (_isChecking) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white70),
+      );
+    }
+
+    if (_isAdminAlreadyProvisioned) {
+      return Center(
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_outline, color: Colors.amber, size: 32),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Registration Closed',
+                  style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  'The official Administrator account has already been registered for Tabaco City Slaughterhouse.\n\nAll staff accounts (Clerk and Inspector) are provisioned directly by the Administrator inside Settings → Staff & Roles.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+                  icon: const Icon(Icons.login, size: 18),
+                  label: const Text('Return to Staff Login', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Center(
       child: SingleChildScrollView(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text(
-              'Welcome',
-              style: TextStyle(color: Colors.white, fontSize: 36, fontWeight: FontWeight.w300),
+              'Administrator Setup',
+              style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 6),
             const Text(
-              'Sign up',
-              style: TextStyle(color: Colors.white70, fontSize: 16),
+              'Register primary admin account',
+              style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
             const SizedBox(height: 20),
             _buildTextField(
               controller: _usernameController,
-              label: 'Username',
+              label: 'Verified Admin Email',
             ),
             const SizedBox(height: 16),
             _buildTextField(
@@ -307,7 +409,7 @@ class _SignupPageState extends State<SignupPage> {
             const SizedBox(height: 16),
             _buildTextField(
               controller: _confirmPasswordController,
-              label: 'ConfirmPassword',
+              label: 'Confirm Password',
               isPassword: true,
               obscureText: _obscureConfirmPassword,
               onToggleObscure: () {
@@ -316,7 +418,7 @@ class _SignupPageState extends State<SignupPage> {
             ),
             const SizedBox(height: 30),
             SizedBox(
-              width: 200,
+              width: 220,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleSignup,
                 style: ElevatedButton.styleFrom(
@@ -326,7 +428,7 @@ class _SignupPageState extends State<SignupPage> {
                 ),
                 child: _isLoading
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Sign Up', style: TextStyle(fontSize: 16, color: Colors.white)),
+                    : const Text('Register Admin', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 20),
@@ -342,12 +444,6 @@ class _SignupPageState extends State<SignupPage> {
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              "By signing up to create an account I accept\nCompany's Terms of Use and Privacy Policy.",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white54, fontSize: 12),
             ),
           ],
         ),

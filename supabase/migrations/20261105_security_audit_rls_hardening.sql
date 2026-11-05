@@ -12,7 +12,7 @@ BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.profiles
         WHERE id = auth.uid()
-          AND LOWER(COALESCE(role, '')) IN ('admin', 'superadmin', 'super admin')
+          AND LOWER(COALESCE(role, '')) = 'admin'
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
@@ -23,7 +23,7 @@ BEGIN
     RETURN EXISTS (
         SELECT 1 FROM public.profiles
         WHERE id = auth.uid()
-          AND LOWER(COALESCE(role, '')) IN ('admin', 'superadmin', 'super admin', 'inspector', 'cashier', 'clerk')
+          AND LOWER(COALESCE(role, '')) IN ('admin', 'inspector', 'cashier', 'clerk')
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER STABLE;

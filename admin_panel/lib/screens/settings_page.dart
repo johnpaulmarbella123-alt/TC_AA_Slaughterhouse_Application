@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/app_settings_service.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -275,7 +277,7 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isAdmin = _settingsService.isAdminOrSuperAdmin;
+    final isAdmin = _settingsService.isAdmin;
 
     if (!isAdmin) {
       return Scaffold(
@@ -881,7 +883,6 @@ class _SettingsPageState extends State<SettingsPage>
   // ═══════════════════════════════════════════════════════════
   Widget _buildStaffRolesTab(bool isDark) {
     final rolesList = [
-      'Super Admin',
       'Admin',
       'Clerk',
       'Inspector',
@@ -892,7 +893,7 @@ class _SettingsPageState extends State<SettingsPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Role Simulation / Quick Role Switcher Banner (Admin/Super Admin preview)
+          // Role Simulation / Quick Role Switcher Banner (Admin preview)
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -1058,7 +1059,6 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                   ),
                   const SizedBox(height: 14),
-                  _buildMatrixRow('Super Admin', 'Primary Bootstrap Account — Full System Control, Admin & Staff Account Provisioning', isDark),
                   _buildMatrixRow('Admin', 'Executive Dashboard, Reports & Records, Settings & Full Supervisory Oversight', isDark),
                   _buildMatrixRow('Clerk', 'Clerk Pending-Tasks Dashboard, Receiving & New Requests, Document Verification, Payment & Cashiering, Meat Releasing, My Profile', isDark),
                   _buildMatrixRow('Inspector', 'Inspector Pending-Tasks Dashboard, Slaughter & Inspection (Ante/Post-Mortem & MIC), My Profile', isDark),
@@ -1073,8 +1073,6 @@ class _SettingsPageState extends State<SettingsPage>
 
   Color _roleColor(String role) {
     switch (StaffAccount.normalizeRole(role)) {
-      case 'Super Admin':
-        return const Color(0xFFB91C1C);
       case 'Admin':
         return const Color(0xFF2D6A4F);
       case 'Clerk':
@@ -1180,7 +1178,6 @@ class _SettingsPageState extends State<SettingsPage>
                     prefixIcon: Icon(Icons.badge_outlined, size: 18),
                   ),
                   items: [
-                    if (_settingsService.isSuperAdmin) 'Super Admin',
                     'Admin',
                     'Clerk',
                     'Inspector',
@@ -1211,21 +1208,57 @@ class _SettingsPageState extends State<SettingsPage>
                   );
                   return;
                 }
+
+                Navigator.pop(ctx);
+
+                // 1. Provision live Supabase Auth account using a standalone client instance
+                String? generatedUid;
+                try {
+                  const defaultUrl = 'https://jacgcceaxblwgdxaeaqk.supabase.co';
+                  const defaultAnonKey =
+                      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphY2djY2VheGJsd2dkeGFlYXFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MzE4MDMsImV4cCI6MjA5NDQwNzgwM30.UQZJMdhEKQ2KqOmcvqFg8-JWBuR5b9XtjphzAnKeW6c';
+                  final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? defaultUrl;
+                  final supabaseKey = dotenv.env['SUPABASE_ANON_KEY'] ?? defaultAnonKey;
+
+                  final standaloneClient = SupabaseClient(supabaseUrl, supabaseKey);
+                  final authRes = await standaloneClient.auth.signUp(
+                    email: email,
+                    password: password,
+                    data: {
+                      'role': selectedRole.toLowerCase(),
+                      'full_name': name,
+                    },
+                  );
+                  if (authRes.user != null) {
+                    generatedUid = authRes.user!.id;
+                    try {
+                      await Supabase.instance.client.from('profiles').upsert({
+                        'id': authRes.user!.id,
+                        'full_name': name,
+                        'role': selectedRole.toLowerCase(),
+                        'updated_at': DateTime.now().toIso8601String(),
+                      });
+                    } catch (_) {}
+                  }
+                } catch (authErr) {
+                  debugPrint('Staff Supabase Auth provisioning notice: $authErr');
+                }
+
                 final newStaff = StaffAccount(
-                  id: 'staff-${DateTime.now().millisecondsSinceEpoch}',
+                  id: generatedUid ?? 'staff-${DateTime.now().millisecondsSinceEpoch}',
                   fullName: name,
                   email: email,
                   role: selectedRole,
                   createdAt: DateTime.now(),
                   password: password,
                 );
-                Navigator.pop(ctx);
+
                 await _settingsService.addStaffAccount(newStaff);
                 if (mounted) {
                   setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Added $name ($selectedRole) with exclusive login credentials!'),
+                      content: Text('Successfully provisioned $name ($selectedRole)! Account ready for login.'),
                       backgroundColor: const Color(0xFF2D6A4F),
                     ),
                   );

@@ -417,14 +417,14 @@ class _AdminSidebarState extends State<_AdminSidebar> {
             ),
             child: _buildNavItem(
               index: 7,
-              icon: settingsService.isAdminOrSuperAdmin
+              icon: settingsService.isAdmin
                   ? Icons.settings_outlined
                   : Icons.person_outline,
-              activeIcon: settingsService.isAdminOrSuperAdmin
+              activeIcon: settingsService.isAdmin
                   ? Icons.settings
                   : Icons.person,
-              label: settingsService.isAdminOrSuperAdmin ? 'Settings' : 'My Profile',
-              subtitle: settingsService.isAdminOrSuperAdmin
+              label: settingsService.isAdmin ? 'Settings' : 'My Profile',
+              subtitle: settingsService.isAdmin
                   ? 'Fees, Staff, Schedule, Profile'
                   : 'Account profile & password',
               isDark: isDark,

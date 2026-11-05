@@ -82,7 +82,7 @@ Deno.serve(async (req: Request) => {
           .select("role")
           .eq("id", user.id)
           .maybeSingle();
-        const isStaff = ["admin", "superadmin", "inspector", "cashier", "clerk"].includes(
+        const isStaff = ["admin", "inspector", "cashier", "clerk"].includes(
           (profile?.role || "").toLowerCase()
         );
 

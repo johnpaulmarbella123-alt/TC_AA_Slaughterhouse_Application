@@ -43,7 +43,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle();
 
     const userRole = (profile?.role || "").toLowerCase();
-    const isAuthorized = ["admin", "superadmin", "inspector"].includes(userRole);
+    const isAuthorized = ["admin", "inspector"].includes(userRole);
 
     if (!isAuthorized) {
       return new Response(

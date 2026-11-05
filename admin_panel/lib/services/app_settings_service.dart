@@ -95,11 +95,13 @@ class StaffAccount {
   final String id;
   String fullName;
   String email;
-  String role; // 'Super Admin', 'Admin', 'Clerk', 'Inspector'
+  String role; // 'Admin', 'Clerk', 'Inspector'
   bool isActive;
   DateTime createdAt;
   String? avatarUrl;
   String? password;
+
+  static const List<String> availableRoles = ['Admin', 'Clerk', 'Inspector'];
 
   StaffAccount({
     required this.id,
@@ -114,8 +116,7 @@ class StaffAccount {
 
   static String normalizeRole(String rawRole) {
     final r = rawRole.trim().toLowerCase();
-    if (r == 'super admin' || r == 'superadmin') return 'Super Admin';
-    if (r == 'admin') return 'Admin';
+    if (r == 'super admin' || r == 'superadmin' || r == 'admin') return 'Admin';
     if (r.contains('inspector')) return 'Inspector';
     if (r == 'clerk' ||
         r == 'receiving clerk' ||
@@ -581,8 +582,9 @@ class AppSettingsService extends ChangeNotifier {
 
   String _currentRole = 'Admin';
   String get currentRole => _currentRole;
-  bool get isSuperAdmin => _currentRole == 'Super Admin';
-  bool get isAdminOrSuperAdmin => _currentRole == 'Super Admin' || _currentRole == 'Admin';
+  bool get isSuperAdmin => false;
+  bool get isAdmin => _currentRole == 'Admin';
+  bool get isAdminOrSuperAdmin => _currentRole == 'Admin';
 
   void setCurrentRole(String role) {
     _currentRole = StaffAccount.normalizeRole(role);
@@ -654,10 +656,10 @@ class AppSettingsService extends ChangeNotifier {
   /// 4: Payment & Cashiering
   /// 5: Meat Releasing
   /// 6: Reports & Records
-  /// 7: Settings (Full Settings for Admin/Super Admin, My Profile for Clerk/Inspector)
+  /// 7: Settings (Full Settings for Admin, My Profile for Clerk/Inspector)
   bool isModuleAllowed(int moduleIndex) {
     final normalized = StaffAccount.normalizeRole(_currentRole);
-    if (normalized == 'Super Admin' || normalized == 'Admin') return true;
+    if (normalized == 'Admin') return true;
 
     // All roles can access Dashboard (0) and Settings / My Profile (7)
     if (moduleIndex == 0 || moduleIndex == 7) return true;
@@ -709,8 +711,13 @@ class AppSettingsService extends ChangeNotifier {
   String _profileName = 'Slaughterhouse Administrator';
   String get profileName => _profileName;
 
-  String _profileEmail = 'admin@tabaco.gov.ph';
-  String get profileEmail => _profileEmail;
+  String _profileEmail = '';
+  String get profileEmail {
+    if (_profileEmail.isNotEmpty && _profileEmail.toLowerCase() != 'admin@tabaco.gov.ph') {
+      return _profileEmail;
+    }
+    return Supabase.instance.client.auth.currentUser?.email ?? '';
+  }
 
   String? _profilePhotoUrl;
   String? get profilePhotoUrl => _profilePhotoUrl;
@@ -1018,15 +1025,20 @@ class AppSettingsService extends ChangeNotifier {
             _profilePhotoUrl = meta['avatar_url'].toString();
           }
           if (meta['role'] != null) {
-            final r = meta['role'].toString().toLowerCase();
-            if (r == 'superadmin' || r == 'super admin') {
-              _currentRole = 'Super Admin';
-            } else if (r == 'admin') {
-              _currentRole = 'Admin';
-            }
+            _currentRole = StaffAccount.normalizeRole(meta['role'].toString());
           }
         }
       }
+
+      // Purge any legacy 'admin@tabaco.gov.ph' or 'Super Admin'
+      _staffAccounts.removeWhere((s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph');
+      for (final s in _staffAccounts) {
+        s.role = StaffAccount.normalizeRole(s.role);
+      }
+      if (_profileEmail.toLowerCase() == 'admin@tabaco.gov.ph') {
+        _profileEmail = '';
+      }
+      _currentRole = StaffAccount.normalizeRole(_currentRole);
 
       await _ensureAdminAuth();
 
