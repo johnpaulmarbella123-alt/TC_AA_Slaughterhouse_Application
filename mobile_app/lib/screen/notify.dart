@@ -755,9 +755,101 @@ class _NotifyPageState extends State<NotifyPage> {
           ],
         ),
         content: SingleChildScrollView(
-          child: Text(
-            message,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message,
+                style: const TextStyle(fontSize: 13, color: Colors.black87, height: 1.4),
+              ),
+              if (isIllegalReport && notif['data'] is Map) ...[
+                Builder(
+                  builder: (context) {
+                    final data = notif['data'] as Map;
+                    final status = data['status']?.toString();
+                    final endorsedTo = data['endorsed_to']?.toString();
+                    final findings = data['findings']?.toString();
+                    if (status == null && endorsedTo == null && findings == null) {
+                      return const SizedBox.shrink();
+                    }
+                    return Container(
+                      margin: const EdgeInsets.only(top: 14),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (status != null && status.isNotEmpty) ...[
+                            Row(
+                              children: [
+                                const Text('Resolution Stage: ',
+                                    style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF475569))),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFEFF6FF),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                        color: const Color(0xFFBFDBFE)),
+                                  ),
+                                  child: Text(status,
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFF1D4ED8))),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          if (endorsedTo != null && endorsedTo.isNotEmpty) ...[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Assigned Agency: ',
+                                    style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF475569))),
+                                Expanded(
+                                    child: Text(endorsedTo,
+                                        style: const TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF0F172A)))),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                          ],
+                          if (findings != null && findings.isNotEmpty) ...[
+                            const Text('Official Findings: ',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF475569))),
+                            const SizedBox(height: 2),
+                            Text(findings,
+                                style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: Color(0xFF334155),
+                                    height: 1.35)),
+                          ],
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ],
           ),
         ),
         actions: [
