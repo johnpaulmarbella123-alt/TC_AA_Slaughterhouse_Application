@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/app_settings_service.dart';
+import '../widgets/terms_and_conditions_dialog.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -489,6 +490,25 @@ class _LoginPageState extends State<LoginPage> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white60, fontSize: 11.5),
               ),
+            const SizedBox(height: 18),
+            Center(
+              child: InkWell(
+                onTap: () {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => const TermsAndConditionsDialog(),
+                  );
+                },
+                child: const Text(
+                  'Terms & Conditions and User Agreement',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),

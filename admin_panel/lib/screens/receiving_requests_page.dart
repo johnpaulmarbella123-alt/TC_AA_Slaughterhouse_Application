@@ -1557,6 +1557,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   List<_CustomerLookupItem> _lookupDirectory = [];
   _CustomerLookupItem? _selectedCustomer;
   bool _isMarkingLocked = false;
+  bool _isSeparateFacility = false;
+  String _selectedEmergencyCause = 'Heat Stroke';
+  final List<String> _emergencyCauses = const [
+    'Heat Stroke',
+    'Transit Stress',
+    'Accidental / Transit Injury',
+    'Other Non-Infectious Cause',
+  ];
 
   @override
   void initState() {
@@ -1901,7 +1909,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         'market_name': null,
         'marking': _markingCtrl.text.trim(),
         'preferred_date': DateTime.now().toIso8601String().split('T')[0], // today's date
-        'status': 'approved', // walk-in: goes directly to approved
+        'status': _isSeparateFacility ? 'slaughter_started' : 'approved', // Separate Facility bypasses Doc Verification directly into Slaughter & Inspection
       };
 
       Map<String, dynamic> insertedRow;
@@ -1946,6 +1954,42 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
           ? '${_selectedBarangay ?? ''}, ${_selectedMunicipality ?? 'Tabaco City'}, $_selectedProvince'
           : 'Tabaco Public Market';
 
+      // If Separate Facility (Emergency Slaughter), create slaughter_inspection row & notify linked account
+      if (_isSeparateFacility) {
+        try {
+          await widget.supabase.from('slaughter_inspection').insert({
+            'request_id': reqId,
+            'anti_mortem': 'Separate Facility',
+            'process_stage': 'Separate Facility (Weighing)',
+            'post_mortem': 'Pending',
+            'process_notes':
+                '[SEPARATE FACILITY - EMERGENCY SLAUGHTER | Cause: $_selectedEmergencyCause] Walk-in livestock arrived deceased due to non-infectious cause ($_selectedEmergencyCause). Routed to Separate Facility for immediate slaughter.',
+          });
+        } catch (inspErr) {
+          debugPrint('Error inserting separate facility inspection row: $inspErr');
+        }
+
+        if (matchedUserId != null) {
+          final livestockType = _selectedAnimalType ?? 'Livestock';
+          final animalCount = int.tryParse(_animalCountCtrl.text.trim()) ?? 1;
+          await NotificationService.sendNotificationSafely(
+            widget.supabase,
+            userId: matchedUserId,
+            title: 'Separate Facility — Emergency Slaughter',
+            message:
+                'Your $animalCount head(s) of $livestockType ($refNo) arrived deceased due to $_selectedEmergencyCause (non-infectious) and is being processed immediately in the Separate Facility, bypassing the standard slaughterhouse queue.',
+            type: 'separate_facility_slaughter',
+            data: {
+              'request_id': reqId,
+              'livestock_type': livestockType,
+              'animal_count': animalCount,
+              'emergency_cause': _selectedEmergencyCause,
+              'facility': 'Separate Facility',
+            },
+          );
+        }
+      }
+
       // Ensure newly entered walk-in meat dealer is permanently locked in registry
       try {
         final dealersService = RegularDealersService.instance;
@@ -1976,6 +2020,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
             requestType: _isBarangay ? 'Barangay' : 'Market',
             destinationOrOrigin: destOrOrigin,
             isLinkedToAccount: matchedUserId != null,
+            isSeparateFacility: _isSeparateFacility,
+            emergencyCause: _isSeparateFacility ? _selectedEmergencyCause : null,
           ),
         );
         if (mounted) {
@@ -2148,7 +2194,83 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 'Enter unique marking (e.g., MK, MK-1)..',
                 readOnly: _isMarkingLocked,
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 18),
+
+              // ── Separate Facility (Emergency Slaughter) Toggle ──
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: _isSeparateFacility ? const Color(0xFFFFF7ED) : const Color(0xFFF7FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _isSeparateFacility ? const Color(0xFFEA580C) : Colors.grey.shade300,
+                    width: _isSeparateFacility ? 1.5 : 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.bolt_rounded,
+                          color: _isSeparateFacility ? const Color(0xFFC2410C) : Colors.grey.shade600,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Separate Facility — Emergency Slaughter',
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isSeparateFacility ? const Color(0xFF9A3412) : const Color(0xFF2D3748),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'For livestock that died due to stress, heat stroke, or accidental (non-infectious) causes. Bypasses standard slaughterhouse queue for immediate slaughter.',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: _isSeparateFacility ? const Color(0xFFC2410C) : Colors.grey.shade600,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: _isSeparateFacility,
+                          activeThumbColor: const Color(0xFFC2410C),
+                          onChanged: (val) => setState(() => _isSeparateFacility = val),
+                        ),
+                      ],
+                    ),
+                    if (_isSeparateFacility) ...[
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Non-Infectious Cause of Death *',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF9A3412)),
+                      ),
+                      const SizedBox(height: 6),
+                      DropdownButtonFormField<String>(
+                        initialValue: _selectedEmergencyCause,
+                        decoration: _dropdownDecoration(),
+                        items: _emergencyCauses
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 13))))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedEmergencyCause = v);
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
 
               // ── Actions ──
               Row(
@@ -2618,6 +2740,8 @@ class _WalkInClaimStubDialog extends StatefulWidget {
   final String requestType;
   final String destinationOrOrigin;
   final bool isLinkedToAccount;
+  final bool isSeparateFacility;
+  final String? emergencyCause;
 
   const _WalkInClaimStubDialog({
     required this.refNo,
@@ -2629,6 +2753,8 @@ class _WalkInClaimStubDialog extends StatefulWidget {
     required this.requestType,
     required this.destinationOrOrigin,
     required this.isLinkedToAccount,
+    this.isSeparateFacility = false,
+    this.emergencyCause,
   });
 
   @override
@@ -2765,6 +2891,29 @@ class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
             _stubInfoRow('Contact Number:', widget.contactNumber.isNotEmpty ? widget.contactNumber : 'Not provided'),
             _stubInfoRow('Livestock & Head Count:', '${widget.livestockType} (${widget.animalCount} head/s)'),
             _stubInfoRow('Classification:', '${widget.requestType} • ${widget.destinationOrOrigin}'),
+            if (widget.isSeparateFacility) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7ED),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFEA580C)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.bolt_rounded, color: Color(0xFFC2410C), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Separate Facility — Immediate Slaughter (Cause: ${widget.emergencyCause ?? "Non-Infectious"})',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),

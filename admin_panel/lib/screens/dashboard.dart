@@ -232,7 +232,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         Expanded(
                           child: Text(
                             isPenaltyAccepted
-                                ? 'ACCEPTED ₱500 PENALTY & RESCHEDULE'
+                                ? 'ACCEPTED RESCHEDULE (FACILITY DELAY)'
                                 : (isConfine ? 'CONFINE IN SLAUGHTERHOUSE' : 'TAKE LIVESTOCK BACK'),
                             style: TextStyle(
                               fontSize: 12,
@@ -251,7 +251,7 @@ class _DashboardPageState extends State<DashboardPage> {
               const SizedBox(height: 14),
               Text(
                 isPenaltyAccepted
-                    ? 'The customer accepted the ₱500 legal finality fee to keep livestock in facility for resumed slaughter. Go to Slaughter & Inspection to set the schedule.'
+                    ? 'The customer accepted rescheduling to keep livestock in facility for resumed slaughter (₱0 facility delay fee). Go to Slaughter & Inspection to set the schedule.'
                     : (isConfine
                         ? 'The customer agreed to confine the animal in the corral under observation. Once cleared by the veterinarian, you can resume slaughter.'
                         : 'The customer chose to retrieve their livestock. Please set the pickup schedule so the customer knows when to collect the animal at the corral.'),

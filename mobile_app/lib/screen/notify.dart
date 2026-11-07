@@ -317,6 +317,7 @@ class _NotifyPageState extends State<NotifyPage> {
     switch (type) {
       case 'slaughter_completed':
       case 'doc_verified':
+      case 'separate_facility_slaughter':
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -1383,6 +1384,19 @@ class _NotifyPageState extends State<NotifyPage> {
           badgeText: const Color(0xFF185FA5),
           actionLabel: 'View Details',
           actionColor: const Color(0xFF185FA5),
+        );
+      case 'separate_facility_slaughter':
+        final cause = (data['emergency_cause'] ?? 'Non-Infectious Cause').toString();
+        return _NotifStyle(
+          icon: Icons.bolt_rounded,
+          iconColor: const Color(0xFFC2410C),
+          iconBg: const Color(0xFFFFF7ED),
+          imagePath: 'assets/images/slaughter_operation.png',
+          badge: 'Separate Facility ($cause)',
+          badgeBg: const Color(0xFFFFF7ED),
+          badgeText: const Color(0xFF9A3412),
+          actionLabel: 'View Status',
+          actionColor: const Color(0xFFC2410C),
         );
       case 'slaughter_completed':
         final isMarket = t.contains('delivery') ||

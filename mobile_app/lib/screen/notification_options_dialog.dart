@@ -5,9 +5,10 @@ import 'package:url_launcher/url_launcher.dart';
 /// Dialog shown when the user taps "View Options" on
 /// `anti_mortem_failed` or `operation_failed` notifications.
 ///
-/// For **anti_mortem_failed**: Shows a full-screen modal dialog matching the
-/// mockup design with "Take Livestock Back" and "Confine in Slaughterhouse"
-/// options.
+/// For **anti_mortem_failed**: Shows a modal dialog displaying the veterinary
+/// findings and informing the customer that the livestock has been placed in
+/// facility confinement while awaiting the inspector's evaluation on whether it
+/// can still be slaughtered or must be condemned.
 ///
 /// For **operation_failed**: Shows the existing bottom-sheet with reschedule
 /// and contact options.
@@ -134,14 +135,12 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
       if (mounted) {
         widget.onDone();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text(
-              choice == 'confine'
-                  ? 'Your livestock will be confined. You\'ll be notified of the new schedule.'
-                  : 'Pickup requested. The admin will approve your pickup time.',
+              'Confinement acknowledged. You will be notified once the inspector updates whether your livestock is cleared for slaughter or condemned.',
             ),
-            backgroundColor: const Color(0xFF2D6A4F),
-            duration: const Duration(seconds: 4),
+            backgroundColor: Color(0xFF2D6A4F),
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -193,7 +192,7 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'What would you like to do?',
+                          'Livestock Placed in Facility Confinement',
                           style: TextStyle(fontSize: 12, color: Colors.grey),
                         ),
                       ],
@@ -303,67 +302,92 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
               ),
               const SizedBox(height: 14),
 
-              // ── INFO BANNER ──
+              // ── CONFINEMENT & VETERINARY OBSERVATION CARD ──
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF9E6),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFE8D78A)),
+                  color: const Color(0xFFE6F1FB),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFB6D8F6)),
                 ),
-                child: const Row(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.info_outline, size: 16, color: Color(0xFF8B7A2B)),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Your livestock did not pass the ante-mortem inspection. Please choose one of the following options:',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFF6B5E1A),
-                          height: 1.3,
+                    Row(
+                      children: [
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.local_hospital_rounded,
+                            color: Color(0xFF185FA5),
+                            size: 18,
+                          ),
                         ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Confined in Slaughterhouse (Under Observation)',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF185FA5),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Because your livestock did not pass the ante-mortem inspection, it cannot be taken back and has been placed in facility confinement for quarantine and monitoring.\n\nPlease await an update from the veterinary inspector on whether it can still be slaughtered or if it must be condemned.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF1E3A5F),
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
 
-              // ── CHOOSE AN OPTION LABEL ──
-              const Text(
-                'Choose an option:',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF4A5568),
+              // ── ACKNOWLEDGE CONFINEMENT BUTTON ──
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isSubmitting ? null : () => _submitChoice('confine'),
+                  icon: _isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.check_circle_outline, size: 18),
+                  label: Text(
+                    _isSubmitting ? 'Saving...' : 'Acknowledge Confinement',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF185FA5),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-
-              // ── OPTION 1: TAKE LIVESTOCK BACK ──
-              _OptionTile(
-                icon: Icons.undo_rounded,
-                iconBg: const Color(0xFFFFF3E5),
-                iconColor: const Color(0xFFD4820A),
-                title: 'Take Livestock Back',
-                subtitle: 'Take your livestock home. No processing charge will be applied.',
-                isSubmitting: _isSubmitting,
-                onTap: () => _submitChoice('take_back'),
-              ),
-              const SizedBox(height: 10),
-
-              // ── OPTION 2: CONFINE IN SLAUGHTERHOUSE ──
-              _OptionTile(
-                icon: Icons.local_hospital_rounded,
-                iconBg: const Color(0xFFE6F1FB),
-                iconColor: const Color(0xFF185FA5),
-                title: 'Confine in Slaughterhouse',
-                subtitle: 'Leave livestock in facility for quarantine and monitoring.',
-                isSubmitting: _isSubmitting,
-                onTap: () => _submitChoice('confine'),
               ),
             ],
           ),
@@ -719,24 +743,24 @@ class _DelayedOperationDialogState extends State<_DelayedOperationDialog> {
                   children: [
                     const Row(
                       children: [
-                        Icon(Icons.receipt_long, size: 16, color: Color(0xFF8B7A2B)),
+                        Icon(Icons.info_outline, size: 16, color: Color(0xFF1E855A)),
                         SizedBox(width: 8),
                         Text(
-                          'Legal Finality / Penalty Fee: ₱500.00',
+                          'Facility Technical Delay — ₱0 Penalty Fee',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFF6B5E1A),
+                            color: Color(0xFF1E855A),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'If you keep your livestock in the facility for resumed slaughter, a legal finality fee of ₱500.00 will be charged. Alternatively, you may retrieve your livestock with no fee.',
+                      'Because this delay is due to an internal slaughterhouse facility error, no penalty fee is charged. You may choose to keep your livestock in the facility for resumed slaughter at ₱0 penalty, or retrieve your livestock with no fee.',
                       style: TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF6B5E1A),
+                        color: Color(0xFF2D3748),
                         height: 1.35,
                       ),
                     ),
@@ -825,13 +849,13 @@ class _DelayedOperationDialogState extends State<_DelayedOperationDialog> {
                 ),
                 const SizedBox(height: 10),
 
-                // ── OPTION 1: ACCEPT PENALTY FEE ──
+                // ── OPTION 1: RESUME IN FACILITY ──
                 _OptionTile(
                   icon: Icons.check_circle_outline,
                   iconBg: const Color(0xFFE4F8F0),
                   iconColor: const Color(0xFF1A8C62),
-                  title: 'Accept Penalty Fee (₱500.00)',
-                  subtitle: 'Keep livestock in facility for processing. ₱500.00 will be added to your payment.',
+                  title: 'Keep in Facility & Reschedule (₱0 Fee)',
+                  subtitle: 'Keep livestock in facility for processing when operations resume. No penalty fee is charged.',
                   isSubmitting: _isSubmitting,
                   onTap: () => _submitChoice('accept_penalty'),
                 ),

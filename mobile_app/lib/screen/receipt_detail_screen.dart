@@ -213,21 +213,17 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         final isBarangay = requestData['request_type'] == 'barangay';
         final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
 
-        final isTakeBack = requestData['anti_mortem_response'] == 'take_back' ||
-            requestData['status'] == 'taken_back' ||
-            requestData['status'] == 'pickup_scheduled';
-        final isAnteMortemFail = requestData['anti_mortem_response'] == 'confine' ||
-            requestData['status'] == 'confined' ||
-            requestData['status'] == 'anti_mortem_failed';
-        final hasExplicitPenalty = requestData['penalty_fee'] != null &&
-            (double.tryParse(requestData['penalty_fee'].toString()) ?? 0.0) > 0;
-        final isDelayed = !isTakeBack && !isAnteMortemFail && (hasExplicitPenalty ||
-            requestData['anti_mortem_response'] == 'accept_penalty' ||
-            requestData['status'] == 'delay_error' ||
-            (requestData['delay_reason'] != null && requestData['delay_reason'].toString().isNotEmpty) ||
-            (requestData['process_notes'] ?? '').toString().contains('Technical delay') ||
-            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('penalty'));
-        final penaltyFee = isDelayed ? 500.0 : 0.0;
+        final explicitPenaltyVal = double.tryParse(requestData['penalty_fee']?.toString() ?? '0') ?? 0.0;
+        final trackingPenaltyVal = double.tryParse(penaltyTracking?['penalty_fee']?.toString() ?? '0') ?? 0.0;
+        final hasExplicitMissedSlotPenalty = explicitPenaltyVal > 0 ||
+            trackingPenaltyVal > 0 ||
+            (requestData['penalty_reason']?.toString().contains('Missed') ?? false) ||
+            (penaltyTracking?['penalty_reason']?.toString().contains('Missed') ?? false) ||
+            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('missed schedule') ||
+            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('wasted slot');
+        final penaltyFee = hasExplicitMissedSlotPenalty
+            ? (explicitPenaltyVal > 0 ? explicitPenaltyVal : (trackingPenaltyVal > 0 ? trackingPenaltyVal : 500.0))
+            : 0.0;
         final isPaid = (paymentData?['status'] == 'paid') ||
             (paymentData?['payment_method']?.toString().trim().toLowerCase() == 'gcash') ||
             (requestData['status'] == 'paid') ||
@@ -680,7 +676,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   ),
                 if (((_fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
                   _lineItem(
-                    "Legal Finality Fee (Delayed Operation):",
+                    "Missed Schedule / Wasted Slot Penalty:",
                     "\u20b1${((_fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}",
                   ),
                 const SizedBox(height: 8),

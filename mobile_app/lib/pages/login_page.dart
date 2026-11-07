@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../auth/auth_server.dart';
 import '../screen/how_it_works.dart';
+import '../widgets/terms_and_conditions_dialog.dart';
 import 'forgot_password_page.dart';
 import 'home_page.dart';
 
@@ -291,6 +292,30 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Terms & Conditions Link
+                    Center(
+                      child: TextButton(
+                        onPressed: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => const TermsAndConditionsDialog(),
+                          );
+                        },
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          minimumSize: const Size(100, 32),
+                        ),
+                        child: const Text(
+                          "Terms & Conditions and User Agreement",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                            decoration: TextDecoration.underline,
                           ),
                         ),
                       ),

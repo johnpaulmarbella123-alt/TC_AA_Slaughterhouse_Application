@@ -211,7 +211,8 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     final double postMortemFee = carcassWeightNum * postMortemRatePerKg;
     final bool isMarket = req['request_type'] == 'market' || req['release_type'] == 'delivery';
     final double deliveryFee = isMarket ? 60.0 : 0.0;
-    final double calculatedTotal = baseFixedFees + postMortemFee + deliveryFee;
+    final double penaltyFee = double.tryParse(req['penalty_fee']?.toString() ?? '0') ?? 0.0;
+    final double calculatedTotal = baseFixedFees + postMortemFee + deliveryFee + penaltyFee;
 
     double totalAmount = calculatedTotal;
     if (_payment != null && _payment!['amount'] != null) {
@@ -431,6 +432,61 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
             const SizedBox(height: 16),
           ],
 
+          // ── SEPARATE FACILITY BANNER (IF APPLICABLE) ─────────────
+          Builder(builder: (ctx) {
+            final inspAntiMortem = (_inspection?['anti_mortem'] ?? '').toString();
+            final inspStage = (_inspection?['process_stage'] ?? '').toString();
+            final inspNotes = (_inspection?['process_notes'] ?? '').toString();
+            final isSeparateFacility = inspAntiMortem == 'Separate Facility' ||
+                inspStage.contains('Separate Facility') ||
+                inspNotes.contains('SEPARATE FACILITY');
+            if (!isSeparateFacility) return const SizedBox.shrink();
+
+            String cause = 'Non-Infectious Cause (Stress / Heat Stroke / Accidental)';
+            final match = RegExp(r'Cause:\s*([^\]]+)').firstMatch(inspNotes);
+            if (match != null && match.group(1) != null) {
+              cause = match.group(1)!.trim();
+            }
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF7ED),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFEA580C)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.bolt_rounded, color: Color(0xFFC2410C), size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Separate Facility — Immediate Slaughter ($cause)',
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF9A3412),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Your livestock arrived deceased due to $cause (unrelated to infectious disease) and was routed to the Separate Facility for immediate slaughter, bypassing the standard slaughterhouse queue.',
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFFC2410C), height: 1.4),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+
           // ── CARD 1: REQUEST DETAILS ──────────────────────────────
           Container(
             padding: const EdgeInsets.all(18),
@@ -442,13 +498,44 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  refNo,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      refNo,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                    if ((_inspection?['anti_mortem'] ?? '') == 'Separate Facility' ||
+                        (_inspection?['process_stage'] ?? '').toString().contains('Separate Facility') ||
+                        (_inspection?['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF7ED),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFEA580C)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bolt_rounded, size: 14, color: Color(0xFFC2410C)),
+                            SizedBox(width: 4),
+                            Text(
+                              'Separate Facility',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF9A3412),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 14),
                 Row(
@@ -538,6 +625,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
                                   weight: carcassWeightNum,
                                   postMortemFee: postMortemFee,
                                   deliveryFee: deliveryFee,
+                                  penaltyFee: penaltyFee,
                                   total: totalAmount,
                                   isPaid: isPaid,
                                 ),
@@ -662,6 +750,9 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
 
     final reqTimeStr = _formatDateTime(createdAt);
     DateTime baseDate = DateTime.tryParse(createdAt?.toString() ?? '') ?? DateTime.now();
+    final isSeparateFacility = (_inspection?['anti_mortem'] ?? '') == 'Separate Facility' ||
+        (_inspection?['process_stage'] ?? '').toString().contains('Separate Facility') ||
+        (_inspection?['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
     final steps = [
       _ProcessStep(
@@ -672,7 +763,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
         isCompleted: true, // If approved, request is received
       ),
       _ProcessStep(
-        title: 'Document Verified',
+        title: isSeparateFacility ? 'Document Verification (Bypassed — Emergency)' : 'Document Verified',
         time: currentStageIndex >= 1
             ? DateFormat('yyyy-MM-dd  hh:mm a')
                 .format(baseDate.add(const Duration(minutes: 40)))
@@ -680,7 +771,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
         isCompleted: currentStageIndex >= 1,
       ),
       _ProcessStep(
-        title: 'Slaughter Inspection',
+        title: isSeparateFacility ? 'Separate Facility Routing (Non-Infectious)' : 'Slaughter Inspection',
         time: currentStageIndex >= 2
             ? DateFormat('yyyy-MM-dd  hh:mm a')
                 .format(baseDate.add(const Duration(hours: 24)))
@@ -688,7 +779,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
         isCompleted: currentStageIndex >= 2,
       ),
       _ProcessStep(
-        title: 'Slaughter Operation',
+        title: isSeparateFacility ? 'Immediate Slaughter (Separate Facility)' : 'Slaughter Operation',
         time: currentStageIndex >= 3
             ? DateFormat('yyyy-MM-dd  hh:mm a')
                 .format(baseDate.add(const Duration(hours: 38)))
@@ -806,6 +897,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     required double weight,
     required double postMortemFee,
     required double deliveryFee,
+    double penaltyFee = 0.0,
     required double total,
     required bool isPaid,
   }) {
@@ -846,6 +938,13 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
               ),
             if (deliveryFee > 0)
               _breakdownRow('Delivery Van Fee', '₱${deliveryFee.toStringAsFixed(2)}'),
+            if (penaltyFee > 0)
+              _breakdownRow(
+                'Missed Schedule / Wasted Slot Penalty',
+                '₱${penaltyFee.toStringAsFixed(2)}',
+                color: const Color(0xFFC2410C),
+                isBold: true,
+              ),
             const Divider(height: 20),
             _breakdownRow(
               'Total Amount to Pay',

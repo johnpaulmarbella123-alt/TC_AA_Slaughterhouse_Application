@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
 import '../screen/how_it_works.dart';
+import '../widgets/terms_and_conditions_dialog.dart';
 
 class SignupPages extends StatefulWidget {
 
@@ -369,7 +370,38 @@ class _SignupScreenState
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
+
+                    // TERMS AGREEMENT NOTICE
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => const TermsAndConditionsDialog(),
+                          );
+                        },
+                        child: RichText(
+                          textAlign: TextAlign.center,
+                          text: const TextSpan(
+                            style: TextStyle(color: Colors.black54, fontSize: 12),
+                            children: [
+                              TextSpan(text: "By signing up, you agree to our\n"),
+                              TextSpan(
+                                text: "Terms & Conditions and User Agreement",
+                                style: TextStyle(
+                                  color: Color(0xFF218358),
+                                  fontWeight: FontWeight.bold,
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
 
                     // LOGIN LINK
                     Center(

@@ -88,7 +88,14 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           }
         }
         if (trackingMap.containsKey(reqIdStr) && trackingMap[reqIdStr] is Map) {
-          r['penalty_tracking'] = Map<String, dynamic>.from(trackingMap[reqIdStr] as Map);
+          final t = trackingMap[reqIdStr] as Map;
+          r['penalty_tracking'] = Map<String, dynamic>.from(t);
+          if (t['penalty_fee'] != null) {
+            r['penalty_fee'] = t['penalty_fee'];
+          }
+          if (t['penalty_reason'] != null) {
+            r['penalty_reason'] = t['penalty_reason'];
+          }
         }
         // Flatten slaughter_inspection
         final inspectionList = r['slaughter_inspection'];
@@ -96,9 +103,11 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           final insp = inspectionList.first as Map<String, dynamic>;
           r['carcass_weight'] = insp['carcass_weight'];
           r['inspector_name'] = insp['inspector_name'];
+          r['process_notes'] = insp['process_notes'];
         } else if (inspectionList is Map) {
           r['carcass_weight'] = inspectionList['carcass_weight'];
           r['inspector_name'] = inspectionList['inspector_name'];
+          r['process_notes'] = inspectionList['process_notes'];
         }
         // Flatten payments
         final paymentsList = r['payments'];
@@ -185,27 +194,22 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         req['status'] == 'anti_mortem_failed') {
       return false;
     }
-    // Explicit penalty fee on request
-    if (req['penalty_fee'] != null) {
-      return (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0;
+    // Explicit penalty fee on request (e.g. Missed Schedule / Wasted Slot Penalty)
+    if (req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0) {
+      return true;
     }
-    if (req['anti_mortem_response'] == 'accept_penalty') return true;
-    if (req['status'] == 'delay_error') return true;
-    if (req['delay_reason'] != null && req['delay_reason'].toString().trim().isNotEmpty) return true;
+    final reqIdStr = req['id']?.toString() ?? '';
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+    if (tracking != null && tracking['penalty_fee'] != null && (double.tryParse(tracking['penalty_fee'].toString()) ?? 0.0) > 0) {
+      return true;
+    }
     final notes = (req['process_notes'] ?? '').toString();
-    if (notes.contains('Technical delay') || notes.toLowerCase().contains('penalty')) return true;
-    final insp = req['slaughter_inspection'];
-    if (insp is Map) {
-      if (insp['process_stage'] == 'Technical Error/Delay') return true;
-      final inspNotes = (insp['process_notes'] ?? '').toString();
-      if (inspNotes.contains('Technical delay') || inspNotes.toLowerCase().contains('penalty')) return true;
-    } else if (insp is List && insp.isNotEmpty) {
-      final first = insp.first;
-      if (first is Map) {
-        if (first['process_stage'] == 'Technical Error/Delay') return true;
-        final inspNotes = (first['process_notes'] ?? '').toString();
-        if (inspNotes.contains('Technical delay') || inspNotes.toLowerCase().contains('penalty')) return true;
-      }
+    if (notes.toLowerCase().contains('missed schedule') || notes.toLowerCase().contains('wasted slot')) {
+      return true;
+    }
+    final trackingReason = tracking?['penalty_reason']?.toString().toLowerCase() ?? '';
+    if (trackingReason.contains('missed') || trackingReason.contains('wasted slot')) {
+      return true;
     }
     return false;
   }
@@ -301,13 +305,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final rates = AppSettingsService.instance.getFeeRatesForAnimal(animalType);
     final weight = _carcassWeight(req);
     final postMortemFee = weight * rates.postMortemRatePerKg;
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
     final isDelayed = hasTechnicalDelay(req);
-    final penaltyFee = isDelayed ? 500.0 : 0.0;
+    final penaltyFee = isDelayed
+        ? ((req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0)
+            ? (double.tryParse(req['penalty_fee'].toString()) ?? 500.0)
+            : ((tracking != null && tracking['penalty_fee'] != null && (double.tryParse(tracking['penalty_fee'].toString()) ?? 0.0) > 0)
+                ? (double.tryParse(tracking['penalty_fee'].toString()) ?? 500.0)
+                : 500.0))
+        : 0.0;
     final dueDate = _getPaymentDueDate(req);
     final isOverdue = _isPaymentOverdue(req);
     final payment = req['payment'] as Map<String, dynamic>?;
-    final reqIdStr = req['id'].toString();
-    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
     final storedOverdue = payment?['overdue_penalty'] != null
         ? double.tryParse(payment!['overdue_penalty'].toString()) ?? 0.0
         : (tracking?['overdue_payment_billed_on_receipt'] == true ? 100.0 : null);
@@ -1340,7 +1350,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                   ),
                 if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
                   _feeRow(
-                    'Legal Finality / Penalty Fee (Delayed Operation):',
+                    'Missed Schedule / Wasted Slot Penalty:',
                     '\u20b1${((fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}',
                     bold: true,
                   ),
@@ -1666,10 +1676,49 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       if (inspection is Map) {
         data['carcass_weight'] = inspection['carcass_weight'];
         data['inspector_name'] = inspection['inspector_name'];
+        data['process_notes'] = inspection['process_notes'];
       } else if (inspection is List && inspection.isNotEmpty) {
         final first = inspection.first as Map;
         data['carcass_weight'] = first['carcass_weight'];
         data['inspector_name'] = first['inspector_name'];
+        data['process_notes'] = first['process_notes'];
+      }
+
+      // Populate penalty tracking for requested ID
+      final reqIdStr = data['id'].toString();
+      if (_PaymentCashieringPageState._penaltyTrackingMap.containsKey(reqIdStr)) {
+        final t = _PaymentCashieringPageState._penaltyTrackingMap[reqIdStr];
+        if (t is Map) {
+          data['penalty_tracking'] = Map<String, dynamic>.from(t);
+          if (t['penalty_fee'] != null) {
+            data['penalty_fee'] = t['penalty_fee'];
+          }
+          if (t['penalty_reason'] != null) {
+            data['penalty_reason'] = t['penalty_reason'];
+          }
+        }
+      } else {
+        try {
+          final trackRow = await widget.supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'pickup_penalty_tracking')
+              .maybeSingle();
+          if (trackRow != null && trackRow['value'] is Map) {
+            final tMap = Map<String, dynamic>.from(trackRow['value']);
+            _PaymentCashieringPageState._penaltyTrackingMap = tMap;
+            if (tMap.containsKey(reqIdStr) && tMap[reqIdStr] is Map) {
+              final t = tMap[reqIdStr] as Map;
+              data['penalty_tracking'] = Map<String, dynamic>.from(t);
+              if (t['penalty_fee'] != null) {
+                data['penalty_fee'] = t['penalty_fee'];
+              }
+              if (t['penalty_reason'] != null) {
+                data['penalty_reason'] = t['penalty_reason'];
+              }
+            }
+          }
+        } catch (_) {}
       }
 
       // Flatten payment data (can be Map or List)
@@ -2013,6 +2062,29 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                   ),
                 ],
               ),
+              if (((_fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFEA580C).withValues(alpha: 0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFC2410C)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Includes \u20b1${((_fees['penalty_fee'] as num).toDouble()).toStringAsFixed(2)} Missed Schedule / Wasted Slot Penalty',
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
 
               // Payment Method
