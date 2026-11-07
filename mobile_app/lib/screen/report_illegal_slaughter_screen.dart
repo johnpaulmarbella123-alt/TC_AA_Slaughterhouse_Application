@@ -300,8 +300,8 @@ class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _isExpanded ? widget.accentColor.withValues(alpha: 0.6) : Colors.grey.shade200,
-          width: _isExpanded ? 1.5 : 1.0,
+          color: _isExpanded ? const Color(0xFF0F172A) : Colors.grey.shade200,
+          width: _isExpanded ? 1.4 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
@@ -339,17 +339,17 @@ class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
                             widget.title,
                             style: const TextStyle(
                               fontSize: 13.5,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1E293B),
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F172A),
                             ),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 3),
                           Text(
                             widget.lawReference,
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: widget.accentColor,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF0F172A),
                             ),
                           ),
                         ],
@@ -376,21 +376,21 @@ class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
                       label: "What to look for",
                       content: widget.whatToLookFor,
                       icon: Icons.visibility_outlined,
-                      color: const Color(0xFF475569),
+                      color: const Color(0xFF0F172A),
                     ),
                     const SizedBox(height: 10),
                     _detailSection(
                       label: "Why it's illegal",
                       content: widget.whyIllegal,
                       icon: Icons.gavel_outlined,
-                      color: const Color(0xFF991B1B),
+                      color: const Color(0xFF0F172A),
                     ),
                     const SizedBox(height: 10),
                     _detailSection(
                       label: "Who to report to",
                       content: widget.whoToReportTo,
                       icon: Icons.shield_outlined,
-                      color: const Color(0xFF1E855A),
+                      color: const Color(0xFF0F172A),
                     ),
                     const SizedBox(height: 14),
                     SizedBox(
@@ -404,7 +404,7 @@ class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
                           style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: widget.accentColor,
+                          backgroundColor: const Color(0xFF0F172A),
                           foregroundColor: Colors.white,
                           elevation: 0,
                           shape: RoundedRectangleBorder(
@@ -439,23 +439,23 @@ class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
             Text(
               label,
               style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
                 color: color,
                 letterSpacing: 0.2,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 4),
         Padding(
           padding: const EdgeInsets.only(left: 19),
           child: Text(
             content,
             style: const TextStyle(
-              fontSize: 11.5,
-              color: Color(0xFF334155),
-              height: 1.35,
+              fontSize: 12,
+              color: Color(0xFF0F172A),
+              height: 1.4,
             ),
           ),
         ),
