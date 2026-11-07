@@ -1029,9 +1029,9 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
           msg = 'An on-site inspection team has been dispatched to investigate report ($ref) under $_severityLevel priority in coordination with $effectiveAgency. Thank you for safeguarding public meat safety.';
           smsMsg = '[TABACO SLAUGHTERHOUSE] Update ($ref): On-site inspection team dispatched (Severity: $_severityLevel) with $effectiveAgency. Investigation is actively in progress.';
         } else if (newStatus == 'Report Compiled') {
-          notifTitle = '📋 Case Resolved & Action Taken ($ref)';
+          notifTitle = '📋 Case Outcome & Action Taken ($ref)';
           final finalFindings = findings ?? 'On-site verification completed and appropriate statutory actions enforced.';
-          msg = 'Official findings have been documented for report ($ref) [Triage: $_severityLevel] and endorsed to $effectiveAgency.\n\nFindings: $finalFindings';
+          msg = 'The investigation for report ($ref) has concluded under $_severityLevel priority.\n\nAssigned Authority: $effectiveAgency\n\nOfficial Abattoir Findings & Action Taken:\n$finalFindings\n\nThank you for your civic contribution to public health and animal welfare in Tabaco City.';
           smsMsg = '[TABACO SLAUGHTERHOUSE] Resolved ($ref): Action taken (Triage: $_severityLevel) with $effectiveAgency. Summary: $finalFindings';
         }
 
@@ -1047,8 +1047,8 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
           'endorsed_to': ?endorsedTo,
         };
 
-        // Dispatch in-app notification
-        if (targetUserId != null) {
+        // Dispatch in-app notification (only to non-anonymous whistleblowers)
+        if (!isAnon && targetUserId != null) {
           await NotificationService.sendNotificationSafely(
             widget.supabase,
             userId: targetUserId,
@@ -1059,8 +1059,9 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
             data: notifDataPayload,
           );
         } else {
-          // If anonymous or user_id not linked, write reference notification so it displays by reference_no
+          // If anonymous, write record with user_id: null so it is NEVER delivered to any user's personal in-app feed
           await widget.supabase.from('notifications').insert({
+            'user_id': null,
             'title': notifTitle,
             'message': msg,
             'is_read': false,

@@ -767,23 +767,77 @@ class _NotifyPageState extends State<NotifyPage> {
                 Builder(
                   builder: (context) {
                     final data = notif['data'] as Map;
+                    final refNo = notif['reference_no'] ?? data['reference_no'];
                     final status = data['status']?.toString();
+                    final severity = data['severity_level']?.toString() ?? data['priority']?.toString();
                     final endorsedTo = data['endorsed_to']?.toString();
                     final findings = data['findings']?.toString();
-                    if (status == null && endorsedTo == null && findings == null) {
-                      return const SizedBox.shrink();
-                    }
+                    final category = data['violation_category']?.toString();
+                    final isCompiled = status == 'Report Compiled' || title.contains('Outcome') || title.contains('Resolved');
+                    final isFiled = notif['type'] == 'report_filed' || title.contains('Submission Confirmed');
+
                     return Container(
                       margin: const EdgeInsets.only(top: 14),
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        color: isCompiled
+                            ? const Color(0xFFF0FDF4)
+                            : (isFiled ? const Color(0xFFF8FAFC) : const Color(0xFFF8FAFC)),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isCompiled ? const Color(0xFFBBF7D0) : const Color(0xFFE2E8F0),
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Reference Number & Severity Badge Row
+                          Row(
+                            children: [
+                              if (refNo != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF0F172A),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    '$refNo',
+                                    style: const TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              if (severity != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: severity == 'Severe'
+                                        ? const Color(0xFFFEE2E2)
+                                        : (severity == 'Moderate' ? const Color(0xFFFEF3C7) : const Color(0xFFEFF6FF)),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Triage: $severity',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: severity == 'Severe'
+                                          ? const Color(0xFFDC2626)
+                                          : (severity == 'Moderate' ? const Color(0xFFD97706) : const Color(0xFF2563EB)),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Resolution Stage / Status
                           if (status != null && status.isNotEmpty) ...[
                             Row(
                               children: [
@@ -793,55 +847,135 @@ class _NotifyPageState extends State<NotifyPage> {
                                         fontWeight: FontWeight.bold,
                                         color: Color(0xFF475569))),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 7, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFEFF6FF),
-                                    borderRadius: BorderRadius.circular(4),
+                                    color: isCompiled
+                                        ? const Color(0xFFDCFCE7)
+                                        : (status == 'Investigating'
+                                            ? const Color(0xFFFCE7F3)
+                                            : const Color(0xFFEFF6FF)),
+                                    borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                        color: const Color(0xFFBFDBFE)),
+                                      color: isCompiled
+                                          ? const Color(0xFF86EFAC)
+                                          : (status == 'Investigating'
+                                              ? const Color(0xFFF0ABFC)
+                                              : const Color(0xFFBFDBFE)),
+                                    ),
                                   ),
-                                  child: Text(status,
-                                      style: const TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF1D4ED8))),
+                                  child: Text(
+                                    isCompiled ? 'Report Compiled / Resolved' : status,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isCompiled
+                                          ? const Color(0xFF15803D)
+                                          : (status == 'Investigating'
+                                              ? const Color(0xFFC026D3)
+                                              : const Color(0xFF1D4ED8)),
+                                    ),
+                                  ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                           ],
+
+                          // Assigned Agency
                           if (endorsedTo != null && endorsedTo.isNotEmpty) ...[
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Assigned Agency: ',
+                                const Text('Assigned Authority: ',
                                     style: TextStyle(
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.bold,
                                         color: Color(0xFF475569))),
                                 Expanded(
-                                    child: Text(endorsedTo,
-                                        style: const TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF0F172A)))),
+                                  child: Text(
+                                    endorsedTo,
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                          ],
+
+                          // Category (if available)
+                          if (category != null && category.isNotEmpty) ...[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Violation Category: ',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF64748B))),
+                                Expanded(
+                                  child: Text(
+                                    category,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFF334155),
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 6),
                           ],
+
+                          // Official Findings & Actions Taken (Featured container)
                           if (findings != null && findings.isNotEmpty) ...[
-                            const Text('Official Findings: ',
-                                style: TextStyle(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: Color(0xFF475569))),
-                            const SizedBox(height: 2),
-                            Text(findings,
-                                style: const TextStyle(
-                                    fontSize: 11.5,
-                                    color: Color(0xFF334155),
-                                    height: 1.35)),
+                            const SizedBox(height: 4),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: isCompiled ? Colors.white : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: isCompiled ? const Color(0xFF86EFAC) : const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        isCompiled ? Icons.assignment_turned_in : Icons.assignment_outlined,
+                                        size: 14,
+                                        color: isCompiled ? const Color(0xFF16A34A) : const Color(0xFF475569),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        isCompiled ? 'Official Outcome & Actions Taken:' : 'Investigation Findings:',
+                                        style: TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: isCompiled ? const Color(0xFF15803D) : const Color(0xFF1E293B),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    findings,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF1E293B),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ],
                       ),
@@ -1076,7 +1210,39 @@ class _NotifyPageState extends State<NotifyPage> {
         t.contains('illegal slaughter') ||
         t.contains('hot meat') ||
         t.contains('illegal report') ||
-        (t.contains('report') && (t.contains('filed') || t.contains('compiled') || t.contains('investigat')))) {
+        (t.contains('report') && (t.contains('filed') || t.contains('compiled') || t.contains('investigat') || t.contains('confirmed')))) {
+      final statusVal = data['status']?.toString();
+
+      // Submission Confirmation
+      if (type == 'report_filed' || t.contains('submission confirmed')) {
+        return const _NotifStyle(
+          icon: Icons.check_circle_outline,
+          iconColor: Color(0xFF16A34A),
+          iconBg: Color(0xFFDCFCE7),
+          imagePath: 'assets/images/icon-illegal-slaughter-report-square.png',
+          badge: 'Submission Confirmed',
+          badgeBg: Color(0xFFDCFCE7),
+          badgeText: Color(0xFF15803D),
+          actionLabel: 'View Confirmation',
+          actionColor: Color(0xFF15803D),
+        );
+      }
+
+      // Case Outcome & Resolution
+      if (statusVal == 'Report Compiled' || t.contains('case outcome') || t.contains('action taken')) {
+        return const _NotifStyle(
+          icon: Icons.assignment_turned_in_outlined,
+          iconColor: Color(0xFF16A34A),
+          iconBg: Color(0xFFDCFCE7),
+          imagePath: 'assets/images/icon-illegal-slaughter-report-square.png',
+          badge: 'Case Outcome',
+          badgeBg: Color(0xFFD1FAE5),
+          badgeText: Color(0xFF047857),
+          actionLabel: 'View Outcome',
+          actionColor: Color(0xFF047857),
+        );
+      }
+
       final isStatus = t.contains('status') ||
           type == 'report_status_update' ||
           type == 'report_investigating' ||
@@ -1085,7 +1251,6 @@ class _NotifyPageState extends State<NotifyPage> {
           t.contains('investigating') ||
           t.contains('compiled') ||
           t.contains('resolved');
-      final statusVal = data['status']?.toString();
       String badgeText = 'Report Filed';
       Color badgeBg = const Color(0xFFFCEAEA);
       Color badgeTextColor = const Color(0xFFA32D2D);
