@@ -102,6 +102,62 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
     }
   }
 
+  static String detectSeverity(dynamic descRaw) {
+    final desc = (descRaw ?? '').toString();
+    if (desc.contains('Dog and Cat Meat') || desc.contains('Cruelty') || desc.contains('Severe')) {
+      return 'Severe';
+    } else if (desc.contains('Hot Meat') || desc.contains('Prohibited Livestock') || desc.contains('Carabao')) {
+      return 'Moderate';
+    }
+    return 'Mild';
+  }
+
+  static Widget buildSeverityBadge(String? severity) {
+    final sev = severity ?? 'Mild';
+    Color bg;
+    Color text;
+    IconData icon;
+    switch (sev) {
+      case 'Severe':
+        bg = const Color(0xFFFEE2E2);
+        text = const Color(0xFFDC2626);
+        icon = Icons.warning_amber_rounded;
+        break;
+      case 'Moderate':
+        bg = const Color(0xFFFEF3C7);
+        text = const Color(0xFFD97706);
+        icon = Icons.info_outline;
+        break;
+      case 'Mild':
+      default:
+        bg = const Color(0xFFEFF6FF);
+        text = const Color(0xFF2563EB);
+        icon = Icons.health_and_safety_outlined;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: text),
+          const SizedBox(width: 4),
+          Text(
+            sev,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              color: text,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   static String formatTableDate(String? raw) {
     if (raw == null || raw.trim().isEmpty) return 'No date';
     try {
@@ -719,25 +775,33 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
               ),
             ),
 
-            // Column 4: Status (Pill Badge)
+            // Column 4: Status (Pill Badge) & Severity
             Expanded(
               flex: 2,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: getStatusBgColor(status),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    status,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: getStatusTextColor(status),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: getStatusBgColor(status),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: getStatusTextColor(status),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 5),
+                    buildSeverityBadge(report['severity_level'] ?? detectSeverity(report['description'])),
+                  ],
                 ),
               ),
             ),
@@ -786,14 +850,18 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
   late Map<String, dynamic> _report;
   final TextEditingController _findingsCtrl = TextEditingController();
   String _selectedAgency = 'NMIS (National Meat Inspection Service)';
+  String _severityLevel = 'Mild';
   bool _isSubmittingAction = false;
   bool _isEditingCompiled = false;
   bool _isExportingPdf = false;
 
   final List<String> _agencyOptions = [
+    'Tabaco City Slaughterhouse / CVO Internal Unit',
     'NMIS (National Meat Inspection Service)',
-    'City Veterinary Office',
     'Philippine National Police (PNP)',
+    'City Veterinary Office Enforcement Task Force',
+    'Bureau of Animal Industry (BAI)',
+    'Animal Welfare NGOs (PAWS / AKF)',
     'Barangay Captain / Local Officials',
     'City Legal Office',
   ];
@@ -803,9 +871,39 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
     super.initState();
     _report = Map<String, dynamic>.from(widget.initialReport);
     _findingsCtrl.text = _report['findings'] ?? '';
+
+    // Initialize severity level from report or auto-detect from category/description
+    final rawSev = _report['severity_level']?.toString();
+    if (rawSev != null && ['Mild', 'Moderate', 'Severe'].contains(rawSev)) {
+      _severityLevel = rawSev;
+    } else {
+      _severityLevel = _IllegalSlaughterReportsViewState.detectSeverity(_report['description']);
+    }
+
     if (_report['endorsed_to'] != null && _agencyOptions.contains(_report['endorsed_to'])) {
       _selectedAgency = _report['endorsed_to'];
+    } else {
+      _selectedAgency = _defaultAgencyForSeverity(_severityLevel);
     }
+  }
+
+  String _defaultAgencyForSeverity(String severity) {
+    switch (severity) {
+      case 'Severe':
+        return 'Philippine National Police (PNP)';
+      case 'Moderate':
+        return 'NMIS (National Meat Inspection Service)';
+      case 'Mild':
+      default:
+        return 'Tabaco City Slaughterhouse / CVO Internal Unit';
+    }
+  }
+
+  void _onSeverityChanged(String newSev) {
+    setState(() {
+      _severityLevel = newSev;
+      _selectedAgency = _defaultAgencyForSeverity(newSev);
+    });
   }
 
   @override
@@ -828,6 +926,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
     // Optimistically update
     setState(() {
       _report['status'] = newStatus;
+      _report['severity_level'] = _severityLevel;
       if (findings != null) _report['findings'] = findings;
       if (endorsedTo != null) _report['endorsed_to'] = endorsedTo;
       if (newStatus == 'Report Compiled') {
@@ -838,6 +937,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
     try {
       final updateData = <String, dynamic>{
         'status': newStatus,
+        'severity_level': _severityLevel,
         'updated_at': DateTime.now().toIso8601String(),
       };
       if (findings != null) updateData['findings'] = findings;
@@ -851,6 +951,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
         final rId = _report['id']?.toString() ?? _report['report_id']?.toString();
         final repUpdate = <String, dynamic>{
           'status': newStatus,
+          'severity_level': _severityLevel,
           if (ref.isNotEmpty && ref != 'Report') 'reference_no': ref,
         };
         if (rId != null && rId.length > 10) {
@@ -917,24 +1018,27 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
         String msg = '';
         String smsMsg = '';
 
+        final effectiveAgency = endorsedTo ?? _selectedAgency;
+
         if (newStatus == 'Acknowledged') {
           notifTitle = '🚨 Tip Acknowledged ($ref)';
-          msg = 'Your hot meat tip ($ref) has been officially reviewed and acknowledged by the Tabaco City Slaughterhouse administration. An inspection unit is being assigned.';
-          smsMsg = '[TABACO SLAUGHTERHOUSE] Notice: Report $ref has been officially ACKNOWLEDGED. Our veterinary task force is preparing on-site verification. Thank you for your civic vigilance.';
+          msg = 'Your hot meat tip ($ref) has been officially reviewed and acknowledged by the Tabaco City Slaughterhouse administration. Triage Level: $_severityLevel. An inspection unit is being assigned.';
+          smsMsg = '[TABACO SLAUGHTERHOUSE] Notice: Report $ref has been officially ACKNOWLEDGED (Triage: $_severityLevel). Our veterinary task force is preparing verification. Thank you for your vigilance.';
         } else if (newStatus == 'Investigating') {
           notifTitle = '🔍 Investigation Dispatched ($ref)';
-          msg = 'An on-site inspection team has been dispatched to investigate report ($ref)${endorsedTo != null ? ' in coordination with $endorsedTo' : ''}. Thank you for safeguarding public meat safety.';
-          smsMsg = '[TABACO SLAUGHTERHOUSE] Update ($ref): On-site inspection team dispatched${endorsedTo != null ? ' with $endorsedTo' : ''}. Investigation is actively in progress.';
+          msg = 'An on-site inspection team has been dispatched to investigate report ($ref) under $_severityLevel priority in coordination with $effectiveAgency. Thank you for safeguarding public meat safety.';
+          smsMsg = '[TABACO SLAUGHTERHOUSE] Update ($ref): On-site inspection team dispatched (Severity: $_severityLevel) with $effectiveAgency. Investigation is actively in progress.';
         } else if (newStatus == 'Report Compiled') {
           notifTitle = '📋 Case Resolved & Action Taken ($ref)';
           final finalFindings = findings ?? 'On-site verification completed and appropriate statutory actions enforced.';
-          msg = 'Official findings have been documented for report ($ref)${endorsedTo != null ? ' and endorsed to $endorsedTo' : ''}.\n\nFindings: $finalFindings';
-          smsMsg = '[TABACO SLAUGHTERHOUSE] Resolved ($ref): Action taken & report compiled${endorsedTo != null ? ' with $endorsedTo' : ''}. Summary: $finalFindings';
+          msg = 'Official findings have been documented for report ($ref) [Triage: $_severityLevel] and endorsed to $effectiveAgency.\n\nFindings: $finalFindings';
+          smsMsg = '[TABACO SLAUGHTERHOUSE] Resolved ($ref): Action taken (Triage: $_severityLevel) with $effectiveAgency. Summary: $finalFindings';
         }
 
         final notifDataPayload = <String, dynamic>{
           'reference_no': ref,
           'status': newStatus,
+          'severity_level': _severityLevel,
           'updated_at': DateTime.now().toIso8601String(),
           'sms_alert': smsMsg,
           'sms_sent': true,
@@ -1111,9 +1215,9 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                       color: Color(0xFF0F172A),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                     decoration: BoxDecoration(
                       color: _IllegalSlaughterReportsViewState.getStatusBgColor(status),
                       borderRadius: BorderRadius.circular(16),
@@ -1127,6 +1231,8 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 6),
+                  _IllegalSlaughterReportsViewState.buildSeverityBadge(_severityLevel),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFEF4444)),
@@ -1179,9 +1285,9 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                     ),
                     const SizedBox(height: 24),
 
-                    // SECTION 2: ADMIN WORKFLOW
+                    // SECTION 2: ADMIN WORKFLOW & SEVERITY TRIAGE
                     const Text(
-                      'ADMIN WORKFLOW',
+                      'ADMIN WORKFLOW & SEVERITY TRIAGE',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1189,7 +1295,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                         color: Color(0xFF64748B),
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+
+                    // First-look Severity Triage & Statutory Escalation Routing
+                    _buildSeverityTriageCard(),
+                    const SizedBox(height: 8),
 
                     // 3-Step Guided Stepper
                     _buildStepper(status),
@@ -1201,6 +1311,347 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
         ),
       ),
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // SEVERITY TRIAGE & STATUTORY GUIDANCE CARD
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildSeverityTriageCard() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.policy_outlined, size: 16, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'INCIDENT SEVERITY & TRIAGE LEVEL',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                        color: Color(0xFF0F172A),
+                      ),
+                    ),
+                    Text(
+                      'Admin First-Look Triage: Internal Abattoir vs. Statutory Escalation',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Triage Level Selection Chips
+          Row(
+            children: [
+              _buildSeverityChip(
+                label: 'Mild',
+                sublabel: 'Internal CVO',
+                level: 'Mild',
+                activeColor: const Color(0xFF2563EB),
+                activeBg: const Color(0xFFEFF6FF),
+                icon: Icons.health_and_safety_outlined,
+              ),
+              const SizedBox(width: 8),
+              _buildSeverityChip(
+                label: 'Moderate',
+                sublabel: 'NMIS Crackdown',
+                level: 'Moderate',
+                activeColor: const Color(0xFFD97706),
+                activeBg: const Color(0xFFFFFBEB),
+                icon: Icons.warning_amber_rounded,
+              ),
+              const SizedBox(width: 8),
+              _buildSeverityChip(
+                label: 'Severe',
+                sublabel: 'PNP Emergency',
+                level: 'Severe',
+                activeColor: const Color(0xFFDC2626),
+                activeBg: const Color(0xFFFEF2F2),
+                icon: Icons.local_police_outlined,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Dynamic Guidance Box according to _severityLevel
+          _buildTriageGuidanceBox(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeverityChip({
+    required String label,
+    required String sublabel,
+    required String level,
+    required Color activeColor,
+    required Color activeBg,
+    required IconData icon,
+  }) {
+    final isSelected = _severityLevel == level;
+    return Expanded(
+      child: InkWell(
+        onTap: () => _onSeverityChanged(level),
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? activeBg : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? activeColor : const Color(0xFFE2E8F0),
+              width: isSelected ? 1.6 : 1.0,
+            ),
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 14, color: isSelected ? activeColor : const Color(0xFF64748B)),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: isSelected ? activeColor : const Color(0xFF334155),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                sublabel,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                  color: isSelected ? activeColor.withValues(alpha: 0.85) : const Color(0xFF94A3B8),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTriageGuidanceBox() {
+    if (_severityLevel == 'Severe') {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFEF2F2),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFFECACA)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.local_police, size: 16, color: Color(0xFFDC2626)),
+                SizedBox(width: 6),
+                Text(
+                  'PNP & Law Enforcement Direct Escalation (Active Crime)',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF991B1B)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'For ongoing dog/cat meat trade (RA 9482), active animal torture/cruelty (RA 8485 / RA 10631), or clandestine operations requiring immediate field intervention and rescue.',
+              style: TextStyle(fontSize: 11.5, color: Color(0xFF7F1D1D), height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('• 1. Emergency Call: Contact Tabaco PNP directly for immediate police dispatch.', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF991B1B))),
+                  SizedBox(height: 2),
+                  Text('• 2. Police Blotter: File formal incident blotter citing RA 8485/10631 or RA 9482.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  SizedBox(height: 2),
+                  Text('• 3. SMS Alternative: Text PNP <message> to 2920 for non-emergencies.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  SizedBox(height: 2),
+                  Text('• 4. Coordination: Alert BAI and Animal Welfare NGOs (PAWS/AKF) for animal custody.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: const [
+                Icon(Icons.check_circle_outline, size: 13, color: Color(0xFFDC2626)),
+                SizedBox(width: 4),
+                Text(
+                  'Recommended Action: Endorse to Philippine National Police (PNP)',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    } else if (_severityLevel == 'Moderate') {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFBEB),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFFDE68A)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.business_center_outlined, size: 16, color: Color(0xFFD97706)),
+                SizedBox(width: 6),
+                Text(
+                  'NMIS Administrative & Regulatory Crackdown',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'For commercial backyard slaughterhouses, transport of uninspected "hot meat" (mane-mane), undocumented frozen goods, or prohibited slaughter of carabaos (EO 626-A) / horses.',
+              style: TextStyle(fontSize: 11.5, color: Color(0xFF78350F), height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFFCD34D)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('• 1. Official Complaint Form: Fill out NMIS ADR Form No. 1 (Information Sheet).', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF92400E))),
+                  SizedBox(height: 2),
+                  Text('• 2. Formal Submission: Email completed dossier to nmis@nmis.gov.ph.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  SizedBox(height: 2),
+                  Text('• 3. Phone Hotline: Reach NMIS Central Office at (02) 8924-7980.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  SizedBox(height: 2),
+                  Text('• 4. Regional Deployment: Coordinate with RTOC Region 5 for field raid.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: const [
+                Icon(Icons.check_circle_outline, size: 13, color: Color(0xFFD97706)),
+                SizedBox(width: 4),
+                Text(
+                  'Recommended Action: Endorse to NMIS (National Meat Inspection Service)',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFD97706)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Mild
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF0FDF4),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFBBF7D0)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.verified_outlined, size: 16, color: Color(0xFF16A34A)),
+                SizedBox(width: 6),
+                Text(
+                  'Slaughterhouse & CVO Internal Resolution',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'The situation is not severe: minor non-compliances, neighbor inquiries, or isolated non-commercial home slaughter. Handled directly by the Tabaco City Slaughterhouse administration.',
+              style: TextStyle(fontSize: 11.5, color: Color(0xFF14532D), height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF86EFAC)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('• 1. Routine Verification: Abattoir inspectors visit the site during routine patrol.', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF166534))),
+                  SizedBox(height: 2),
+                  Text('• 2. Corrective Advisory: Provide livestock owner with official Slaughterhouse Ordinance guidelines.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  SizedBox(height: 2),
+                  Text('• 3. Internal Logging: Record findings in local abattoir logs without external police action.', style: TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: const [
+                Icon(Icons.check_circle_outline, size: 13, color: Color(0xFF16A34A)),
+                SizedBox(width: 4),
+                Text(
+                  'Recommended Action: Tabaco City Slaughterhouse / CVO Internal Unit',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   // ═══════════════════════════════════════════════════════════
