@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +22,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   final supabase = Supabase.instance.client;
   final TextEditingController _searchController = TextEditingController();
 
+  List<Map<String, dynamic>> _allRequests = [];
   List<Map<String, dynamic>> _approvedRequests = [];
   List<Map<String, dynamic>> _pendingBarangay = [];
   List<Map<String, dynamic>> _pendingMarket = [];
@@ -82,20 +84,31 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   Future<void> _loadRequests({bool silent = false}) async {
     if (!silent && mounted) setState(() => _isLoading = true);
     try {
-      final allRequests = await supabase
+      if (AppSettingsService.instance.hasActiveStaffSession ||
+          supabase.auth.currentSession == null) {
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      }
+      final allRequestsRaw = await supabase
           .from('requests')
           .select()
           .order('created_at', ascending: false);
+      final allRequests = List<Map<String, dynamic>>.from(allRequestsRaw);
+
+      try {
+        await RegularDealersService.instance.reload();
+        await RegularDealersService.instance.syncCustomersFromRequests(allRequests);
+      } catch (_) {}
 
       // Sync walk-in claims and directory via `system_settings` so mobile customers
       // can claim walk-in orders by Reference # or Marking Tag despite `requests` RLS.
-      await _syncWalkInBridge(List<Map<String, dynamic>>.from(allRequests));
+      await _syncWalkInBridge(allRequests);
 
       final approved = allRequests.where((r) => r['status'] == 'approved').toList();
       final pendingAll = allRequests.where((r) => r['status'] == 'pending').toList();
 
       if (mounted) {
         setState(() {
+          _allRequests = List<Map<String, dynamic>>.from(allRequests);
           _approvedRequests = List<Map<String, dynamic>>.from(approved);
           _pendingBarangay = List<Map<String, dynamic>>.from(
             pendingAll.where((r) => r['request_type'] == 'barangay'),
@@ -210,14 +223,76 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         requestedMarking: requestedMarking,
       );
 
-      final matchedDealer = dealersService.findDealerByName(customerName) ??
-          (requestedMarking != null ? dealersService.findDealerByMarking(requestedMarking) : null);
+      final matchedDealer = dealersService.findAuthoritativeDealer(
+        userId: request['user_id']?.toString(),
+        customerName: customerName,
+      );
       if (matchedDealer != null) {
         customerName = matchedDealer.name; // Keep as official abattoir record name (e.g. D. CERILLO)
       }
 
+      final specialInstruction = (request['special_instruction'] ?? '').toString().trim();
       if (permanentMarking != null && permanentMarking.isNotEmpty) {
         existingMarking = permanentMarking;
+        if (specialInstruction.isNotEmpty) {
+          if (!mounted) return;
+          final proceed = await showDialog<bool>(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              title: const Row(
+                children: [
+                  Icon(Icons.assignment_outlined, color: Color(0xFFB45309)),
+                  SizedBox(width: 8),
+                  Text('Review Special Instructions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Customer: $customerName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.speaker_notes, size: 14, color: Color(0xFFB45309)),
+                            SizedBox(width: 5),
+                            Text('Customer Special Instructions:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF92400E))),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(specialInstruction, style: const TextStyle(fontSize: 13, color: Color(0xFF78350F), height: 1.35)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Confirm and approve this slaughter request?', style: TextStyle(fontSize: 12, color: Colors.black87)),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
+                  child: const Text('Proceed & Approve'),
+                ),
+              ],
+            ),
+          );
+          if (proceed != true) return;
+        }
       } else {
         // This is a NEW meat dealer or initial request without a locked marking yet.
         // Prompt Admin/Clerk with the dealer's requested marking (or suggested initials) to confirm & permanently lock.
@@ -248,6 +323,32 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                   'This is a new meat dealer with their initial slaughter request. Once confirmed, this marking tag will remain permanently locked for all future slaughter requests.',
                   style: TextStyle(fontSize: 12, color: Colors.black87),
                 ),
+                if (specialInstruction.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.speaker_notes, size: 14, color: Color(0xFFB45309)),
+                            SizedBox(width: 4),
+                            Text('Customer Special Instructions:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF92400E))),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(specialInstruction, style: const TextStyle(fontSize: 12, color: Color(0xFF78350F), height: 1.3)),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
                 TextField(
                   controller: markingCtrl,
@@ -618,93 +719,120 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     ),
                   ),
                 )
-              : Scrollbar(
-                  controller: _approvedScrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _approvedScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                    headingTextStyle: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A5568),
-                      fontSize: 13,
-                    ),
-                    dataTextStyle: const TextStyle(
-                      color: Color(0xFF2D3748),
-                      fontSize: 13,
-                    ),
-                    columnSpacing: 50,
-                    horizontalMargin: 24,
-                    columns: const [
-                      DataColumn(label: Text('Reference #')),
-                      DataColumn(label: Text('City/Brgy.')),
-                      DataColumn(label: Text('Customer')),
-                      DataColumn(label: Text('Livestock')),
-                      DataColumn(label: Text('Type')),
-                      DataColumn(label: Text('Marking')),
-                      DataColumn(label: Text('Date')),
-                      DataColumn(label: Text('Actions')),
-                    ],
-                    rows: _approvedRequests.map((req) {
-                      final refNo = _buildRefNo(req);
-                      return DataRow(cells: [
-                        DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.w600))),
-                        DataCell(Text('${req['municipality'] ?? ''}/ ${req['barangay'] ?? ''}')),
-                        DataCell(Text(req['customer_name'] ?? '')),
-                        DataCell(Text(
-                          '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
-                        )),
-                        DataCell(_buildTypeBadge(req['request_type'])),
-                        DataCell(
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFEBF8FF),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFFBEE3F8)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.lock, size: 10, color: Color(0xFF2B6CB0)),
-                                const SizedBox(width: 4),
-                                Text(
-                                  (req['customer_marking'] ?? req['marking'] ?? '—').toString(),
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF2B6CB0)),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        DataCell(Text(_formatDate(req['preferred_date']))),
-                        DataCell(
-                          OutlinedButton(
-                            onPressed: () {
-                              // TODO: Update entry
-                            },
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                              side: BorderSide(color: Colors.grey.shade300),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final availableWidth = constraints.maxWidth;
+                    final tableWidth = math.max(1000.0, availableWidth);
+                    final colSpacing = (availableWidth > 1400)
+                        ? 46.0
+                        : (availableWidth > 1100 ? 32.0 : 20.0);
+
+                    return Scrollbar(
+                      controller: _approvedScrollController,
+                      thumbVisibility: true,
+                      trackVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _approvedScrollController,
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: tableWidth),
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 16.0),
+                            child: DataTable(
+                              headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                              headingTextStyle: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A5568),
+                                fontSize: 13,
                               ),
-                              foregroundColor: const Color(0xFF2D3748),
-                              textStyle: const TextStyle(fontSize: 12),
+                              dataTextStyle: const TextStyle(
+                                color: Color(0xFF2D3748),
+                                fontSize: 13,
+                              ),
+                              columnSpacing: colSpacing,
+                              horizontalMargin: 24,
+                              columns: const [
+                                DataColumn(label: Text('Reference #')),
+                                DataColumn(label: Text('City/Brgy.')),
+                                DataColumn(label: Text('Customer')),
+                                DataColumn(label: Text('Livestock')),
+                                DataColumn(label: Text('Type')),
+                                DataColumn(label: Text('Marking')),
+                                DataColumn(label: Text('Date')),
+                                DataColumn(label: Text('Actions')),
+                              ],
+                              rows: _approvedRequests.map((req) {
+                                final refNo = _buildRefNo(req);
+                                return DataRow(cells: [
+                                  DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.w600))),
+                                  DataCell(Text('${req['municipality'] ?? ''}/ ${req['barangay'] ?? ''}')),
+                                  DataCell(
+                                    Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(req['customer_name'] ?? ''),
+                                        _buildSpecialInstructionBadge(
+                                          context,
+                                          req['special_instruction']?.toString(),
+                                          customerName: req['customer_name']?.toString(),
+                                          refNo: refNo,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  DataCell(Text(
+                                    '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
+                                  )),
+                                  DataCell(_buildTypeBadge(req['request_type'])),
+                                  DataCell(
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFEBF8FF),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: const Color(0xFFBEE3F8)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.lock, size: 10, color: Color(0xFF2B6CB0)),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            (req['customer_marking'] ?? req['marking'] ?? '—').toString(),
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Color(0xFF2B6CB0)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  DataCell(Text(_formatDate(req['preferred_date']))),
+                                  DataCell(
+                                    OutlinedButton(
+                                      onPressed: () {
+                                        // TODO: Update entry
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                        side: BorderSide(color: Colors.grey.shade300),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        foregroundColor: const Color(0xFF2D3748),
+                                        textStyle: const TextStyle(fontSize: 12),
+                                      ),
+                                      child: const Text('Update'),
+                                    ),
+                                  ),
+                                ]);
+                              }).toList(),
                             ),
-                            child: const Text('Update'),
                           ),
                         ),
-                      ]);
-                    }).toList(),
-                  ),
+                      ),
+                    );
+                  },
                 ),
-              ),
-            ),
         ],
       ),
     );
@@ -796,27 +924,37 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     ),
                   ),
                 )
-              : Scrollbar(
-                  controller: _pendingScrollController,
-                  thumbVisibility: true,
-                  trackVisibility: true,
-                  child: SingleChildScrollView(
-                    controller: _pendingScrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 16.0),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                    headingTextStyle: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF4A5568),
-                      fontSize: 13,
-                    ),
-                    dataTextStyle: const TextStyle(
-                      color: Color(0xFF2D3748),
-                      fontSize: 13,
-                    ),
-                    columnSpacing: 20,
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final availableWidth = constraints.maxWidth;
+                    final tableWidth = math.max(1100.0, availableWidth);
+                    final colSpacing = (availableWidth > 1400)
+                        ? 32.0
+                        : (availableWidth > 1100 ? 24.0 : 16.0);
+
+                    return Scrollbar(
+                      controller: _pendingScrollController,
+                      thumbVisibility: true,
+                      trackVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _pendingScrollController,
+                        scrollDirection: Axis.horizontal,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(minWidth: tableWidth),
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 16.0),
+                            child: DataTable(
+                              headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                              headingTextStyle: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF4A5568),
+                                fontSize: 13,
+                              ),
+                              dataTextStyle: const TextStyle(
+                                color: Color(0xFF2D3748),
+                                fontSize: 13,
+                              ),
+                              columnSpacing: colSpacing,
                     horizontalMargin: 24,
                     columns: [
                       const DataColumn(label: Text('Reference #')),
@@ -833,42 +971,92 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     rows: currentList.map((req) {
                       final refNo = _buildRefNo(req);
                       final cName = (req['customer_name'] ?? '').toString();
-                      final mMark = (req['marking'] ?? req['customer_marking'] ?? '').toString();
+                      final rawMark = (req['marking'] ?? req['customer_marking'] ?? '').toString();
                       final uId = req['user_id']?.toString();
-                      final isReg = RegularDealersService.instance.isRegularDealer(
+                      final matchedDealer = RegularDealersService.instance.findAuthoritativeDealer(
                         userId: uId,
                         customerName: cName,
-                        marking: mMark,
+                        marking: rawMark,
                       );
+                      final hasApprovedHistory = _allRequests.any((r) {
+                        final st = (r['status'] ?? '').toString().toLowerCase();
+                        if (st == 'pending' || st == 'rejected' || st == 'cancelled') return false;
+                        final rUid = r['user_id']?.toString();
+                        if (uId != null && uId.isNotEmpty && rUid != null && rUid.isNotEmpty) {
+                          return rUid == uId;
+                        }
+                        return (r['customer_name'] ?? '').toString().trim().toLowerCase() ==
+                            cName.trim().toLowerCase();
+                      });
+                      final isEstablishedRegular =
+                          (matchedDealer != null && !matchedDealer.isNew) || hasApprovedHistory;
+                      final mMark = (matchedDealer != null && matchedDealer.markings.trim().isNotEmpty)
+                          ? matchedDealer.markings.trim()
+                          : rawMark;
+                      final hasLockedMarking =
+                          matchedDealer != null && matchedDealer.markings.trim().isNotEmpty;
                       return DataRow(cells: [
                         DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.w600))),
                         DataCell(
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(cName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                              if (isReg) ...[
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE8F5E9),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: const Color(0xFF81C784)),
-                                  ),
-                                  child: const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.verified, size: 10, color: Color(0xFF2E7D32)),
-                                      SizedBox(width: 3),
-                                      Text(
-                                        'Regular Dealer',
-                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(cName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                  if (isEstablishedRegular) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFE8F5E9),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: const Color(0xFF81C784)),
                                       ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.verified, size: 10, color: Color(0xFF2E7D32)),
+                                          SizedBox(width: 3),
+                                          Text(
+                                            'Regular Dealer',
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ] else ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFDEF7EC),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: const Color(0xFF31C48D)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.star, size: 10, color: Color(0xFF046C4E)),
+                                          SizedBox(width: 3),
+                                          Text(
+                                            'New Dealer',
+                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              _buildSpecialInstructionBadge(
+                                context,
+                                req['special_instruction']?.toString(),
+                                customerName: cName,
+                                refNo: refNo,
+                              ),
                             ],
                           ),
                         ),
@@ -881,23 +1069,25 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: isReg ? const Color(0xFFE8F5E9) : const Color(0xFFF7FAFC),
+                              color: hasLockedMarking ? const Color(0xFFE8F5E9) : const Color(0xFFFFFBEB),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: isReg ? const Color(0xFFA5D6A7) : const Color(0xFFE2E8F0)),
+                              border: Border.all(color: hasLockedMarking ? const Color(0xFFA5D6A7) : const Color(0xFFFDE68A)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                if (isReg) ...[
-                                  const Icon(Icons.lock, size: 10, color: Color(0xFF2E7D32)),
-                                  const SizedBox(width: 4),
-                                ],
+                                Icon(
+                                  hasLockedMarking ? Icons.lock : Icons.edit_note,
+                                  size: 11,
+                                  color: hasLockedMarking ? const Color(0xFF2E7D32) : const Color(0xFFB45309),
+                                ),
+                                const SizedBox(width: 4),
                                 Text(
                                   mMark.isNotEmpty ? mMark : '—',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 11,
-                                    color: isReg ? const Color(0xFF2E7D32) : const Color(0xFF2D3748),
+                                    color: hasLockedMarking ? const Color(0xFF2E7D32) : const Color(0xFFB45309),
                                   ),
                                 ),
                               ],
@@ -956,6 +1146,9 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                 ),
               ),
             ),
+          );
+        },
+      ),
           const SizedBox(height: 16),
         ],
       ),
@@ -965,6 +1158,117 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   // ════════════════════════════════════════════
   //  HELPER WIDGETS
   // ════════════════════════════════════════════
+
+  Widget _buildSpecialInstructionBadge(BuildContext context, String? instruction, {String? customerName, String? refNo}) {
+    if (instruction == null || instruction.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final text = instruction.trim();
+
+    return Tooltip(
+      message: 'Customer Special Note: $text\n(Click to view details)',
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: InkWell(
+        onTap: () => _showSpecialInstructionDialog(context, text, customerName: customerName, refNo: refNo),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF3C7),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.6)),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.assignment_outlined, size: 12, color: Color(0xFFB45309)),
+              SizedBox(width: 4),
+              Text(
+                'Special Note',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFB45309),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSpecialInstructionDialog(BuildContext context, String text, {String? customerName, String? refNo}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.assignment_outlined, color: Color(0xFFB45309), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text('Customer Special Instructions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (refNo != null || customerName != null) ...[
+              Row(
+                children: [
+                  if (refNo != null)
+                    Text(refNo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D6A4F))),
+                  if (refNo != null && customerName != null)
+                    const Text(' • ', style: TextStyle(color: Colors.grey)),
+                  if (customerName != null)
+                    Text(customerName, style: const TextStyle(fontSize: 13, color: Color(0xFF4A5568), fontWeight: FontWeight.w500)),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(fontSize: 13.5, color: Color(0xFF78350F), height: 1.4),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2D6A4F),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildTab(String label, int index) {
     final isActive = _pendingTabIndex == index;
@@ -1248,7 +1552,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   bool _isLoadingBarangays = false;
 
   String? _selectedAnimalType;
-  final List<String> _animalTypes = ['Cattle', 'Carabao', 'Hog', 'Goat', 'Sheep', 'Poultry'];
+  final List<String> _animalTypes = ['Cattle', 'Carabao', 'Hog', 'Goat', 'Sheep'];
 
   List<_CustomerLookupItem> _lookupDirectory = [];
   _CustomerLookupItem? _selectedCustomer;

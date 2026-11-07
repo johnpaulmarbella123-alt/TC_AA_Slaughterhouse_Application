@@ -414,10 +414,12 @@ class _NotifyPageState extends State<NotifyPage> {
       case 'meat_delivery':
       case 'meat_pickup':
       case 'meat_pickup_reminder':
+      case 'cold_storage_penalty':
         _showMeatReleaseDialog(notif, data);
         break;
 
       case 'payment_reminder':
+      case 'overdue_payment_penalty':
         final requestId = data['request_id'];
         final res = await Navigator.push(
           context,
@@ -553,8 +555,31 @@ class _NotifyPageState extends State<NotifyPage> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'NOTICE: 5:00 PM deadline has passed. Carcass is safely preserved in abattoir cold storage. A \u20b1150.00 preservation fee applies upon release.',
+                          'NOTICE: 5:00 PM deadline has passed. Carcass is safely preserved in abattoir cold storage. A \u20b1150.00 Cold Storage penalty fee applies.',
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (!isDelivery && !isHandoverConfirmed) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFCD34D)),
+                  ),
+                  child: Row(
+                    children: const [
+                      Icon(Icons.ac_unit, color: Color(0xFFB45309), size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'REMINDER: Please pick up your meat on or before 5:00 PM. A \u20b1150.00 Cold Storage penalty fee applies if not picked up by 5:00 PM.',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
                         ),
                       ),
                     ],
@@ -601,13 +626,19 @@ class _NotifyPageState extends State<NotifyPage> {
               if (!isDelivery && !isHandoverConfirmed) ...[
                 const SizedBox(height: 8),
                 Row(
-                  children: const [
-                    Icon(Icons.badge_outlined, size: 14, color: Color(0xFF4A5568)),
-                    SizedBox(width: 6),
+                  children: [
+                    Icon(
+                      (data['payment_status'] == 'unpaid') ? Icons.payments_outlined : Icons.badge_outlined,
+                      size: 14,
+                      color: const Color(0xFF4A5568),
+                    ),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        'Cannot pick up personally? You can designate an Authorized Representative in the Receipt screen.',
-                        style: TextStyle(fontSize: 11, color: Color(0xFF4A5568), fontStyle: FontStyle.italic),
+                        (data['payment_status'] == 'unpaid')
+                            ? 'Please complete your payment at the Cashier window first. Pickup authorization and your Official Receipt are granted once payment is confirmed.'
+                            : 'Cannot pick up personally? You can designate an Authorized Representative in the Official Receipt screen.',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF4A5568), fontStyle: FontStyle.italic),
                       ),
                     ),
                   ],
@@ -644,7 +675,9 @@ class _NotifyPageState extends State<NotifyPage> {
                 }
               },
               child: Text(
-                !isDelivery && !isHandoverConfirmed ? 'View Receipt / Assign Rep' : 'View Receipt',
+                (data['payment_status'] == 'unpaid')
+                    ? 'View Payment Details'
+                    : (!isDelivery && !isHandoverConfirmed ? 'View Receipt / Assign Rep' : 'View Receipt'),
                 style: const TextStyle(color: Color(0xFF0A3D2E)),
               ),
             ),
@@ -1036,6 +1069,32 @@ class _NotifyPageState extends State<NotifyPage> {
         imagePath: 'assets/images/icon-delivery-truck.png',
       );
     }
+    if (type == 'cold_storage_penalty') {
+      return const _NotifStyle(
+        icon: Icons.ac_unit,
+        iconColor: Color(0xFFC53030),
+        iconBg: Color(0xFFFFF5F5),
+        imagePath: 'assets/images/icon-meat-box.png',
+        badge: 'Cold Storage +\u20b1150',
+        badgeBg: Color(0xFFFED7D7),
+        badgeText: Color(0xFF9B2C2C),
+        actionLabel: 'View Receipt & Details',
+        actionColor: Color(0xFFC53030),
+      );
+    }
+    if (type == 'overdue_payment_penalty') {
+      return const _NotifStyle(
+        icon: Icons.error_outline,
+        iconColor: Color(0xFFC53030),
+        iconBg: Color(0xFFFFF5F5),
+        imagePath: 'assets/images/receipt.png',
+        badge: 'Overdue +\u20b1100',
+        badgeBg: Color(0xFFFED7D7),
+        badgeText: Color(0xFF9B2C2C),
+        actionLabel: 'View Receipt & Pay',
+        actionColor: Color(0xFFC53030),
+      );
+    }
     if (type == 'meat_pickup_reminder' || t.contains('pickup reminder') || t.contains('claim your meat') || t.contains('cold storage')) {
       return const _NotifStyle(
         icon: Icons.timer_outlined,
@@ -1206,6 +1265,18 @@ class _NotifyPageState extends State<NotifyPage> {
           actionLabel: 'View Details',
           actionColor: Color(0xFFC53030),
         );
+      case 'cold_storage_penalty':
+        return const _NotifStyle(
+          icon: Icons.ac_unit,
+          iconColor: Color(0xFFC53030),
+          iconBg: Color(0xFFFFF5F5),
+          imagePath: 'assets/images/icon-meat-box.png',
+          badge: 'Cold Storage +\u20b1150',
+          badgeBg: Color(0xFFFED7D7),
+          badgeText: Color(0xFF9B2C2C),
+          actionLabel: 'View Details',
+          actionColor: Color(0xFFC53030),
+        );
       case 'payment_reminder':
         return _NotifStyle(
           icon: Icons.warning_amber_rounded,
@@ -1217,6 +1288,18 @@ class _NotifyPageState extends State<NotifyPage> {
           badgeText: const Color(0xFF7B341E),
           actionLabel: 'View Receipt & Pay',
           actionColor: const Color(0xFFDD6B20),
+        );
+      case 'overdue_payment_penalty':
+        return _NotifStyle(
+          icon: Icons.error_outline,
+          iconColor: const Color(0xFFC53030),
+          iconBg: const Color(0xFFFFF5F5),
+          imagePath: 'assets/images/receipt.png',
+          badge: 'Overdue +\u20b1100',
+          badgeBg: const Color(0xFFFED7D7),
+          badgeText: const Color(0xFF9B2C2C),
+          actionLabel: 'View Receipt & Pay',
+          actionColor: const Color(0xFFC53030),
         );
 
       case 'request_submitted':
@@ -1839,12 +1922,22 @@ class _NotifCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   // Body — uses 'message' (your column) or 'body' as fallback
-                  Text(
-                    (notif['message'] ?? notif['body'] ?? '').toString(),
-                    style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  Builder(builder: (context) {
+                    var msgText = (notif['message'] ?? notif['body'] ?? '').toString();
+                    final rawData = notif['data'];
+                    if (rawData is Map) {
+                      final vNote = (rawData['verification_notes'] ?? '').toString().trim();
+                      if (vNote.isNotEmpty && !msgText.contains('Note:')) {
+                        msgText = '$msgText\nNote: $vNote';
+                      }
+                    }
+                    return Text(
+                      msgText,
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      maxLines: 5,
+                      overflow: TextOverflow.ellipsis,
+                    );
+                  }),
                   // Action button
                   if (style.actionLabel != null) ...[
                     const SizedBox(height: 6),

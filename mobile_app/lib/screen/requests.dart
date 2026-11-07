@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -121,33 +122,7 @@ class _RequestsContentState extends State<RequestsContent> {
       bool isRegular = false;
       String? officialDealerName;
 
-      // 2. Check if linked to an official regular dealer in system_settings
-      try {
-        final regRow = await supabase
-            .from('system_settings')
-            .select('value')
-            .eq('key', 'regular_dealers')
-            .maybeSingle();
-
-        if (regRow != null && regRow['value'] is List) {
-          final regList = List<dynamic>.from(regRow['value']);
-          for (var item in regList) {
-            if (item is Map) {
-              final uId = item['user_id']?.toString() ?? item['userId']?.toString();
-              if (uId != null && uId == user.id) {
-                officialDealerName = (item['name'] ?? '').toString().trim();
-                resolvedMarking = (item['markings'] ?? item['marking'] ?? '').toString().trim();
-                isRegular = true;
-                isLocked = true;
-                isCustNameLocked = true;
-                break;
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 3. Fetch latest profile from DB
+      // 2. Fetch latest profile from DB first so we also know display_name / address
       Map<String, dynamic>? profile;
       try {
         final res = await supabase
@@ -157,7 +132,6 @@ class _RequestsContentState extends State<RequestsContent> {
             .maybeSingle();
         if (res != null) profile = Map<String, dynamic>.from(res);
       } catch (_) {
-        // Fallback with standard columns if schema differs
         try {
           final res = await supabase
               .from('profiles')
@@ -165,15 +139,27 @@ class _RequestsContentState extends State<RequestsContent> {
               .eq('id', user.id)
               .maybeSingle();
           if (res != null) profile = Map<String, dynamic>.from(res);
-        } catch (_) {}
+        } catch (_) {
+          try {
+            final res = await supabase
+                .from('profiles')
+                .select('display_name, address')
+                .eq('id', user.id)
+                .maybeSingle();
+            if (res != null) profile = Map<String, dynamic>.from(res);
+          } catch (_) {}
+        }
       }
 
       if (profile != null) {
+        if (profile['display_name'] != null && profile['display_name'].toString().trim().isNotEmpty) {
+          resolvedName ??= profile['display_name'].toString().trim();
+        }
         if (profile['official_dealer_name'] != null && profile['official_dealer_name'].toString().trim().isNotEmpty) {
           officialDealerName = profile['official_dealer_name'].toString().trim();
         }
         if (profile['assigned_marking'] != null && profile['assigned_marking'].toString().trim().isNotEmpty) {
-          resolvedMarking = profile['assigned_marking'].toString().trim();
+          resolvedMarking = profile['assigned_marking'].toString().trim().toUpperCase();
         }
         if (profile['marking_locked'] == true || profile['marking_locked'].toString() == 'true') {
           isLocked = true;
@@ -184,11 +170,87 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       }
 
+      // 3. Check if linked to an official regular dealer in system_settings (authoritative Admin record)
+      try {
+        final regRow = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'regular_dealers')
+            .maybeSingle();
+
+        if (regRow != null && regRow['value'] != null) {
+          final rawVal = regRow['value'];
+          final List<dynamic> regList = rawVal is String
+              ? List<dynamic>.from(jsonDecode(rawVal))
+              : (rawVal is List ? List<dynamic>.from(rawVal) : []);
+
+          final normCandidateName = (officialDealerName ?? resolvedName ?? '').trim().toLowerCase();
+          for (var item in regList) {
+            if (item is Map) {
+              final uId = (item['user_id'] ?? item['userId'])?.toString().trim();
+              final itemName = (item['name'] ?? '').toString().trim();
+              final itemMarking = (item['markings'] ?? item['marking'] ?? '').toString().trim().toUpperCase();
+              if (uId != null && uId.isNotEmpty && uId != user.id) {
+                continue; // Belongs to a different user account
+              }
+              final matchesUser = uId != null && uId.isNotEmpty && uId == user.id;
+              final matchesName = (uId == null || uId.isEmpty) &&
+                  normCandidateName.isNotEmpty &&
+                  itemName.toLowerCase() == normCandidateName;
+              if (matchesUser || matchesName) {
+                if (itemName.isNotEmpty) officialDealerName = itemName;
+                if (itemMarking.isNotEmpty) resolvedMarking = itemMarking;
+                isRegular = true;
+                isLocked = true;
+                isCustNameLocked = true;
+                break;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 4. If marking not yet found in regular_dealers/profiles, check user's first submitted request
+      if (resolvedMarking == null || resolvedMarking.isEmpty) {
+        try {
+          final pastReq = await supabase
+              .from('requests')
+              .select('marking, customer_name')
+              .eq('user_id', user.id)
+              .not('status', 'in', '("rejected","cancelled")')
+              .order('created_at', ascending: true)
+              .limit(1)
+              .maybeSingle();
+          if (pastReq != null) {
+            final m = pastReq['marking']?.toString().trim().toUpperCase();
+            if (m != null && m.isNotEmpty) {
+              resolvedMarking = m;
+              isLocked = true;
+              isCustNameLocked = true;
+              isRegular = true;
+            }
+            final cName = pastReq['customer_name']?.toString().trim();
+            if ((officialDealerName == null || officialDealerName.isEmpty) && cName != null && cName.isNotEmpty) {
+              officialDealerName = cName;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 5. Fallback to userMetadata assigned_marking if locked earlier
+      if ((resolvedMarking == null || resolvedMarking.isEmpty) && meta != null) {
+        final metaMark = meta['assigned_marking']?.toString().trim().toUpperCase();
+        if (metaMark != null && metaMark.isNotEmpty) {
+          resolvedMarking = metaMark;
+          isLocked = true;
+          isCustNameLocked = true;
+          isRegular = true;
+        }
+      }
+
       // Reconcile official name
       if (officialDealerName != null && officialDealerName.isNotEmpty) {
         resolvedName = officialDealerName;
-      } else if (profile != null && profile['display_name'] != null && profile['display_name'].toString().trim().isNotEmpty) {
-        resolvedName = profile['display_name'].toString().trim();
       }
 
       // Fallback if still empty: email username
@@ -215,43 +277,17 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       }
 
-      // 4. If marking not yet loaded, check user's previous requests
-      if (resolvedMarking == null || resolvedMarking.isEmpty) {
-        try {
-          final pastReq = await supabase
-              .from('requests')
-              .select('marking, customer_marking')
-              .eq('user_id', user.id)
-              .not('status', 'in', '("rejected","cancelled")')
-              .order('created_at', ascending: false)
-              .limit(1)
-              .maybeSingle();
-          if (pastReq != null) {
-            final m = (pastReq['customer_marking'] ?? pastReq['marking'])?.toString().trim();
-            if (m != null && m.isNotEmpty) {
-              resolvedMarking = m;
-              isLocked = true;
-            }
-          }
-        } catch (_) {}
-      }
-
-      // 5. If still empty, suggest initials from customer name
-      if ((resolvedMarking == null || resolvedMarking.isEmpty) && resolvedName != null && resolvedName.isNotEmpty) {
-        final clean = resolvedName.replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), '').trim();
-        final parts = clean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-        if (parts.length == 1) {
-          resolvedMarking = parts.first.length >= 3 ? parts.first.substring(0, 3).toUpperCase() : parts.first.toUpperCase();
-        } else if (parts.isNotEmpty) {
-          resolvedMarking = parts.map((p) => p[0].toUpperCase()).join();
-          if (resolvedMarking.length > 5) resolvedMarking = resolvedMarking.substring(0, 5);
-        }
-      }
-
-      if (resolvedMarking != null && resolvedMarking.isNotEmpty && mounted) {
+      // NOTE: Do NOT pre-fill initials for first-time dealers!
+      // Only populate _markingController when the user already has a locked marking.
+      if (mounted) {
         setState(() {
-          _markingController.text = resolvedMarking!;
-          _isMarkingLocked = isLocked;
+          if (resolvedMarking != null && resolvedMarking.isNotEmpty) {
+            _markingController.text = resolvedMarking;
+            _isMarkingLocked = true;
+          } else {
+            _markingController.clear();
+            _isMarkingLocked = false;
+          }
         });
       }
     } catch (e) {
@@ -313,12 +349,78 @@ class _RequestsContentState extends State<RequestsContent> {
         return;
       }
 
-      // Check if marking is already used by an active request
-      final markingInput = _markingController.text.trim();
+      final markingInput = _markingController.text.trim().toUpperCase();
+
+      // For a new dealer entering their own marking on their first request,
+      // enforce 1 to 5 alphanumeric characters (letters or numbers).
+      if (!_isMarkingLocked) {
+        if (!RegExp(r'^[A-Z0-9]{1,5}$').hasMatch(markingInput)) {
+          setState(() => isLoading = false);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Livestock Marking must be 1 to 5 letters or numbers (e.g., PAUL, BINO, MK1)."),
+            ),
+          );
+          return;
+        }
+
+        // Also check if another registered dealer in system_settings already owns this marking
+        try {
+          final regRow = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'regular_dealers')
+              .maybeSingle();
+          if (regRow != null && regRow['value'] != null) {
+            final rawVal = regRow['value'];
+            final List<dynamic> regList = rawVal is String
+                ? List<dynamic>.from(jsonDecode(rawVal))
+                : (rawVal is List ? List<dynamic>.from(rawVal) : []);
+            final normMyName = _customerNameController.text.trim().toLowerCase();
+            final takenByOther = regList.any((item) {
+              if (item is! Map) return false;
+              final m = (item['markings'] ?? item['marking'] ?? '').toString().trim().toUpperCase();
+              if (m != markingInput) return false;
+              final uId = (item['user_id'] ?? item['userId'])?.toString().trim();
+              final iName = (item['name'] ?? '').toString().trim().toLowerCase();
+              if (uId != null && uId.isNotEmpty && uId == user.id) return false;
+              if (iName == normMyName) return false;
+              return true;
+            });
+            if (takenByOther) {
+              setState(() => isLoading = false);
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 48),
+                  title: const Text("Marking Already Registered", style: TextStyle(fontWeight: FontWeight.bold)),
+                  content: Text(
+                    "The marking '$markingInput' is already permanently registered to another dealer.\n\n"
+                    "Please enter a different unique combination of 1 to 5 letters or numbers.",
+                  ),
+                  actions: [
+                    ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E855A)),
+                      child: const Text("Change Marking"),
+                    ),
+                  ],
+                ),
+              );
+              return;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Check if marking is already used by another user's active request
       final conflicting = await supabase
           .from('requests')
-          .select('id, marking, status')
+          .select('id, marking, status, user_id')
           .ilike('marking', markingInput)
+          .neq('user_id', user.id)
           .not('status', 'in', '("completed","cancelled","rejected","released")')
           .limit(1);
 
@@ -331,8 +433,8 @@ class _RequestsContentState extends State<RequestsContent> {
             icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 48),
             title: const Text("Marking Already In Use", style: TextStyle(fontWeight: FontWeight.bold)),
             content: Text(
-              "The livestock marking '$markingInput' is currently assigned to an active request.\n\n"
-              "To prevent animal mix-ups during slaughter and holding, please choose a unique tag or identifier (e.g. $markingInput-1).",
+              "The livestock marking '$markingInput' is currently assigned to another dealer's active request.\n\n"
+              "To prevent animal mix-ups during slaughter and holding, please choose a unique marking (1 to 5 letters or numbers).",
             ),
             actions: [
               ElevatedButton(
@@ -350,14 +452,100 @@ class _RequestsContentState extends State<RequestsContent> {
       final parts = _dateController.text.split('/');
       final preferredDateIso =
           "${parts[2]}-${parts[1].padLeft(2, '0')}-${parts[0].padLeft(2, '0')}";
+      final parsedPreferred = DateTime.tryParse(preferredDateIso);
+      final nowLocal = DateTime.now();
+      final todayStart = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
+      if (parsedPreferred == null || parsedPreferred.isBefore(todayStart)) {
+        setState(() => isLoading = false);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Preferred date cannot be in the past. Please select today or a future date."),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
 
-      final finalMarking = _markingController.text.trim().toUpperCase();
+      final finalMarking = markingInput;
+      final finalCustomerName = _customerNameController.text.trim();
+
+      // Persist permanent marking in user_metadata & profiles so it stays locked across sessions
+      try {
+        await supabase.auth.updateUser(
+          UserAttributes(
+            data: {
+              'assigned_marking': finalMarking,
+              'marking_locked': true,
+              'official_dealer_name': finalCustomerName,
+            },
+          ),
+        );
+      } catch (_) {}
+
       try {
         await supabase.from('profiles').update({
           'assigned_marking': finalMarking,
           'marking_locked': true,
           'dealer_category': isBarangay ? 'barangay' : 'market',
         }).eq('id', user.id);
+      } catch (_) {}
+
+      // Also sync into system_settings ('regular_dealers') with strict user_id isolation
+      try {
+        final regRow = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'regular_dealers')
+            .maybeSingle();
+        List<dynamic> regList = [];
+        if (regRow != null && regRow['value'] != null) {
+          final rawVal = regRow['value'];
+          regList = rawVal is String
+              ? List<dynamic>.from(jsonDecode(rawVal))
+              : (rawVal is List ? List<dynamic>.from(rawVal) : []);
+        }
+        final existingIdx = regList.indexWhere((item) {
+          if (item is! Map) return false;
+          final uId = (item['user_id'] ?? item['userId'])?.toString().trim();
+          final iName = (item['name'] ?? '').toString().trim().toLowerCase();
+          if (uId != null && uId.isNotEmpty && uId != user.id) return false;
+          return (uId != null && uId.isNotEmpty && uId == user.id) ||
+              iName == finalCustomerName.toLowerCase();
+        });
+        final categoryStr = isBarangay ? 'barangay' : 'market';
+        if (existingIdx >= 0) {
+          final mapItem = Map<String, dynamic>.from(regList[existingIdx] as Map);
+          mapItem['user_id'] = user.id;
+          if ((mapItem['markings'] ?? '').toString().trim().isEmpty) {
+            mapItem['markings'] = finalMarking;
+          }
+          regList[existingIdx] = mapItem;
+        } else {
+          int maxNum = 0;
+          for (final item in regList) {
+            if (item is Map && (item['category'] ?? 'barangay') == categoryStr) {
+              final numVal = int.tryParse((item['dealer_number'] ?? '0').toString()) ?? 0;
+              if (numVal > maxNum) maxNum = numVal;
+            }
+          }
+          regList.add({
+            'id': 'dlr-${DateTime.now().millisecondsSinceEpoch}',
+            'dealer_number': maxNum + 1,
+            'name': finalCustomerName.toUpperCase(),
+            'markings': finalMarking,
+            'category': categoryStr,
+            'phone': '',
+            'user_id': user.id,
+            'is_active': true,
+            'created_at': DateTime.now().toIso8601String(),
+          });
+        }
+        await supabase.from('system_settings').upsert({
+          'key': 'regular_dealers',
+          'value': jsonEncode(regList),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
       } catch (_) {}
 
       // 1. Insert request with all the fields your schema actually has
@@ -410,6 +598,11 @@ class _RequestsContentState extends State<RequestsContent> {
       setState(() {
         isSubmitted = true;
         isLoading = false;
+        _isMarkingLocked = true;
+        _isCustomerNameLocked = true;
+        _isRegularDealer = true;
+        _customerName = finalCustomerName;
+        _markingController.text = finalMarking;
       });
 
       if (!mounted) return;
@@ -1153,7 +1346,7 @@ class _RequestsContentState extends State<RequestsContent> {
 
                       _buildDropdownField(
                         "Livestock Type",
-                        ["Pig/Hog", "Cow/Cattle", "Goat", "Sheep", "Carabao", "Poultry"],
+                        ["Pig/Hog", "Cow/Cattle", "Goat", "Sheep", "Carabao"],
                       ),
 
                       const SizedBox(height: 16),
@@ -1297,17 +1490,22 @@ class _RequestsContentState extends State<RequestsContent> {
                         "Marking for livestock *",
                         _isMarkingLocked
                             ? "Official assigned marking"
-                            : "Enter unique marking (e.g., MK, MK-1)",
+                            : "Enter your permanent marking (1–5 letters/numbers, e.g., PAUL)",
                         controller: _markingController,
                         readOnly: _isMarkingLocked,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: _isMarkingLocked
+                            ? null
+                            : [
+                                FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
+                                LengthLimitingTextInputFormatter(5),
+                              ],
                         prefixIcon: _isMarkingLocked
                             ? const Icon(Icons.lock, color: Color(0xFF2D6A4F), size: 18)
                             : null,
-                        helperText: _isRegularDealer
-                            ? "Official permanent marking for ${_customerNameController.text} (Permanently locked)."
-                            : (_isMarkingLocked
-                                ? "Official permanent marking recorded at Slaughterhouse (Locked)."
-                                : "Suggested from initials. Once recorded, this becomes your permanent marking."),
+                        helperText: _isRegularDealer || _isMarkingLocked
+                            ? "Official permanent marking for ${_customerNameController.text} (Permanently locked — only Admin can modify)."
+                            : "Enter 1 to 5 letters or numbers. Once submitted, this marking is permanently locked to your account.",
                       ),
                       const SizedBox(height: 32),
 
@@ -1401,6 +1599,8 @@ class _RequestsContentState extends State<RequestsContent> {
     Widget? prefixIcon,
     Widget? suffixIcon,
     String? helperText,
+    List<TextInputFormatter>? inputFormatters,
+    TextCapitalization textCapitalization = TextCapitalization.none,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1412,6 +1612,8 @@ class _RequestsContentState extends State<RequestsContent> {
           readOnly: readOnly,
           keyboardType: isNumber ? TextInputType.number : TextInputType.text,
           maxLines: maxLines,
+          inputFormatters: inputFormatters,
+          textCapitalization: textCapitalization,
           decoration: InputDecoration(
             hintText: hint,
             hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
@@ -1476,11 +1678,13 @@ class _RequestsContentState extends State<RequestsContent> {
           controller: _dateController,
           readOnly: true,
           onTap: () async {
+            final now = DateTime.now();
+            final today = DateTime(now.year, now.month, now.day);
             DateTime? pickedDate = await showDatePicker(
               context: context,
-              initialDate: DateTime.now(),
-              firstDate: DateTime(2000),
-              lastDate: DateTime(2101),
+              initialDate: today,
+              firstDate: today,
+              lastDate: DateTime(today.year + 2, 12, 31),
               builder: (context, child) {
                 return Theme(
                   data: Theme.of(context).copyWith(

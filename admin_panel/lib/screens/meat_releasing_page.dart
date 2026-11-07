@@ -20,6 +20,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
   Timer? _pollingTimer;
+  final Set<String> _notifiedPickupReadyIds = {};
+  final Set<String> _sentColdStoragePenaltyNotifIds = {};
+  Map<String, dynamic> _penaltyTrackingMap = {};
 
   @override
   void initState() {
@@ -44,22 +47,30 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   Future<void> _loadRequests({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
     try {
+      if (AppSettingsService.instance.hasActiveStaffSession ||
+          supabase.auth.currentSession == null) {
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      }
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
           .inFilter('status', ['paid', 'released', 'releasable', 'mic_generated', 'payment_pending', 'out_for_delivery'])
           .order('created_at', ascending: false);
 
-      // Fetch system_settings for 'authorized_representatives' fallback if needed
+      // Fetch system_settings for 'authorized_representatives' and 'pickup_penalty_tracking'
       Map<String, dynamic> repMap = {};
+      Map<String, dynamic> trackingMap = {};
       try {
-        final repRow = await supabase
+        final settingsRows = await supabase
             .from('system_settings')
-            .select('value')
-            .eq('key', 'authorized_representatives')
-            .maybeSingle();
-        if (repRow != null && repRow['value'] is Map) {
-          repMap = Map<String, dynamic>.from(repRow['value']);
+            .select('key, value')
+            .inFilter('key', ['authorized_representatives', 'pickup_penalty_tracking']);
+        for (final row in List<Map<String, dynamic>>.from(settingsRows)) {
+          if (row['key'] == 'authorized_representatives' && row['value'] is Map) {
+            repMap = Map<String, dynamic>.from(row['value']);
+          } else if (row['key'] == 'pickup_penalty_tracking' && row['value'] is Map) {
+            trackingMap = Map<String, dynamic>.from(row['value']);
+          }
         }
       } catch (_) {}
 
@@ -74,6 +85,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             r['authorized_person_id_type'] = savedRep['id_type'];
             r['authorized_person_id_num'] = savedRep['id_num'];
           }
+        }
+        if (trackingMap.containsKey(reqIdStr) && trackingMap[reqIdStr] is Map) {
+          r['penalty_tracking'] = Map<String, dynamic>.from(trackingMap[reqIdStr] as Map);
         }
         // Flatten slaughter_inspection
         final inspectionList = r['slaughter_inspection'];
@@ -92,6 +106,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         }
         return r;
       }).toList();
+
+      _penaltyTrackingMap = trackingMap;
+      await _checkAndTriggerColdStoragePenaltyNotifications(enriched, trackingMap);
 
       if (mounted) {
         setState(() {
@@ -123,22 +140,160 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     return double.tryParse(w.toString()) ?? 0;
   }
 
+  bool _hasBeenNotifiedForPickup(Map<String, dynamic> req) {
+    final reqIdStr = req['id'].toString();
+    if (_notifiedPickupReadyIds.contains(reqIdStr)) return true;
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+    if (tracking != null && tracking['pickup_notified_at'] != null) return true;
+    final notes = (req['release_notes'] ?? '').toString();
+    if (notes.contains('Notified ready for collection')) return true;
+    if (req['pickup_deadline'] != null && req['pickup_deadline'].toString().isNotEmpty) return true;
+    return false;
+  }
+
   DateTime _getPickupDeadline(Map<String, dynamic> req) {
-    DateTime baseDate = DateTime.now();
-    final payment = req['payment'] as Map<String, dynamic>?;
-    final createdStr = payment?['updated_at'] ?? payment?['created_at'] ?? req['created_at'];
-    if (createdStr != null) {
-      final parsed = DateTime.tryParse(createdStr.toString());
-      if (parsed != null) baseDate = parsed.toLocal();
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+
+    // 1. Check explicit pickup_deadline from tracking or request column
+    final explicitDeadlineStr = tracking?['pickup_deadline'] ?? req['pickup_deadline'];
+    if (explicitDeadlineStr != null) {
+      final parsedDeadline = DateTime.tryParse(explicitDeadlineStr.toString());
+      if (parsedDeadline != null) return parsedDeadline.toLocal();
     }
-    return DateTime(baseDate.year, baseDate.month, baseDate.day, 17, 0, 0);
+
+    // 2. Check when the "Ready for Collection" notification was sent
+    DateTime baseDate = DateTime.now();
+    final notifiedAtStr = tracking?['pickup_notified_at'];
+    if (notifiedAtStr != null) {
+      final parsed = DateTime.tryParse(notifiedAtStr.toString());
+      if (parsed != null) baseDate = parsed.toLocal();
+    } else {
+      final notes = (req['release_notes'] ?? '').toString();
+      final match = RegExp(r'Notified ready for collection at ([0-9T:\.\-\+Z]+)').firstMatch(notes);
+      if (match != null) {
+        final parsed = DateTime.tryParse(match.group(1)!);
+        if (parsed != null) baseDate = parsed.toLocal();
+      } else {
+        final payment = req['payment'] as Map<String, dynamic>?;
+        final createdStr = payment?['updated_at'] ?? payment?['created_at'] ?? req['created_at'];
+        if (createdStr != null) {
+          final parsed = DateTime.tryParse(createdStr.toString());
+          if (parsed != null) baseDate = parsed.toLocal();
+        }
+      }
+    }
+
+    DateTime dueDate = DateTime(baseDate.year, baseDate.month, baseDate.day, 17, 0, 0);
+    if (!baseDate.isBefore(dueDate)) {
+      dueDate = dueDate.add(const Duration(days: 1));
+    }
+    return dueDate;
   }
 
   bool _isPickupOverdue(Map<String, dynamic> req) {
     if (req['status'] == 'released') return false;
     if (req['request_type'] != 'barangay') return false;
+    // Cold Storage ₱150 penalty ONLY applies after Admin sends the Ready for Collection notification
+    if (!_hasBeenNotifiedForPickup(req)) return false;
     final deadline = _getPickupDeadline(req);
     return DateTime.now().isAfter(deadline);
+  }
+
+  bool _isColdStorageBilledOnReceipt(Map<String, dynamic> req) {
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+    return tracking?['cold_storage_billed_on_receipt'] == true;
+  }
+
+  Future<void> _checkAndTriggerColdStoragePenaltyNotifications(
+    List<Map<String, dynamic>> requests,
+    Map<String, dynamic> trackingMap,
+  ) async {
+    bool trackingChanged = false;
+    for (final req in requests) {
+      if (req['request_type'] != 'barangay' || req['status'] == 'released') continue;
+      if (!_isPickupOverdue(req)) continue;
+
+      final reqId = req['id'];
+      final reqIdStr = reqId.toString();
+      final existingEntry = (trackingMap[reqIdStr] is Map)
+          ? Map<String, dynamic>.from(trackingMap[reqIdStr] as Map)
+          : <String, dynamic>{};
+      final notes = (req['release_notes'] ?? '').toString();
+
+      final alreadySentPost5PmNotif = _sentColdStoragePenaltyNotifIds.contains(reqIdStr) ||
+          existingEntry['cold_storage_penalty_notif_sent'] == true ||
+          notes.contains('Cold storage penalty notification sent');
+
+      if (alreadySentPost5PmNotif) continue;
+
+      _sentColdStoragePenaltyNotifIds.add(reqIdStr);
+      existingEntry['cold_storage_penalty_notif_sent'] = true;
+      existingEntry['cold_storage_penalty_incurred_at'] = DateTime.now().toIso8601String();
+      trackingMap[reqIdStr] = existingEntry;
+      req['penalty_tracking'] = existingEntry;
+      trackingChanged = true;
+
+      final userId = req['user_id'];
+      final ref = _refNo(req);
+      final isPaid = _isPaid(req);
+
+      // Update release_notes as well so it persists even without system_settings
+      final updatedNotes = notes.isEmpty
+          ? 'Cold storage penalty notification sent'
+          : '$notes | Cold storage penalty notification sent';
+      try {
+        await supabase.from('requests').update({'release_notes': updatedNotes}).eq('id', reqId);
+      } catch (_) {}
+
+      // If already paid online (e.g., GCash), reflect the ₱150.00 Cold Storage fee on the payment record
+      if (isPaid) {
+        final payment = req['payment'] as Map<String, dynamic>?;
+        if (payment != null && payment['id'] != null) {
+          final currentBal = double.tryParse((payment['balance'] ?? 0).toString()) ?? 0.0;
+          final currentTotal = double.tryParse((payment['total_amount'] ?? 0).toString()) ?? 0.0;
+          if (currentBal < 150.0) {
+            final newTotal = currentTotal + 150.0;
+            try {
+              await supabase.from('payments').update({
+                'total_amount': newTotal,
+                'balance': 150.0,
+              }).eq('id', payment['id']);
+              payment['total_amount'] = newTotal;
+              payment['balance'] = 150.0;
+            } catch (_) {}
+          }
+        }
+      }
+
+      // Even if a pre-5:00 PM reminder was already sent, trigger the post-5:00 PM penalty notification
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: 'Cold Storage Penalty Incurred (\u20b1150.00)',
+        message: isPaid
+            ? 'Your meat order (Ref: $ref) was not picked up by the 5:00 PM deadline after collection notification. Your carcass is preserved in abattoir cold storage and an automatic \u20b1150.00 Cold Storage penalty fee has been incurred and reflected on your Receipt (Balance Due at Pickup: \u20b1150.00).'
+            : 'Your meat order (Ref: $ref) was not picked up by the 5:00 PM deadline after collection notification. An automatic \u20b1150.00 Cold Storage penalty fee has been incurred and added to your Receipt bill.',
+        type: 'cold_storage_penalty',
+        data: {
+          'request_id': reqId,
+          'reference_no': ref,
+          'release_type': 'pickup',
+          'cold_storage_fee': 150,
+          'payment_status': isPaid ? 'paid' : 'unpaid',
+        },
+      );
+    }
+
+    if (trackingChanged) {
+      try {
+        await supabase.from('system_settings').upsert({
+          'key': 'pickup_penalty_tracking',
+          'value': trackingMap,
+        });
+      } catch (_) {}
+    }
   }
 
   bool _isPaid(Map<String, dynamic> req) {
@@ -251,6 +406,48 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       } catch (err) {
         debugPrint('Extended columns not present in requests table, falling back to base schema: $err');
         await supabase.from('requests').update(baseUpdateData).eq('id', reqId);
+      }
+
+      // If the ₱150.00 Cold Storage fee was collected upon handover (e.g., for an online-paid / GCash order),
+      // persist 'cold_storage_collected_at_release' in system_settings and update payments so the receipt reflects ₱150.00 paid & 0 balance.
+      if (coldStorageFeeCollected) {
+        final reqIdStr = reqId.toString();
+        try {
+          Map<String, dynamic> trackingMap = Map<String, dynamic>.from(_penaltyTrackingMap);
+          final settingsRow = await supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'pickup_penalty_tracking')
+              .maybeSingle();
+          if (settingsRow != null && settingsRow['value'] is Map) {
+            trackingMap = Map<String, dynamic>.from(settingsRow['value']);
+          }
+          final existingEntry = trackingMap[reqIdStr] is Map
+              ? Map<String, dynamic>.from(trackingMap[reqIdStr] as Map)
+              : <String, dynamic>{};
+          existingEntry['cold_storage_collected_at_release'] = true;
+          existingEntry['cold_storage_collected_at'] = DateTime.now().toIso8601String();
+          trackingMap[reqIdStr] = existingEntry;
+          _penaltyTrackingMap = trackingMap;
+          await supabase.from('system_settings').upsert({
+            'key': 'pickup_penalty_tracking',
+            'value': trackingMap,
+          });
+        } catch (_) {}
+
+        final payment = req['payment'] as Map<String, dynamic>?;
+        if (payment != null && payment['id'] != null) {
+          final currentBal = double.tryParse((payment['balance'] ?? 0).toString()) ?? 0.0;
+          final currentTotal = double.tryParse((payment['total_amount'] ?? 0).toString()) ?? 0.0;
+          final alreadyIncluded = currentBal >= 150.0 || _isColdStorageBilledOnReceipt(req);
+          final updatedTotal = alreadyIncluded ? currentTotal : (currentTotal + 150.0);
+          try {
+            await supabase.from('payments').update({
+              'total_amount': updatedTotal,
+              'balance': 0,
+            }).eq('id', payment['id']);
+          } catch (_) {}
+        }
       }
 
       // Send immutable confirmation notification to customer's mobile app
@@ -435,38 +632,69 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       }
     }
 
-    return Row(
-      children: [
-        _summaryCard(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final card1 = _summaryCard(
           label: 'Total Revenue',
           value: totalRevenue.toStringAsFixed(2),
           icon: Icons.currency_exchange,
           accent: const Color(0xFF2D6A4F),
           isAmount: true,
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
+        );
+        final card2 = _summaryCard(
           label: 'Amount Pending',
           value: amountPending.toStringAsFixed(2),
           icon: Icons.currency_exchange,
           accent: Colors.orange,
           isAmount: true,
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
+        );
+        final card3 = _summaryCard(
           label: 'Paid Today',
           value: paidToday.toString(),
           icon: Icons.check_circle_outline,
           accent: const Color(0xFF2D6A4F),
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
+        );
+        final card4 = _summaryCard(
           label: 'Outstanding',
           value: outstanding.toString(),
           accent: Colors.red,
           showDot: true,
-        ),
-      ],
+        );
+
+        if (constraints.maxWidth < 950) {
+          return Column(
+            children: [
+              Row(
+                children: [
+                  card1,
+                  const SizedBox(width: 14),
+                  card2,
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  card3,
+                  const SizedBox(width: 14),
+                  card4,
+                ],
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            card1,
+            const SizedBox(width: 16),
+            card2,
+            const SizedBox(width: 16),
+            card3,
+            const SizedBox(width: 16),
+            card4,
+          ],
+        );
+      },
     );
   }
 
@@ -502,13 +730,17 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               ],
             ),
             const SizedBox(height: 8),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (isAmount) Text('\u20b1', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: accent)),
-                if (isAmount) const SizedBox(width: 2),
-                Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: accent)),
-              ],
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (isAmount) Text('\u20b1', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: accent)),
+                  if (isAmount) const SizedBox(width: 2),
+                  Text(value, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: accent)),
+                ],
+              ),
             ),
           ],
         ),
@@ -594,28 +826,36 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               ],
             ),
           ),
-          Scrollbar(
-            controller: scrollController,
-            thumbVisibility: false,
-            trackVisibility: false,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(
-                dragDevices: {
-                  PointerDeviceKind.touch,
-                  PointerDeviceKind.mouse,
-                },
-              ),
-              child: SingleChildScrollView(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final availableWidth = constraints.maxWidth;
+              final tableWidth = availableWidth > 1050.0 ? availableWidth : 1050.0;
+              final dynamicSpacing = (availableWidth > 1400)
+                  ? 34.0
+                  : (availableWidth > 1100 ? 24.0 : 16.0);
+
+              return Scrollbar(
                 controller: scrollController,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 1100),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                    dataRowMinHeight: 60,
-                    dataRowMaxHeight: 80,
-                    columnSpacing: 24,
-                    columns: const [
+                thumbVisibility: false,
+                trackVisibility: false,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(
+                    dragDevices: {
+                      PointerDeviceKind.touch,
+                      PointerDeviceKind.mouse,
+                    },
+                  ),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                        dataRowMinHeight: 60,
+                        dataRowMaxHeight: 80,
+                        columnSpacing: dynamicSpacing,
+                        columns: const [
                       DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                       DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -674,10 +914,12 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         ),
                       ]);
                     }).toList(),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
           if (requests.isEmpty)
             Padding(
@@ -718,6 +960,11 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       bgColor = const Color(0xFFFFFBEB);
       borderColor = const Color(0xFFFCD34D);
       textColor = const Color(0xFFB45309);
+    } else if (isOverdue && (status == 'Waiting for Cashier Payment' || status == 'Awaiting Cashier Payment' || status == 'Awaiting Payment Verification')) {
+      bgColor = const Color(0xFFFFF5F5);
+      borderColor = const Color(0xFFFEB2B2);
+      textColor = const Color(0xFFC53030);
+      label = 'Unpaid • Cold Storage +\u20b1150';
     } else if (status == 'Waiting for Cashier Payment' || status == 'Awaiting Cashier Payment' || status == 'Awaiting Payment Verification') {
       bgColor = const Color(0xFFFEF3C7);
       borderColor = const Color(0xFFFCD34D);
@@ -864,43 +1111,213 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     if (!_isPaid(req)) {
       return _buildAwaitingPaymentButton(req);
     }
-    return OutlinedButton(
-      onPressed: () => _showReleaseDialog(req, isDelivery: false),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFF2D6A4F),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        minimumSize: const Size(0, 34),
-        side: const BorderSide(color: Color(0xFF2D6A4F)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-      ),
-      child: const Text('Verify Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+    final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Tooltip(
+          message: isAlreadyNotified
+              ? 'Customer notified that meat is ready for collection (click to resend reminder)'
+              : 'Send notification to customer that their meat is ready for collection (starts 5:00 PM \u20b1150 Cold Storage deadline)',
+          child: ElevatedButton.icon(
+            icon: Icon(
+              isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+              size: 14,
+              color: Colors.white,
+            ),
+            onPressed: () => _notifyReadyForCollection(req),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isAlreadyNotified ? const Color(0xFF2D6A4F) : const Color(0xFF185FA5),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 34),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            label: Text(
+              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready for Collection',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton(
+          onPressed: () => _showReleaseDialog(req, isDelivery: false),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF2D6A4F),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            minimumSize: const Size(0, 34),
+            side: const BorderSide(color: Color(0xFF2D6A4F)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          ),
+          child: const Text('Verify Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+        ),
+      ],
     );
   }
 
   Widget _buildAwaitingPaymentButton(Map<String, dynamic> req) {
-    return Tooltip(
-      message: 'Claimant must settle payment at the Cashier window first before carcass handover',
-      child: OutlinedButton.icon(
-        icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first before carcass release.'),
-              backgroundColor: Color(0xFFD97706),
+    final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Tooltip(
+          message: isAlreadyNotified
+              ? 'Customer already notified that meat is ready for collection (click to resend)'
+              : 'Send notification to customer that their meat is ready for collection (must pay at Cashier before pickup)',
+          child: ElevatedButton.icon(
+            icon: Icon(
+              isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+              size: 14,
+              color: Colors.white,
             ),
-          );
-        },
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFFB45309),
-          backgroundColor: const Color(0xFFFFFBEB),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          minimumSize: const Size(0, 34),
-          side: const BorderSide(color: Color(0xFFFCD34D)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            onPressed: () => _notifyReadyForCollection(req),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isAlreadyNotified ? const Color(0xFF2D6A4F) : const Color(0xFF185FA5),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 34),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            label: Text(
+              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready for Collection',
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            ),
+          ),
         ),
-        label: const Text('Waiting for Cashier Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-      ),
+        const SizedBox(width: 8),
+        Tooltip(
+          message: 'Claimant must settle payment at the Cashier window first before carcass handover',
+          child: OutlinedButton.icon(
+            icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
+            onPressed: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first before carcass release.'),
+                  backgroundColor: Color(0xFFD97706),
+                ),
+              );
+            },
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFB45309),
+              backgroundColor: const Color(0xFFFFFBEB),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 34),
+              side: const BorderSide(color: Color(0xFFFCD34D)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            label: const Text('Waiting for Cashier Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ],
     );
+  }
+
+  Future<void> _notifyReadyForCollection(Map<String, dynamic> req) async {
+    try {
+      final reqId = req['id'];
+      final reqIdStr = reqId.toString();
+      final userId = req['user_id'];
+      final ref = _refNo(req);
+      final isPaid = _isPaid(req);
+      final payment = req['payment'] as Map<String, dynamic>?;
+      final amount = double.tryParse((payment?['total_amount'] ?? 0).toString()) ?? 0.0;
+      final amountStr = amount > 0 ? '\u20b1${amount.toStringAsFixed(2)}' : 'the required slaughter fees';
+
+      final now = DateTime.now();
+      DateTime deadline = DateTime(now.year, now.month, now.day, 17, 0, 0);
+      if (!now.isBefore(deadline)) {
+        deadline = deadline.add(const Duration(days: 1));
+      }
+      final deadlineStr = DateFormat('MMMM d, yyyy • 5:00 PM').format(deadline);
+
+      setState(() {
+        _notifiedPickupReadyIds.add(reqIdStr);
+      });
+
+      final existingNotes = (req['release_notes'] ?? '').toString().trim();
+      final stampedTag = 'Notified ready for collection at ${now.toIso8601String()}';
+      final updatedNotes = existingNotes.contains('Notified ready for collection')
+          ? existingNotes
+          : (existingNotes.isEmpty ? stampedTag : '$existingNotes | $stampedTag');
+
+      try {
+        await supabase.from('requests').update({
+          'release_notes': updatedNotes,
+          'pickup_deadline': deadline.toIso8601String(),
+        }).eq('id', reqId);
+      } catch (_) {
+        try {
+          await supabase.from('requests').update({
+            'release_notes': updatedNotes,
+          }).eq('id', reqId);
+        } catch (_) {}
+      }
+
+      // Persist in system_settings ('pickup_penalty_tracking') for cross-page schema-safe access
+      try {
+        final existingEntry = (_penaltyTrackingMap[reqIdStr] is Map)
+            ? Map<String, dynamic>.from(_penaltyTrackingMap[reqIdStr] as Map)
+            : <String, dynamic>{};
+        existingEntry['pickup_notified_at'] = existingEntry['pickup_notified_at'] ?? now.toIso8601String();
+        existingEntry['pickup_deadline'] = existingEntry['pickup_deadline'] ?? deadline.toIso8601String();
+        _penaltyTrackingMap[reqIdStr] = existingEntry;
+        await supabase.from('system_settings').upsert({
+          'key': 'pickup_penalty_tracking',
+          'value': _penaltyTrackingMap,
+        });
+      } catch (_) {}
+
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: isPaid
+            ? 'Meat Ready for Collection (Claim Before 5:00 PM)'
+            : 'Meat Ready for Collection — Payment Required',
+        message: isPaid
+            ? 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! REMINDER: Please pick up your carcass on or before $deadlineStr. If not picked up by 5:00 PM, an automatic \u20b1150.00 Cold Storage penalty fee will apply.'
+            : 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! Before claiming your carcass from the dispatcher, please complete your payment of $amountStr at the Cashier window. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated. REMINDER: Please complete payment and pick up your meat on or before $deadlineStr — a \u20b1150.00 Cold Storage fee applies if unclaimed by 5:00 PM, and a \u20b1100.00 Overdue Payment penalty applies if unpaid by 5:00 PM.',
+        type: 'meat_pickup',
+        data: {
+          'request_id': reqId,
+          'reference_no': ref,
+          'release_type': 'pickup',
+          'payment_status': isPaid ? 'paid' : 'unpaid',
+          'payment_method': payment?['payment_method'] ?? 'Cash on Pickup',
+          'amount': amount,
+          'pickup_deadline': deadline.toIso8601String(),
+        },
+      );
+
+      _loadRequests(silent: true);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.notifications_active, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(isPaid
+                      ? 'Customer notified that order $ref is ready for collection (5:00 PM \u20b1150 Cold Storage reminder included).'
+                      : 'Customer notified that order $ref is ready for collection (awaiting cashier payment + 5:00 PM penalty reminder).'),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF185FA5),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error sending notification: $e'), backgroundColor: Colors.redAccent),
+        );
+      }
+    }
   }
 
   Widget _buildDoneButton(Map<String, dynamic> req) {
@@ -1440,6 +1857,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     final driverNameCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     final isOverdue = _isPickupOverdue(req);
+    final alreadyBilledOnReceipt = _isColdStorageBilledOnReceipt(req);
     bool coldStorageFeeCollected = isOverdue;
     final weight = _carcassWeight(req);
     final ref = _refNo(req);
@@ -1492,47 +1910,66 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFFF5F5),
+                            color: alreadyBilledOnReceipt ? const Color(0xFFF0FDF4) : const Color(0xFFFFF5F5),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFFEB2B2)),
+                            border: Border.all(
+                              color: alreadyBilledOnReceipt ? const Color(0xFF86EFAC) : const Color(0xFFFEB2B2),
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
-                                children: const [
-                                  Icon(Icons.ac_unit, color: Color(0xFFC53030), size: 18),
-                                  SizedBox(width: 8),
+                                children: [
+                                  Icon(
+                                    alreadyBilledOnReceipt ? Icons.check_circle : Icons.ac_unit,
+                                    color: alreadyBilledOnReceipt ? const Color(0xFF15803D) : const Color(0xFFC53030),
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
                                   Text(
-                                    'Cold Storage Fee Applicable (\u20b1150.00)',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF9B2C2C)),
+                                    alreadyBilledOnReceipt
+                                        ? 'Cold Storage Fee (\u20b1150.00) — Settled on Cashier Receipt'
+                                        : 'Cold Storage Fee Applicable (\u20b1150.00)',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: alreadyBilledOnReceipt ? const Color(0xFF166534) : const Color(0xFF9B2C2C),
+                                    ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 4),
-                              const Text(
-                                'The 5:00 PM pickup deadline has passed. This carcass was preserved in abattoir cold storage. Collect \u20b1150.00 from the claimant upon release.',
-                                style: TextStyle(fontSize: 12, color: Color(0xFF9B2C2C)),
-                              ),
-                              const SizedBox(height: 8),
-                              InkWell(
-                                onTap: () => setDialogState(() => coldStorageFeeCollected = !coldStorageFeeCollected),
-                                child: Row(
-                                  children: [
-                                    Checkbox(
-                                      value: coldStorageFeeCollected,
-                                      activeColor: const Color(0xFFC53030),
-                                      onChanged: (val) => setDialogState(() => coldStorageFeeCollected = val ?? false),
-                                    ),
-                                    const Expanded(
-                                      child: Text(
-                                        'Collected \u20b1150.00 Cold Storage Fee from Claimant',
-                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF9B2C2C)),
-                                      ),
-                                    ),
-                                  ],
+                              Text(
+                                alreadyBilledOnReceipt
+                                    ? 'The \u20b1150.00 Cold Storage penalty fee was already included and paid on the customer\'s Cashier Receipt.'
+                                    : 'The 5:00 PM pickup deadline has passed after the collection notification was sent. Collect \u20b1150.00 from the claimant upon release.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: alreadyBilledOnReceipt ? const Color(0xFF166534) : const Color(0xFF9B2C2C),
                                 ),
                               ),
+                              if (!alreadyBilledOnReceipt) ...[
+                                const SizedBox(height: 8),
+                                InkWell(
+                                  onTap: () => setDialogState(() => coldStorageFeeCollected = !coldStorageFeeCollected),
+                                  child: Row(
+                                    children: [
+                                      Checkbox(
+                                        value: coldStorageFeeCollected,
+                                        activeColor: const Color(0xFFC53030),
+                                        onChanged: (val) => setDialogState(() => coldStorageFeeCollected = val ?? false),
+                                      ),
+                                      const Expanded(
+                                        child: Text(
+                                          'Collected \u20b1150.00 Cold Storage Fee from Claimant',
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF9B2C2C)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),

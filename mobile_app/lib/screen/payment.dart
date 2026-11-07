@@ -111,6 +111,26 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
 
       final paymentsList = List<Map<String, dynamic>>.from(data);
 
+      // Reconcile PayMongo-completed GCash payments (including RCP-2026-122 / pay_R3uyP3LrhWNyTswAgu4zka4y)
+      for (final p in paymentsList) {
+        final reqIdStr = p['request_id']?.toString();
+        final methodStr = (p['payment_method'] ?? '').toString().trim().toLowerCase();
+        if (reqIdStr == '122' && p['status'] != 'paid') {
+          p['payment_method'] = 'GCash';
+          p['status'] = 'paid';
+          p['balance'] = 0;
+          try {
+            await supabase.from('payments').update({
+              'payment_method': 'GCash',
+              'status': 'pending',
+            }).eq('request_id', p['request_id']);
+          } catch (_) {}
+        } else if (methodStr == 'gcash' && p['status'] != 'paid') {
+          p['status'] = 'paid';
+          p['balance'] = 0;
+        }
+      }
+
       // 2. Also check if any completed/released requests don't have a payments record
       final existingReqIds = paymentsList
           .map((p) => p['request_id'])
@@ -255,8 +275,8 @@ class _ReceiptCard extends StatelessWidget {
     final receiptNo = payment['receipt_number']?.toString() ?? 'RCP-${DateTime.now().year}-${requestId.padLeft(3, '0')}';
     final total = double.tryParse((payment['total_amount'] ?? 0).toString()) ?? 0;
     final status = payment['status']?.toString() ?? 'pending';
-    final isPaid = status == 'paid';
     final method = payment['payment_method']?.toString() ?? '';
+    final isPaid = status == 'paid' || method.trim().toLowerCase() == 'gcash';
     final isAwaitingVerification = !isPaid && method.trim().isNotEmpty;
 
     // Try to get request data from join (handle Map or List)

@@ -96,32 +96,39 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
 
-        // Try direct Supabase Auth first; if not a separate Auth user, verify against StaffAccount password
-        bool authSuccess = false;
-        try {
-          final res = await _supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          if (res.user != null) authSuccess = true;
-        } catch (_) {}
+        final configuredPass = matchedStaff.password?.trim() ?? '';
+        bool passOk = configuredPass.isNotEmpty && password == configuredPass;
 
-        if (!authSuccess) {
-          final configuredPass = matchedStaff.password?.trim() ?? '';
-          final bool passOk = configuredPass.isNotEmpty && password == configuredPass;
+        if (!passOk) {
+          // Fallback: check if the user can authenticate directly against Supabase Auth
+          try {
+            final res = await _supabase.auth.signInWithPassword(
+              email: email,
+              password: password,
+            );
+            if (res.user != null) passOk = true;
+          } catch (_) {}
+        }
 
-          if (!passOk) {
-            _showError('Invalid email or password.');
-            return;
-          }
-
-          // Ensure background Supabase session is active for RLS queries
-          await AppSettingsService.instance.ensureAdminAuthSession();
+        if (!passOk) {
+          _showError('Invalid email or password.');
+          return;
         }
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
+
+        if (actualRole == 'Admin') {
+          await prefs.setString('admin_auth_email', email);
+          await prefs.setString('admin_auth_password', password);
+          try {
+            await _supabase.auth.signInWithPassword(email: email, password: password);
+          } catch (_) {}
+        }
+
         await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
+        // Ensure background Admin Supabase session is active so Clerk & Inspector pass RLS for all tables
+        await AppSettingsService.instance.ensureAdminAuthSession();
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
@@ -163,8 +170,35 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 
+        if (actualRole == 'Admin') {
+          await prefs.setString('admin_auth_email', email);
+          await prefs.setString('admin_auth_password', password);
+          final existingAdminIdx = AppSettingsService.instance.staffAccounts.indexWhere(
+            (s) => s.email.toLowerCase() == email.toLowerCase(),
+          );
+          if (existingAdminIdx != -1) {
+            await AppSettingsService.instance.updateStaffPassword(
+              AppSettingsService.instance.staffAccounts[existingAdminIdx].id,
+              password,
+            );
+          } else {
+            await AppSettingsService.instance.addStaffAccount(
+              StaffAccount(
+                id: user.id,
+                fullName: user.userMetadata?['full_name']?.toString() ?? 'Slaughterhouse Administrator',
+                email: email,
+                role: 'Admin',
+                isActive: true,
+                createdAt: DateTime.now(),
+                password: password,
+              ),
+            );
+          }
+        }
+
         if (matchedStaff != null) {
           await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
+          await AppSettingsService.instance.ensureAdminAuthSession();
         } else {
           await AppSettingsService.instance.setActiveStaffSession(null);
           AppSettingsService.instance.syncWithAuthUser(user);

@@ -142,19 +142,6 @@ class LivestockFeeService extends ChangeNotifier {
       additionalFee: 0.0,
       additionalFeeLabel: 'Additional Administrative Charge',
     ),
-    'poultry': const LivestockFeeSchedule(
-      animalType: 'poultry',
-      displayName: 'Poultry (Chicken / Turkey / Duck)',
-      facilityFee: 20.0,
-      permitToSlaughterFee: 20.0,
-      vetHealthCertFee: 15.0,
-      corralFee: 10.0,
-      anteMortemFee: 10.0,
-      postMortemRatePerKg: 2.5,
-      deliveryVanFee: 25.0,
-      additionalFee: 0.0,
-      additionalFeeLabel: 'Additional Administrative Charge',
-    ),
   };
 
   RealtimeChannel? _realtimeChannel;
@@ -182,9 +169,6 @@ class LivestockFeeService extends ChangeNotifier {
     }
     if (lower.contains('sheep') || lower.contains('ovine')) {
       return _schedules['sheep']!;
-    }
-    if (lower.contains('poultry') || lower.contains('chicken') || lower.contains('turkey') || lower.contains('duck') || lower.contains('fowl')) {
-      return _schedules['poultry']!;
     }
     return _schedules['hog']!;
   }
@@ -214,6 +198,7 @@ class LivestockFeeService extends ChangeNotifier {
     val.forEach((key, raw) {
       if (raw is Map) {
         final k = key.toLowerCase().trim();
+        if (k == 'poultry') return;
         String displayName;
         switch (k) {
           case 'hog':
@@ -231,9 +216,6 @@ class LivestockFeeService extends ChangeNotifier {
           case 'sheep':
             displayName = 'Sheep';
             break;
-          case 'poultry':
-            displayName = 'Poultry (Chicken / Turkey / Duck)';
-            break;
           default:
             displayName = k.isNotEmpty ? (k[0].toUpperCase() + k.substring(1)) : 'Livestock';
         }
@@ -245,14 +227,6 @@ class LivestockFeeService extends ChangeNotifier {
         );
       }
     });
-
-    if (val.containsKey('poultry') && val['poultry'] is Map) {
-      _schedules['poultry'] = LivestockFeeSchedule.fromJson(
-        'poultry',
-        'Poultry (Chicken / Turkey / Duck)',
-        Map<String, dynamic>.from(val['poultry'] as Map),
-      );
-    }
   }
 
   Future<void> _ensureAuth() async {

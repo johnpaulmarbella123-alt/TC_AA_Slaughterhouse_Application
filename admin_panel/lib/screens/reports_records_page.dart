@@ -1489,63 +1489,73 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               ),
             )
           else
-            Scrollbar(
-              controller: scrollController,
-              thumbVisibility: false,
-              trackVisibility: false,
-              child: ScrollConfiguration(
-                behavior: ScrollConfiguration.of(context).copyWith(
-                  dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 1050),
-                    child: DataTable(
-                      headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                      dataRowMinHeight: 52,
-                      dataRowMaxHeight: 68,
-                      columnSpacing: 22,
-                      columns: const [
-                        DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Commodity', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Carcass Weight', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Revenue (PHP)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Inspector', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        DataColumn(label: Text('Status / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      ],
-                      rows: records.map((req) {
-                        final ref = _refNo(req);
-                        final type = req['request_type']?.toString() ?? '';
-                        final isBarangay = type == 'barangay';
-                        final livestock = req['livestock_type']?.toString() ?? '\u2014';
-                        final animalCount = req['animal_count'] ?? 1;
-                        final weight = _carcassWeight(req);
-                        final fee = _calcRequestFee(req);
-                        final inspector = req['inspector_name']?.toString() ?? '\u2014';
-                        final remark = _remarkForRequest(req);
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final availableWidth = constraints.maxWidth;
+                final tableWidth = max(1050.0, availableWidth);
+                final colSpacing = (availableWidth > 1400)
+                    ? 32.0
+                    : (availableWidth > 1100 ? 22.0 : 16.0);
 
-                        return DataRow(cells: [
-                          DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                          DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                          DataCell(_buildTypeBadge(isBarangay ? 'Barangay' : 'Market')),
-                          DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                          DataCell(Text('$animalCount', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                          DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(1)} kg' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                          DataCell(Text(fee > 0 ? '\u20b1 ${NumberFormat('#,##0.00').format(fee)}' : '\u2014',
-                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1B4332)))),
-                          DataCell(Text(inspector, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568)))),
-                          DataCell(Text(remark, style: const TextStyle(fontSize: 11, color: Color(0xFF2D6A4F), fontWeight: FontWeight.w500))),
-                        ]);
-                      }).toList(),
+                return Scrollbar(
+                  controller: scrollController,
+                  thumbVisibility: false,
+                  trackVisibility: false,
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(context).copyWith(
+                      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
+                    ),
+                    child: SingleChildScrollView(
+                      controller: scrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minWidth: tableWidth),
+                        child: DataTable(
+                          headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                          dataRowMinHeight: 52,
+                          dataRowMaxHeight: 68,
+                          columnSpacing: colSpacing,
+                          columns: const [
+                            DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Commodity', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Carcass Weight', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Revenue (PHP)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Inspector', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                            DataColumn(label: Text('Status / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          ],
+                          rows: records.map((req) {
+                            final ref = _refNo(req);
+                            final type = req['request_type']?.toString() ?? '';
+                            final isBarangay = type == 'barangay';
+                            final livestock = req['livestock_type']?.toString() ?? '\u2014';
+                            final animalCount = req['animal_count'] ?? 1;
+                            final weight = _carcassWeight(req);
+                            final fee = _calcRequestFee(req);
+                            final inspector = req['inspector_name']?.toString() ?? '\u2014';
+                            final remark = _remarkForRequest(req);
+
+                            return DataRow(cells: [
+                              DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
+                              DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                              DataCell(_buildTypeBadge(isBarangay ? 'Barangay' : 'Market')),
+                              DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
+                              DataCell(Text('$animalCount', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
+                              DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(1)} kg' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                              DataCell(Text(fee > 0 ? '\u20b1 ${NumberFormat('#,##0.00').format(fee)}' : '\u2014',
+                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1B4332)))),
+                              DataCell(Text(inspector, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568)))),
+                              DataCell(Text(remark, style: const TextStyle(fontSize: 11, color: Color(0xFF2D6A4F), fontWeight: FontWeight.w500))),
+                            ]);
+                          }).toList(),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
         ],
       ),
@@ -1646,75 +1656,85 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               ),
             )
           else
-            Scrollbar(
-              controller: scrollController,
-              thumbVisibility: false,
-              trackVisibility: false,
-              child: SingleChildScrollView(
-                controller: scrollController,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 1050),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFFFF5F5)),
-                    dataRowMinHeight: 52,
-                    dataRowMaxHeight: 70,
-                    columnSpacing: 22,
-                    columns: const [
-                      DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF9B2C2C)))),
-                      DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Inspection Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Veterinary Findings / Health Issues', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Action Taken / Disposition', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                    ],
-                    rows: healthIssues.map((req) {
-                      final ref = _refNo(req);
-                      final name = req['customer_name']?.toString() ?? '\u2014';
-                      final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final availableWidth = constraints.maxWidth;
+                final tableWidth = max(1050.0, availableWidth);
+                final colSpacing = (availableWidth > 1400)
+                    ? 32.0
+                    : (availableWidth > 1100 ? 22.0 : 16.0);
 
-                      final anti = (req['anti_mortem'] ?? '').toString();
-                      final post = (req['post_mortem'] ?? '').toString();
-                      final status = (req['status'] ?? '').toString();
+                return Scrollbar(
+                  controller: scrollController,
+                  thumbVisibility: false,
+                  trackVisibility: false,
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFFFF5F5)),
+                        dataRowMinHeight: 52,
+                        dataRowMaxHeight: 70,
+                        columnSpacing: colSpacing,
+                        columns: const [
+                          DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF9B2C2C)))),
+                          DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Inspection Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Veterinary Findings / Health Issues', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Action Taken / Disposition', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                        ],
+                        rows: healthIssues.map((req) {
+                          final ref = _refNo(req);
+                          final name = req['customer_name']?.toString() ?? '\u2014';
+                          final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
 
-                      String stage = 'Ante-Mortem';
-                      String disposition = 'Ante-Mortem Failed — Taken Back';
+                          final anti = (req['anti_mortem'] ?? '').toString();
+                          final post = (req['post_mortem'] ?? '').toString();
+                          final status = (req['status'] ?? '').toString();
 
-                      if (post == 'Failed' || status == 'condemned' || status == 'post_mortem_failed') {
-                        stage = 'Post-Mortem Inspection';
-                        disposition = 'Carcass Condemned';
-                      } else if (anti == 'Failed' || status == 'anti_mortem_failed' || status == 'taken_back') {
-                        stage = 'Ante-Mortem Inspection';
-                        disposition = 'Rejected / Taken Back by Owner';
-                      }
+                          String stage = 'Ante-Mortem';
+                          String disposition = 'Ante-Mortem Failed — Taken Back';
 
-                      String findings = req['veterinary_findings']?.toString() ??
-                          req['condemnation_reason']?.toString() ??
-                          req['process_notes']?.toString() ??
-                          'Health abnormality detected';
-                      if (findings.isEmpty || findings == 'null') {
-                        findings = 'Did not meet health & inspection standards';
-                      }
+                          if (post == 'Failed' || status == 'condemned' || status == 'post_mortem_failed') {
+                            stage = 'Post-Mortem Inspection';
+                            disposition = 'Carcass Condemned';
+                          } else if (anti == 'Failed' || status == 'anti_mortem_failed' || status == 'taken_back') {
+                            stage = 'Ante-Mortem Inspection';
+                            disposition = 'Rejected / Taken Back by Owner';
+                          }
 
-                      return DataRow(cells: [
-                        DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF9B2C2C)))),
-                        DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                        DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                        DataCell(Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFED7D7),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(stage, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC53030))),
-                        )),
-                        DataCell(Text(findings, style: const TextStyle(fontSize: 12, color: Color(0xFF742A2A)))),
-                        DataCell(Text(disposition, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9B2C2C)))),
-                      ]);
-                    }).toList(),
+                          String findings = req['veterinary_findings']?.toString() ??
+                              req['condemnation_reason']?.toString() ??
+                              req['process_notes']?.toString() ??
+                              'Health abnormality detected';
+                          if (findings.isEmpty || findings == 'null') {
+                            findings = 'Did not meet health & inspection standards';
+                          }
+
+                          return DataRow(cells: [
+                            DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF9B2C2C)))),
+                            DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                            DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
+                            DataCell(Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFED7D7),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(stage, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC53030))),
+                            )),
+                            DataCell(Text(findings, style: const TextStyle(fontSize: 12, color: Color(0xFF742A2A)))),
+                            DataCell(Text(disposition, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9B2C2C)))),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
         ],
       ),
@@ -1802,64 +1822,74 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               ),
             )
           else
-            Scrollbar(
-              controller: scrollController,
-              thumbVisibility: false,
-              trackVisibility: false,
-              child: SingleChildScrollView(
-                controller: scrollController,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 1050),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFEDF2F7)),
-                    dataRowMinHeight: 52,
-                    dataRowMaxHeight: 68,
-                    columnSpacing: 22,
-                    columns: const [
-                      DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Scheduled Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Registration Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Reason / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                    ],
-                    rows: uninspected.map((req) {
-                      final ref = _refNo(req);
-                      final name = req['customer_name']?.toString() ?? '\u2014';
-                      final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
-                      final sched = req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
-                      final schedFmt = sched.length > 10 ? sched.substring(0, 10) : sched;
-                      final status = (req['status'] ?? 'Pending').toString();
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final availableWidth = constraints.maxWidth;
+                final tableWidth = max(1050.0, availableWidth);
+                final colSpacing = (availableWidth > 1400)
+                    ? 32.0
+                    : (availableWidth > 1100 ? 22.0 : 16.0);
 
-                      String reason = 'Inspection pending or omitted before slaughter';
-                      if (status == 'cancelled') {
-                        reason = 'Booking cancelled by customer prior to arrival';
-                      } else if (status == 'rejected') {
-                        reason = 'Registration rejected during document verification';
-                      } else if (status == 'pending' || status == 'approved') {
-                        reason = 'Awaiting animal arrival & ante-mortem inspection';
-                      }
+                return Scrollbar(
+                  controller: scrollController,
+                  thumbVisibility: false,
+                  trackVisibility: false,
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFEDF2F7)),
+                        dataRowMinHeight: 52,
+                        dataRowMaxHeight: 68,
+                        columnSpacing: colSpacing,
+                        columns: const [
+                          DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Scheduled Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Registration Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Reason / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                        ],
+                        rows: uninspected.map((req) {
+                          final ref = _refNo(req);
+                          final name = req['customer_name']?.toString() ?? '\u2014';
+                          final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
+                          final sched = req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
+                          final schedFmt = sched.length > 10 ? sched.substring(0, 10) : sched;
+                          final status = (req['status'] ?? 'Pending').toString();
 
-                      return DataRow(cells: [
-                        DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                        DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                        DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                        DataCell(Text(schedFmt, style: const TextStyle(fontSize: 12))),
-                        DataCell(Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE2E8F0),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4A5568))),
-                        )),
-                        DataCell(Text(reason, style: const TextStyle(fontSize: 12, color: Color(0xFF718096)))),
-                      ]);
-                    }).toList(),
+                          String reason = 'Inspection pending or omitted before slaughter';
+                          if (status == 'cancelled') {
+                            reason = 'Booking cancelled by customer prior to arrival';
+                          } else if (status == 'rejected') {
+                            reason = 'Registration rejected during document verification';
+                          } else if (status == 'pending' || status == 'approved') {
+                            reason = 'Awaiting animal arrival & ante-mortem inspection';
+                          }
+
+                          return DataRow(cells: [
+                            DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
+                            DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                            DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
+                            DataCell(Text(schedFmt, style: const TextStyle(fontSize: 12))),
+                            DataCell(Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE2E8F0),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4A5568))),
+                            )),
+                            DataCell(Text(reason, style: const TextStyle(fontSize: 12, color: Color(0xFF718096)))),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
         ],
       ),
@@ -2366,27 +2396,37 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 ],
               ),
               const SizedBox(height: 12),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                  columns: [
-                    const DataColumn(label: Text('No.', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const DataColumn(label: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const DataColumn(label: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.bold))),
-                    ...List.generate(daysInMonth, (i) => DataColumn(label: Text('${i + 1}'))),
-                  ],
-                  rows: allDealers.take(20).map((d) {
-                    return DataRow(cells: [
-                      DataCell(Text('${d.dealerNumber}')),
-                      DataCell(Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                      DataCell(Text(d.markings, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)))),
-                      DataCell(Text(d.category.toUpperCase())),
-                      ...List.generate(daysInMonth, (_) => const DataCell(Text('—'))),
-                    ]);
-                  }).toList(),
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final availableWidth = constraints.maxWidth;
+                  final tableWidth = max(1200.0, availableWidth);
+
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                        columns: [
+                          const DataColumn(label: Text('No.', style: TextStyle(fontWeight: FontWeight.bold))),
+                          const DataColumn(label: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold))),
+                          const DataColumn(label: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold))),
+                          const DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.bold))),
+                          ...List.generate(daysInMonth, (i) => DataColumn(label: Text('${i + 1}'))),
+                        ],
+                        rows: allDealers.take(20).map((d) {
+                          return DataRow(cells: [
+                            DataCell(Text('${d.dealerNumber}')),
+                            DataCell(Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600))),
+                            DataCell(Text(d.markings, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)))),
+                            DataCell(Text(d.category.toUpperCase())),
+                            ...List.generate(daysInMonth, (_) => const DataCell(Text('—'))),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 8),
               Center(
@@ -3645,122 +3685,135 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 ],
               ),
               const SizedBox(height: 14),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                  columnSpacing: 28,
-                  columns: const [
-                    DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Meat Dealer Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Permanent Marking', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Lifetime Heads', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Status / Badge', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
-                  ],
-                  rows: filteredDealers.asMap().entries.map((entry) {
-                    final idx = entry.key + 1;
-                    final d = entry.value;
-                    final heads = headsMap[d.name.toLowerCase().trim()] ?? 0;
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final availableWidth = constraints.maxWidth;
+                  final tableWidth = max(900.0, availableWidth);
+                  final colSpacing = (availableWidth > 1400)
+                      ? 34.0
+                      : (availableWidth > 1100 ? 26.0 : 18.0);
 
-                    return DataRow(cells: [
-                      DataCell(Text(idx.toString(), style: const TextStyle(fontSize: 12, color: Colors.grey))),
-                      DataCell(
-                        Text(
-                          d.name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D3748)),
-                        ),
-                      ),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE6F9F0),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
-                          ),
-                          child: Text(
-                            d.markings,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2D6A4F)),
-                          ),
-                        ),
-                      ),
-                      DataCell(
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: d.category == 'market' ? const Color(0xFFEBF8FF) : const Color(0xFFFEFCBF),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            d.category == 'market' ? 'Market' : 'Barangay',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: d.category == 'market' ? const Color(0xFF2B6CB0) : const Color(0xFFB7791F),
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
+                        columnSpacing: colSpacing,
+                        columns: const [
+                          DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Meat Dealer Name', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Permanent Marking', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Lifetime Heads', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Status / Badge', style: TextStyle(fontWeight: FontWeight.bold))),
+                          DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                        ],
+                        rows: filteredDealers.asMap().entries.map((entry) {
+                          final idx = entry.key + 1;
+                          final d = entry.value;
+                          final heads = headsMap[d.name.toLowerCase().trim()] ?? 0;
+
+                          return DataRow(cells: [
+                            DataCell(Text(idx.toString(), style: const TextStyle(fontSize: 12, color: Colors.grey))),
+                            DataCell(
+                              Text(
+                                d.name,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D3748)),
+                              ),
                             ),
-                          ),
-                        ),
-                      ),
-                      DataCell(Text(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', style: const TextStyle(fontSize: 12))),
-                      DataCell(
-                        Row(
-                          children: [
-                            const Icon(Icons.pets, size: 14, color: Color(0xFF2D6A4F)),
-                            const SizedBox(width: 4),
-                            Text('$heads heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
-                      DataCell(
-                        Row(
-                          children: [
-                            if (d.isNew)
+                            DataCell(
                               Container(
-                                margin: const EdgeInsets.only(right: 6),
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDEF7EC),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: const Color(0xFF31C48D)),
+                                  color: const Color(0xFFE6F9F0),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
                                 ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.star, size: 11, color: Color(0xFF046C4E)),
-                                    SizedBox(width: 2),
-                                    Text('New Dealer', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E))),
-                                  ],
+                                child: Text(
+                                  d.markings,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2D6A4F)),
                                 ),
-                              ),
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: d.isActive ? Colors.green : Colors.grey,
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            Text(d.isActive ? 'Active' : 'Inactive', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                          ],
-                        ),
+                            DataCell(
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: d.category == 'market' ? const Color(0xFFEBF8FF) : const Color(0xFFFEFCBF),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  d.category == 'market' ? 'Market' : 'Barangay',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: d.category == 'market' ? const Color(0xFF2B6CB0) : const Color(0xFFB7791F),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            DataCell(Text(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', style: const TextStyle(fontSize: 12))),
+                            DataCell(
+                              Row(
+                                children: [
+                                  const Icon(Icons.pets, size: 14, color: Color(0xFF2D6A4F)),
+                                  const SizedBox(width: 4),
+                                  Text('$heads heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            ),
+                            DataCell(
+                              Row(
+                                children: [
+                                  if (d.isNew)
+                                    Container(
+                                      margin: const EdgeInsets.only(right: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFDEF7EC),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFF31C48D)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.star, size: 11, color: Color(0xFF046C4E)),
+                                          SizedBox(width: 2),
+                                          Text('New Dealer', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E))),
+                                        ],
+                                      ),
+                                    ),
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: d.isActive ? Colors.green : Colors.grey,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(d.isActive ? 'Active' : 'Inactive', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                ],
+                              ),
+                            ),
+                            DataCell(
+                              OutlinedButton(
+                                onPressed: () => _openRegisterDealerDialog(editDealer: d),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  minimumSize: const Size(0, 30),
+                                ),
+                                child: const Text('Edit', style: TextStyle(fontSize: 11)),
+                              ),
+                            ),
+                          ]);
+                        }).toList(),
                       ),
-                      DataCell(
-                        OutlinedButton(
-                          onPressed: () => _openRegisterDealerDialog(editDealer: d),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            minimumSize: const Size(0, 30),
-                          ),
-                          child: const Text('Edit', style: TextStyle(fontSize: 11)),
-                        ),
-                      ),
-                    ]);
-                  }).toList(),
-                ),
+                    ),
+                  );
+                },
               ),
               if (filteredDealers.isEmpty)
                 const Padding(

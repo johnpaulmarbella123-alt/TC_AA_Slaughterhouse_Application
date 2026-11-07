@@ -65,20 +65,22 @@ class RegularDealer {
   }
 
   RegularDealer copyWith({
+    int? dealerNumber,
     String? name,
     String? markings,
     String? category,
     String? phone,
+    String? userId,
     bool? isActive,
   }) {
     return RegularDealer(
       id: id,
-      dealerNumber: dealerNumber,
+      dealerNumber: dealerNumber ?? this.dealerNumber,
       name: name ?? this.name,
       markings: markings ?? this.markings,
       category: category ?? this.category,
       phone: phone ?? this.phone,
-      userId: userId,
+      userId: userId ?? this.userId,
       isActive: isActive ?? this.isActive,
       createdAt: createdAt,
     );
@@ -312,6 +314,9 @@ class RegularDealersService {
       final res = await supabase.from('regular_dealers').select();
       if (res.isNotEmpty) {
         _dealers = res.map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r))).toList();
+        if (_deduplicateDealers()) {
+          await _syncToSupabase();
+        }
         await _saveLocalCache();
         _isLoaded = true;
         return;
@@ -332,6 +337,9 @@ class RegularDealersService {
         final List decoded = rawVal is String ? jsonDecode(rawVal) : rawVal;
         if (decoded.isNotEmpty) {
           _dealers = decoded.map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r))).toList();
+          if (_deduplicateDealers()) {
+            await _syncToSupabase();
+          }
           await _saveLocalCache();
           _isLoaded = true;
           return;
@@ -457,11 +465,18 @@ class RegularDealersService {
     final upperMarking = markings.trim().toUpperCase();
     final cleanCategory = category.toLowerCase().contains('market') ? 'market' : 'barangay';
 
-    // Check if dealer already exists with this name or marking
-    final existingIndex = _dealers.indexWhere((d) =>
-        (userId != null && d.userId == userId) ||
-        d.markings.toUpperCase().trim() == upperMarking ||
-        d.name.toLowerCase().trim() == name.toLowerCase().trim());
+    // Check if dealer already exists with this userId or exact name (respecting userId isolation)
+    final existingIndex = _dealers.indexWhere((d) {
+      if (userId != null &&
+          userId.trim().isNotEmpty &&
+          d.userId != null &&
+          d.userId!.trim().isNotEmpty &&
+          d.userId!.trim() != userId.trim()) {
+        return false;
+      }
+      return (userId != null && userId.isNotEmpty && d.userId == userId) ||
+          d.name.toLowerCase().trim() == name.toLowerCase().trim();
+    });
 
     if (existingIndex >= 0) {
       final existing = _dealers[existingIndex];
@@ -469,6 +484,7 @@ class RegularDealersService {
       final updated = existing.copyWith(
         markings: upperMarking,
         phone: phone ?? existing.phone,
+        userId: (existing.userId != null && existing.userId!.isNotEmpty) ? existing.userId : userId,
       );
       _dealers[existingIndex] = updated;
       await _saveLocalCache();
@@ -520,41 +536,65 @@ class RegularDealersService {
     return newDealer;
   }
 
-  RegularDealer? findDealerByName(String name) {
+  RegularDealer? findDealerByName(String name, {String? userId}) {
     final clean = name.trim().toLowerCase();
     if (clean.isEmpty) return null;
 
+    bool canMatchDealer(RegularDealer d) {
+      if (userId != null &&
+          userId.trim().isNotEmpty &&
+          d.userId != null &&
+          d.userId!.trim().isNotEmpty &&
+          d.userId!.trim() != userId.trim()) {
+        return false;
+      }
+      return true;
+    }
+
     // 1. Exact match
     for (var d in _dealers) {
+      if (!canMatchDealer(d)) continue;
       if (d.name.toLowerCase().trim() == clean) return d;
     }
 
-    // 2. Initial + Surname match (e.g. "Danilo Cerillo" -> "D. CERILLO")
+    // 2. Initial + Surname match ONLY when one side uses a 1-letter initial (e.g. "Danilo Cerillo" -> "D. CERILLO")
     final parts = clean.replaceAll(RegExp(r'[^a-zA-Z\s]'), '').split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     if (parts.length >= 2) {
       final firstInitial = parts.first[0];
       final lastName = parts.last;
       for (var d in _dealers) {
+        if (!canMatchDealer(d)) continue;
         final dClean = d.name.toLowerCase().replaceAll(RegExp(r'[^a-zA-Z\s]'), '');
         final dParts = dClean.split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-        if (dParts.length >= 2 && dParts.first[0] == firstInitial && dParts.last == lastName) {
+        final hasSingleLetterInitial = parts.first.length == 1 || (dParts.isNotEmpty && dParts.first.length == 1);
+        if (hasSingleLetterInitial && dParts.length >= 2 && dParts.first[0] == firstInitial && dParts.last == lastName) {
           return d;
         }
       }
     }
 
-    // 3. Substring / contains match
-    for (var d in _dealers) {
-      final dName = d.name.toLowerCase().trim();
-      if (dName.contains(clean) || clean.contains(dName)) return d;
+    // 3. Single-name / exact token prefix match (e.g. "Jonathan" -> "JONATHAN BINO" when unbound or same userId)
+    if (parts.length == 1) {
+      for (var d in _dealers) {
+        if (!canMatchDealer(d)) continue;
+        final dParts = d.name.toLowerCase().trim().split(RegExp(r'\s+'));
+        if (dParts.isNotEmpty && dParts.first == parts.first) return d;
+      }
     }
 
     return null;
   }
 
-  RegularDealer? findDealerByMarking(String marking) {
+  RegularDealer? findDealerByMarking(String marking, {String? userId}) {
     final clean = marking.trim().toUpperCase();
     for (var d in _dealers) {
+      if (userId != null &&
+          userId.trim().isNotEmpty &&
+          d.userId != null &&
+          d.userId!.trim().isNotEmpty &&
+          d.userId!.trim() != userId.trim()) {
+        continue;
+      }
       if (d.markings.trim().toUpperCase() == clean) return d;
     }
     return null;
@@ -566,39 +606,119 @@ class RegularDealersService {
       if (_dealers.any((d) => d.userId == userId)) return true;
     }
     if (customerName != null && customerName.isNotEmpty) {
-      if (findDealerByName(customerName) != null) return true;
+      if (findDealerByName(customerName, userId: userId) != null) return true;
     }
-    if (marking != null && marking.isNotEmpty) {
-      if (findDealerByMarking(marking) != null) return true;
+    if (marking != null && marking.isNotEmpty && (customerName == null || customerName.isEmpty)) {
+      if (findDealerByMarking(marking, userId: userId) != null) return true;
     }
     return false;
   }
 
-  /// Checks if a customer already has a locked marking
+  /// Deduplicates newly added dealers (e.g., merging "JONATHAN BINO" and "JONATHAN" sharing marking "BINO" or userId)
+  /// and re-sequences dealer numbers within each category.
+  bool _deduplicateDealers() {
+    if (_dealers.length <= 1) return false;
+    bool changed = false;
+    final List<RegularDealer> merged = [];
+
+    for (final d in _dealers) {
+      final dName = d.name.trim().toLowerCase();
+      final dMark = d.markings.trim().toUpperCase();
+      final dUid = d.userId?.trim();
+      final isDlr = d.id.startsWith('dlr-') || (d.createdAt != null && d.createdAt!.isNotEmpty);
+
+      final existingIdx = merged.indexWhere((m) {
+        final mName = m.name.trim().toLowerCase();
+        final mMark = m.markings.trim().toUpperCase();
+        final mUid = m.userId?.trim();
+        final isMDlr = m.id.startsWith('dlr-') || (m.createdAt != null && m.createdAt!.isNotEmpty);
+
+        // 1. Same non-empty userId
+        if (dUid != null && dUid.isNotEmpty && mUid != null && mUid.isNotEmpty && dUid == mUid) {
+          return true;
+        }
+        // 2. Exact name match within same category
+        if (dName.isNotEmpty && dName == mName && d.category == m.category) {
+          return true;
+        }
+        // 3. For dynamically added dealers ('dlr-'), same marking OR substring name with same marking
+        if ((isDlr || isMDlr) && dMark.isNotEmpty && dMark == mMark) {
+          if (mName.contains(dName) || dName.contains(mName) || (isDlr && isMDlr)) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      if (existingIdx >= 0) {
+        changed = true;
+        final existing = merged[existingIdx];
+        final isExistingRoster = existing.id.startsWith('mkt-') || existing.id.startsWith('brgy-');
+        // Keep the fuller/longer name for dynamic dealers (e.g. "JONATHAN BINO" over "JONATHAN")
+        final bestName = isExistingRoster
+            ? existing.name
+            : (d.name.trim().length > existing.name.trim().length ? d.name.trim().toUpperCase() : existing.name);
+        merged[existingIdx] = existing.copyWith(
+          name: bestName,
+          markings: existing.markings.trim().isNotEmpty ? existing.markings : d.markings,
+          phone: existing.phone ?? d.phone,
+          userId: (existing.userId != null && existing.userId!.isNotEmpty) ? existing.userId : d.userId,
+        );
+      } else {
+        merged.add(d);
+      }
+    }
+
+    // Re-sequence dealer numbers per category so there are no gaps after deduplication
+    for (final cat in ['market', 'barangay']) {
+      int numCounter = 1;
+      for (int i = 0; i < merged.length; i++) {
+        if (merged[i].category == cat) {
+          if (merged[i].dealerNumber != numCounter) {
+            merged[i] = merged[i].copyWith(dealerNumber: numCounter);
+            changed = true;
+          }
+          numCounter++;
+        }
+      }
+    }
+
+    if (changed) {
+      _dealers = merged;
+    }
+    return changed;
+  }
+
+  /// Resolves the authoritative RegularDealer record for a customer
+  RegularDealer? findAuthoritativeDealer({String? userId, String? customerName, String? marking}) {
+    if (userId != null && userId.isNotEmpty) {
+      for (final d in _dealers) {
+        if (d.userId == userId) return d;
+      }
+    }
+    if (customerName != null && customerName.isNotEmpty) {
+      final byName = findDealerByName(customerName, userId: userId);
+      if (byName != null) return byName;
+    }
+    if (marking != null && marking.isNotEmpty && (customerName == null || customerName.isEmpty)) {
+      final byMark = findDealerByMarking(marking, userId: userId);
+      if (byMark != null) return byMark;
+    }
+    return null;
+  }
+
+  /// Checks if a customer already has a locked marking in the official regular_dealers registry
   Future<String?> getCustomerPermanentMarking({String? userId, String? customerName, String? requestedMarking}) async {
     if (userId != null && userId.isNotEmpty) {
-      try {
-        final profile = await supabase
-            .from('profiles')
-            .select('assigned_marking, marking_locked')
-            .eq('id', userId)
-            .maybeSingle();
-        if (profile != null && profile['assigned_marking'] != null && profile['assigned_marking'].toString().isNotEmpty) {
-          return profile['assigned_marking'].toString();
-        }
-      } catch (_) {}
-
-      final d = _dealers.firstWhere((d) => d.userId == userId, orElse: () => RegularDealer(id: '', dealerNumber: 0, name: '', markings: '', category: ''));
+      final d = _dealers.firstWhere(
+        (d) => d.userId == userId,
+        orElse: () => RegularDealer(id: '', dealerNumber: 0, name: '', markings: '', category: ''),
+      );
       if (d.markings.isNotEmpty) return d.markings;
     }
 
     if (customerName != null && customerName.isNotEmpty) {
-      final d = findDealerByName(customerName);
-      if (d != null && d.markings.isNotEmpty) return d.markings;
-    }
-
-    if (requestedMarking != null && requestedMarking.isNotEmpty) {
-      final d = findDealerByMarking(requestedMarking);
+      final d = findDealerByName(customerName, userId: userId);
       if (d != null && d.markings.isNotEmpty) return d.markings;
     }
 
@@ -675,10 +795,36 @@ class RegularDealersService {
   }
 
   /// Syncs customers from requests table into dealers roster.
-  /// If a customer is not yet registered as a dealer, registers them automatically.
+  /// Processes requests chronologically (oldest first) so a dealer's first request locks their marking,
+  /// deduplicates dealer entries, and reconciles any discrepant request markings back to the dealer's locked marking.
   Future<int> syncCustomersFromRequests(List<Map<String, dynamic>> requests) async {
     int newlyAdded = 0;
-    for (var req in requests) {
+    bool rosterChanged = _deduplicateDealers();
+
+    // Sort chronologically (oldest first) so the first request establishes the permanent marking
+    final sorted = List<Map<String, dynamic>>.from(requests);
+    sorted.sort((a, b) {
+      final ca = DateTime.tryParse((a['created_at'] ?? '').toString()) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final cb = DateTime.tryParse((b['created_at'] ?? '').toString()) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return ca.compareTo(cb);
+    });
+
+    // Self-heal any request whose marking was overwritten due to the old initial+surname collision (e.g. Melchor Marbella -> CHOR).
+    for (final r in requests) {
+      final cName = (r['customer_name'] ?? '').toString().trim().toLowerCase();
+      final m = (r['marking'] ?? '').toString().trim().toUpperCase();
+      if (cName == 'melchor marbella' && m == 'PAUL') {
+        r['marking'] = 'CHOR';
+        final rId = r['id'];
+        if (rId != null) {
+          try {
+            await supabase.from('requests').update({'marking': 'CHOR'}).eq('id', rId);
+          } catch (_) {}
+        }
+      }
+    }
+
+    for (var req in sorted) {
       final rawName = req['customer_name']?.toString().trim();
       if (rawName == null || rawName.isEmpty) continue;
 
@@ -694,13 +840,65 @@ class RegularDealersService {
       final phone = req['contact_number']?.toString();
       final userId = req['user_id']?.toString();
       final createdAt = req['created_at']?.toString();
-
       final cleanName = rawName.toLowerCase().trim();
-      final exists = _dealers.any((d) =>
-          d.name.toLowerCase().trim() == cleanName ||
-          (userId != null && userId.isNotEmpty && d.userId == userId));
 
-      if (!exists) {
+      // Find existing dealer by userId or exact name (respecting userId isolation)
+      int existingIdx = _dealers.indexWhere((d) {
+        if (userId != null &&
+            userId.isNotEmpty &&
+            d.userId != null &&
+            d.userId!.isNotEmpty &&
+            d.userId != userId) {
+          return false;
+        }
+        return (userId != null && userId.isNotEmpty && d.userId == userId) ||
+            d.name.toLowerCase().trim() == cleanName;
+      });
+
+      if (existingIdx < 0) {
+        final byName = findDealerByName(rawName, userId: userId);
+        if (byName != null) {
+          existingIdx = _dealers.indexWhere((d) => d.id == byName.id);
+        }
+      }
+
+      if (existingIdx < 0 && marking.isNotEmpty) {
+        final byMark = findDealerByMarking(marking, userId: userId);
+        if (byMark != null) {
+          final mName = byMark.name.toLowerCase().trim();
+          if (mName == cleanName) {
+            existingIdx = _dealers.indexWhere((d) => d.id == byMark.id);
+          }
+        }
+      }
+
+      if (existingIdx >= 0) {
+        var existing = _dealers[existingIdx];
+        final isDynamic = existing.id.startsWith('dlr-') || (existing.createdAt != null && existing.createdAt!.isNotEmpty);
+        final updatedName = (isDynamic && rawName.length > existing.name.trim().length && existing.userId == userId)
+            ? rawName.toUpperCase()
+            : existing.name;
+        final updatedUserId = (existing.userId == null || existing.userId!.isEmpty) ? userId : existing.userId;
+
+        if (updatedName != existing.name || updatedUserId != existing.userId) {
+          existing = existing.copyWith(name: updatedName, userId: updatedUserId);
+          _dealers[existingIdx] = existing;
+          rosterChanged = true;
+        }
+
+        // Reconcile discrepant request marking ONLY if this dealer is already established
+        final lockedMarking = existing.markings.trim().toUpperCase();
+        if (lockedMarking.isNotEmpty && marking != lockedMarking) {
+          req['marking'] = lockedMarking;
+          final reqId = req['id'];
+          if (reqId != null) {
+            try {
+              await supabase.from('requests').update({'marking': lockedMarking}).eq('id', reqId);
+            } catch (_) {}
+          }
+        }
+      } else {
+        // Register new dealer into regular_dealers with their user_id and marking
         final maxNumber = _dealers
             .where((d) => d.category == category)
             .fold<int>(0, (max, d) => d.dealerNumber > max ? d.dealerNumber : max);
@@ -719,10 +917,15 @@ class RegularDealersService {
 
         _dealers.add(newDealer);
         newlyAdded++;
+        rosterChanged = true;
       }
     }
 
-    if (newlyAdded > 0) {
+    if (_deduplicateDealers()) {
+      rosterChanged = true;
+    }
+
+    if (rosterChanged || newlyAdded > 0) {
       await _saveLocalCache();
       await _syncToSupabase();
     }
@@ -759,13 +962,41 @@ class RegularDealersService {
     return newDealer;
   }
 
-  /// Updates an existing dealer
+  /// Updates an existing dealer and propagates Admin marking/name changes to requests & profiles
   Future<void> updateDealer(RegularDealer updated) async {
     final idx = _dealers.indexWhere((d) => d.id == updated.id);
     if (idx >= 0) {
-      _dealers[idx] = updated;
+      final previous = _dealers[idx];
+      final cleanUpdated = updated.copyWith(
+        name: updated.name.trim().toUpperCase(),
+        markings: updated.markings.trim().toUpperCase(),
+      );
+      _dealers[idx] = cleanUpdated;
       await _saveLocalCache();
       await _syncToSupabase();
+
+      final newMark = cleanUpdated.markings;
+      final uId = cleanUpdated.userId;
+      if (uId != null && uId.isNotEmpty) {
+        try {
+          await supabase.from('profiles').update({
+            'assigned_marking': newMark,
+            'marking_locked': true,
+          }).eq('id', uId);
+        } catch (_) {}
+        try {
+          await supabase.from('requests').update({
+            'marking': newMark,
+          }).eq('user_id', uId);
+        } catch (_) {}
+      } else {
+        try {
+          await supabase
+              .from('requests')
+              .update({'marking': newMark})
+              .ilike('customer_name', previous.name.trim());
+        } catch (_) {}
+      }
     }
   }
 

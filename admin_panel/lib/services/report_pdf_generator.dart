@@ -58,8 +58,8 @@ class ReportPdfGenerator {
             (r['request_type']?.toString() ?? '').toLowerCase() == 'barangay')
         .toList();
 
-    // Accurately compute commodity heads and carcass weights across all 5 livestock types
-    int totalHogs = 0, totalCow = 0, totalCara = 0, totalGoat = 0, totalPoultry = 0;
+    // Accurately compute commodity heads and carcass weights across livestock types
+    int totalHogs = 0, totalCow = 0, totalCara = 0, totalGoat = 0;
     double totalWeight = 0;
     double computedRevenue = 0;
 
@@ -71,8 +71,6 @@ class ReportPdfGenerator {
 
       if (_isGoat(type)) {
         totalGoat += count;
-      } else if (_isPoultry(type)) {
-        totalPoultry += count;
       } else if (_isCow(type)) {
         totalCow += count;
       } else if (_isCara(type)) {
@@ -104,7 +102,7 @@ class ReportPdfGenerator {
 
     final finalRevenue = totalRevenue ?? computedRevenue;
     final finalProcessedCount = totalLivestockProcessed ??
-        (totalHogs + totalCow + totalCara + totalGoat + totalPoultry);
+        (totalHogs + totalCow + totalCara + totalGoat);
 
     String mainTitle = 'DAILY SLAUGHTERHOUSE PRODUCTION & REVENUE REPORT';
     if (reportType.toLowerCase().contains('weekly')) {
@@ -151,7 +149,6 @@ class ReportPdfGenerator {
                 cow: totalCow,
                 cara: totalCara,
                 goat: totalGoat,
-                poultry: totalPoultry,
                 totalWeight: totalWeight,
                 totalRevenue: finalRevenue,
               ),
@@ -179,7 +176,6 @@ class ReportPdfGenerator {
                 cow: totalCow,
                 cara: totalCara,
                 goat: totalGoat,
-                poultry: totalPoultry,
                 totalWeight: totalWeight,
                 totalRevenue: finalRevenue,
               ),
@@ -385,9 +381,7 @@ class ReportPdfGenerator {
           _headerCellCenter('', headerStyle),
           _headerCellCenter('', headerStyle),
           _headerCellCenter('', headerStyle),
-          _headerCellCenter('', headerStyle),
           _headerCellCenter('CARCASS WEIGHT (KG)', headerStyle),
-          _headerCellCenter('', headerStyle),
           _headerCellCenter('', headerStyle),
           _headerCellCenter('', headerStyle),
           _headerCellCenter('', headerStyle),
@@ -397,7 +391,7 @@ class ReportPdfGenerator {
       ),
     );
 
-    // Header Row 2: Sub-columns for all 5 categories
+    // Header Row 2: Sub-columns for livestock categories
     rows.add(
       pw.TableRow(
         decoration: pw.BoxDecoration(color: PdfColor.fromHex('#F7FAFC')),
@@ -409,12 +403,10 @@ class ReportPdfGenerator {
           _headerCellCenter('COW', headerStyle),
           _headerCellCenter('CARA', headerStyle),
           _headerCellCenter('GOAT', headerStyle),
-          _headerCellCenter('POULTRY', headerStyle),
           _headerCellCenter('HOG', headerStyle),
           _headerCellCenter('COW', headerStyle),
           _headerCellCenter('CARA', headerStyle),
           _headerCellCenter('GOAT', headerStyle),
-          _headerCellCenter('POULTRY', headerStyle),
           _headerCellCenter('TOTAL', headerStyle),
           _headerCellCenter('', headerStyle),
         ],
@@ -432,7 +424,7 @@ class ReportPdfGenerator {
               child: pw.Text('No market transactions for this period',
                   style: pw.TextStyle(fontSize: 6, fontStyle: pw.FontStyle.italic, color: PdfColors.grey600)),
             ),
-            ...List.generate(13, (_) => _emptyCell(cellStyle)),
+            ...List.generate(11, (_) => _emptyCell(cellStyle)),
           ],
         ),
       );
@@ -452,7 +444,7 @@ class ReportPdfGenerator {
             padding: const pw.EdgeInsets.all(2),
             child: pw.Center(child: pw.Text('BARANGAY SECTION', style: sectionStyle)),
           ),
-          ...List.generate(13, (_) => _emptyCell(cellStyle)),
+          ...List.generate(11, (_) => _emptyCell(cellStyle)),
         ],
       ),
     );
@@ -468,7 +460,7 @@ class ReportPdfGenerator {
               child: pw.Text('No barangay transactions for this period',
                   style: pw.TextStyle(fontSize: 6, fontStyle: pw.FontStyle.italic, color: PdfColors.grey600)),
             ),
-            ...List.generate(13, (_) => _emptyCell(cellStyle)),
+            ...List.generate(11, (_) => _emptyCell(cellStyle)),
           ],
         ),
       );
@@ -484,18 +476,16 @@ class ReportPdfGenerator {
         0: pw.FixedColumnWidth(16),  // No.
         1: pw.FlexColumnWidth(2.6),  // Name
         2: pw.FlexColumnWidth(1.1),  // Markings
-        3: pw.FixedColumnWidth(18),  // Heads Hog
-        4: pw.FixedColumnWidth(18),  // Heads Cow
-        5: pw.FixedColumnWidth(18),  // Heads Cara
-        6: pw.FixedColumnWidth(18),  // Heads Goat
-        7: pw.FixedColumnWidth(22),  // Heads Poultry
-        8: pw.FixedColumnWidth(22),  // Weight Hog
-        9: pw.FixedColumnWidth(22),  // Weight Cow
-        10: pw.FixedColumnWidth(22), // Weight Cara
-        11: pw.FixedColumnWidth(22), // Weight Goat
-        12: pw.FixedColumnWidth(24), // Weight Poultry
-        13: pw.FixedColumnWidth(36), // Fee Total
-        14: pw.FlexColumnWidth(1.8), // Remarks
+        3: pw.FixedColumnWidth(20),  // Heads Hog
+        4: pw.FixedColumnWidth(20),  // Heads Cow
+        5: pw.FixedColumnWidth(20),  // Heads Cara
+        6: pw.FixedColumnWidth(20),  // Heads Goat
+        7: pw.FixedColumnWidth(24),  // Weight Hog
+        8: pw.FixedColumnWidth(24),  // Weight Cow
+        9: pw.FixedColumnWidth(24),  // Weight Cara
+        10: pw.FixedColumnWidth(24), // Weight Goat
+        11: pw.FixedColumnWidth(38), // Fee Total
+        12: pw.FlexColumnWidth(1.8), // Remarks
       },
       children: rows,
     );
@@ -508,16 +498,12 @@ class ReportPdfGenerator {
     final animalCount = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
     final carcassWeight = double.tryParse((req['carcass_weight'] ?? 0).toString()) ?? 0;
 
-    String hogsHeads = '', cowHeads = '', caraHeads = '', goatHeads = '', poultryHeads = '';
-    String hogsWeight = '', cowWeight = '', caraWeight = '', goatWeight = '', poultryWeight = '';
+    String hogsHeads = '', cowHeads = '', caraHeads = '', goatHeads = '';
+    String hogsWeight = '', cowWeight = '', caraWeight = '', goatWeight = '';
 
-    // Accurate distribution across species: Goats & Poultry never dumped under Hogs!
     if (_isGoat(livestockType)) {
       goatHeads = animalCount.toString();
       if (carcassWeight > 0) goatWeight = carcassWeight.toStringAsFixed(1);
-    } else if (_isPoultry(livestockType)) {
-      poultryHeads = animalCount.toString();
-      if (carcassWeight > 0) poultryWeight = carcassWeight.toStringAsFixed(1);
     } else if (_isCow(livestockType)) {
       cowHeads = animalCount.toString();
       if (carcassWeight > 0) cowWeight = carcassWeight.toStringAsFixed(1);
@@ -558,12 +544,10 @@ class ReportPdfGenerator {
         _dataCellCenter(cowHeads, style),
         _dataCellCenter(caraHeads, style),
         _dataCellCenter(goatHeads, style),
-        _dataCellCenter(poultryHeads, style),
         _dataCellCenter(hogsWeight, style),
         _dataCellCenter(cowWeight, style),
         _dataCellCenter(caraWeight, style),
         _dataCellCenter(goatWeight, style),
-        _dataCellCenter(poultryWeight, style),
         _dataCellCenter(feeStr, style),
         _dataCell(remarks, style),
       ],
@@ -765,12 +749,11 @@ class ReportPdfGenerator {
     required int cow,
     required int cara,
     required int goat,
-    required int poultry,
     required double totalWeight,
     required double totalRevenue,
   }) {
     final style = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
-    final totalHeads = hogs + cow + cara + goat + poultry;
+    final totalHeads = hogs + cow + cara + goat;
 
     return pw.Table(
       border: pw.TableBorder.all(width: 0.5, color: PdfColor.fromHex('#CBD5E0')),
@@ -779,10 +762,9 @@ class ReportPdfGenerator {
         1: pw.FlexColumnWidth(1.0),
         2: pw.FlexColumnWidth(1.0),
         3: pw.FlexColumnWidth(1.0),
-        4: pw.FlexColumnWidth(1.0),
-        5: pw.FlexColumnWidth(1.3),
-        6: pw.FlexColumnWidth(1.5),
-        7: pw.FlexColumnWidth(1.7),
+        4: pw.FlexColumnWidth(1.3),
+        5: pw.FlexColumnWidth(1.5),
+        6: pw.FlexColumnWidth(1.7),
       },
       children: [
         pw.TableRow(
@@ -791,8 +773,7 @@ class ReportPdfGenerator {
             _headerCellCenter('HOGS', style),
             _headerCellCenter('COW / CATTLE', style),
             _headerCellCenter('CARABAO', style),
-            _headerCellCenter('GOAT', style),
-            _headerCellCenter('POULTRY', style),
+            _headerCellCenter('GOAT / SHEEP', style),
             _headerCellCenter('TOTAL HEADS', style),
             _headerCellCenter('TOTAL WEIGHT', style),
             _headerCellCenter('TOTAL REVENUE', style),
@@ -804,7 +785,6 @@ class ReportPdfGenerator {
             _headerCellCenter(cow.toString(), style),
             _headerCellCenter(cara.toString(), style),
             _headerCellCenter(goat.toString(), style),
-            _headerCellCenter(poultry.toString(), style),
             _headerCellCenter('$totalHeads Heads',
                 pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#2D6A4F'))),
             _headerCellCenter('${totalWeight.toStringAsFixed(1)} kg', style),
@@ -896,11 +876,6 @@ class ReportPdfGenerator {
   // ═══════════════════════════════════════════════════════════════
   static bool _isGoat(String t) =>
       t.contains('goat') || t.contains('sheep') || t.contains('caprine') || t.contains('kambing');
-
-  static bool _isPoultry(String t) =>
-      t.contains('poultry') || t.contains('chicken') || t.contains('duck') ||
-      t.contains('turkey') || t.contains('fowl') || t.contains('manok') ||
-      t.contains('pato') || t.contains('bibe');
 
   static bool _isCow(String t) =>
       t.contains('cow') || t.contains('cattle') || t.contains('bovine') || t.contains('baka');

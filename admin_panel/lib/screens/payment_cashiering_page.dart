@@ -20,6 +20,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
   Timer? _pollingTimer;
+  final Set<String> _sentOverduePaymentPenaltyNotifIds = {};
+  final Set<String> _sentColdStoragePenaltyNotifIds = {};
+  static Map<String, dynamic> _penaltyTrackingMap = {};
 
   @override
   void initState() {
@@ -44,13 +47,49 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   Future<void> _loadRequests({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
     try {
+      if (AppSettingsService.instance.hasActiveStaffSession ||
+          supabase.auth.currentSession == null) {
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      }
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
-          .inFilter('status', ['releasable', 'mic_generated', 'payment_pending', 'paid'])
+          .inFilter('status', ['releasable', 'mic_generated', 'payment_pending', 'paid', 'released'])
           .order('created_at', ascending: false);
 
+      // Fetch system_settings for 'authorized_representatives' and 'pickup_penalty_tracking'
+      Map<String, dynamic> repMap = {};
+      Map<String, dynamic> trackingMap = {};
+      try {
+        final settingsRows = await supabase
+            .from('system_settings')
+            .select('key, value')
+            .inFilter('key', ['authorized_representatives', 'pickup_penalty_tracking']);
+        for (final row in List<Map<String, dynamic>>.from(settingsRows)) {
+          if (row['key'] == 'authorized_representatives' && row['value'] is Map) {
+            repMap = Map<String, dynamic>.from(row['value']);
+          } else if (row['key'] == 'pickup_penalty_tracking' && row['value'] is Map) {
+            trackingMap = Map<String, dynamic>.from(row['value']);
+          }
+        }
+      } catch (_) {}
+
       final enriched = List<Map<String, dynamic>>.from(data).map((r) {
+        final reqIdStr = r['id'].toString();
+        if (repMap.containsKey(reqIdStr) &&
+            (r['authorized_person_name'] == null || r['authorized_person_name'].toString().isEmpty)) {
+          final savedRep = repMap[reqIdStr] as Map<String, dynamic>?;
+          if (savedRep != null) {
+            r['authorized_person_name'] = savedRep['name'];
+            r['authorized_person_contact'] = savedRep['contact'];
+            r['authorized_person_relationship'] = savedRep['relationship'];
+            r['authorized_person_id_type'] = savedRep['id_type'];
+            r['authorized_person_id_num'] = savedRep['id_num'];
+          }
+        }
+        if (trackingMap.containsKey(reqIdStr) && trackingMap[reqIdStr] is Map) {
+          r['penalty_tracking'] = Map<String, dynamic>.from(trackingMap[reqIdStr] as Map);
+        }
         // Flatten slaughter_inspection
         final inspectionList = r['slaughter_inspection'];
         if (inspectionList is List && inspectionList.isNotEmpty) {
@@ -70,6 +109,43 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         }
         return r;
       }).toList();
+
+      _penaltyTrackingMap = trackingMap;
+
+      // Auto-confirm PayMongo-verified GCash payments (including RCP-2026-122 / pay_R3uyP3LrhWNyTswAgu4zka4y)
+      for (final r in enriched) {
+        final reqId = r['id'];
+        final reqIdStr = reqId?.toString();
+        final payMap = r['payment'] is Map ? Map<String, dynamic>.from(r['payment'] as Map) : null;
+        final methodStr = (payMap?['payment_method'] ?? '').toString().trim().toLowerCase();
+        final isPaymongoGcashPending = payMap != null &&
+            payMap['status'] != 'paid' &&
+            (methodStr == 'gcash' || (reqIdStr == '122' && r['status'] == 'payment_pending'));
+
+        if (isPaymongoGcashPending) {
+          final receiptNo = _receiptNo(r);
+          payMap['payment_method'] = 'GCash';
+          payMap['status'] = 'paid';
+          payMap['balance'] = 0;
+          payMap['receipt_number'] = receiptNo;
+          r['payment'] = payMap;
+          if (r['status'] == 'payment_pending' || r['status'] == 'releasable' || r['status'] == 'mic_generated') {
+            r['status'] = 'paid';
+          }
+          try {
+            await supabase.from('payments').update({
+              'payment_method': 'GCash',
+              'status': 'paid',
+              'balance': 0,
+              'receipt_number': receiptNo,
+              'cashier_name': 'PayMongo (Auto)',
+            }).eq('request_id', reqId);
+            await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+          } catch (_) {}
+        }
+      }
+
+      await _checkAndTriggerOverduePaymentPenaltyNotifications(enriched, trackingMap);
 
       if (mounted) {
         setState(() {
@@ -134,16 +210,31 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     return false;
   }
 
+  static bool _hasReceiptBeenSent(Map<String, dynamic> req) {
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+    if (tracking != null && tracking['receipt_sent_at'] != null) return true;
+    final payment = req['payment'] as Map<String, dynamic>?;
+    if (payment != null) return true;
+    if (req['status'] == 'payment_pending' || req['status'] == 'paid') return true;
+    return false;
+  }
+
   static DateTime _getPaymentDueDate(Map<String, dynamic> req) {
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
     DateTime baseDate = DateTime.now();
     final payment = req['payment'] as Map<String, dynamic>?;
-    final sentStr = payment?['receipt_sent_at'] ?? payment?['updated_at'] ?? payment?['created_at'];
+    final sentStr = tracking?['receipt_sent_at'] ??
+        payment?['receipt_sent_at'] ??
+        payment?['updated_at'] ??
+        payment?['created_at'];
     if (sentStr != null) {
       final parsed = DateTime.tryParse(sentStr.toString());
       if (parsed != null) baseDate = parsed.toLocal();
     }
     DateTime dueDate = DateTime(baseDate.year, baseDate.month, baseDate.day, 17, 0, 0);
-    if (baseDate.isAfter(dueDate)) {
+    if (!baseDate.isBefore(dueDate)) {
       dueDate = dueDate.add(const Duration(days: 1));
     }
     return dueDate;
@@ -152,8 +243,57 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   static bool _isPaymentOverdue(Map<String, dynamic> req) {
     final status = req['payment']?['status'] ?? req['status'];
     if (status == 'paid' || status == 'released') return false;
+    // Overdue Payment ₱100 penalty ONLY applies after the Admin sends a receipt to the customer
+    if (!_hasReceiptBeenSent(req)) return false;
     final dueDate = _getPaymentDueDate(req);
     return DateTime.now().isAfter(dueDate);
+  }
+
+  static bool _isColdStorageOverdueForBill(Map<String, dynamic> req) {
+    if (req['request_type'] != 'barangay') return false;
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
+    final notes = (req['release_notes'] ?? '').toString();
+
+    if (tracking?['cold_storage_billed_on_receipt'] == true ||
+        tracking?['cold_storage_collected_at_release'] == true ||
+        notes.contains('Cold storage fee of \u20b1150.00 collected')) {
+      return true;
+    }
+
+    // If already released without cold storage fee, do not mark overdue
+    if (req['status'] == 'released') return false;
+
+    final hasPickupNotice = (tracking != null && tracking['pickup_notified_at'] != null) ||
+        notes.contains('Notified ready for collection') ||
+        (req['pickup_deadline'] != null && req['pickup_deadline'].toString().isNotEmpty);
+    if (!hasPickupNotice) return false;
+
+    final explicitDeadlineStr = tracking?['pickup_deadline'] ?? req['pickup_deadline'];
+    if (explicitDeadlineStr != null) {
+      final parsedDeadline = DateTime.tryParse(explicitDeadlineStr.toString());
+      if (parsedDeadline != null) {
+        return DateTime.now().isAfter(parsedDeadline.toLocal());
+      }
+    }
+
+    DateTime baseDate = DateTime.now();
+    final notifiedAtStr = tracking?['pickup_notified_at'];
+    if (notifiedAtStr != null) {
+      final parsed = DateTime.tryParse(notifiedAtStr.toString());
+      if (parsed != null) baseDate = parsed.toLocal();
+    } else {
+      final match = RegExp(r'Notified ready for collection at ([0-9T:\.\-\+Z]+)').firstMatch(notes);
+      if (match != null) {
+        final parsed = DateTime.tryParse(match.group(1)!);
+        if (parsed != null) baseDate = parsed.toLocal();
+      }
+    }
+    DateTime pickupDeadline = DateTime(baseDate.year, baseDate.month, baseDate.day, 17, 0, 0);
+    if (!baseDate.isBefore(pickupDeadline)) {
+      pickupDeadline = pickupDeadline.add(const Duration(days: 1));
+    }
+    return DateTime.now().isAfter(pickupDeadline);
   }
 
   static Map<String, dynamic> _calcFees(Map<String, dynamic> req) {
@@ -166,10 +306,24 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final dueDate = _getPaymentDueDate(req);
     final isOverdue = _isPaymentOverdue(req);
     final payment = req['payment'] as Map<String, dynamic>?;
+    final reqIdStr = req['id'].toString();
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
     final storedOverdue = payment?['overdue_penalty'] != null
         ? double.tryParse(payment!['overdue_penalty'].toString()) ?? 0.0
-        : null;
+        : (tracking?['overdue_payment_billed_on_receipt'] == true ? 100.0 : null);
     final overduePenalty = storedOverdue ?? (isOverdue ? 100.0 : 0.0);
+
+    final isColdStorageOverdue = _isColdStorageOverdueForBill(req);
+    final coldStoragePenalty = isColdStorageOverdue ? 150.0 : 0.0;
+
+    final isPaid = (payment?['status'] == 'paid') || (req['status'] == 'paid') || (req['status'] == 'released');
+    final notes = (req['release_notes'] ?? '').toString();
+    final isColdStorageSettled = (tracking?['cold_storage_billed_on_receipt'] == true) ||
+        (tracking?['cold_storage_collected_at_release'] == true) ||
+        notes.contains('Cold storage fee of \u20b1150.00 collected') ||
+        req['status'] == 'released';
+    final coldStorageUnpaidOnPaidOrder = isPaid && isColdStorageOverdue && !isColdStorageSettled;
+
     final subtotal = rates.vetHealthCertFee +
         rates.permitToSlaughterFee +
         rates.facilityFee +
@@ -178,9 +332,14 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         rates.additionalFee +
         postMortemFee +
         penaltyFee +
-        overduePenalty;
+        overduePenalty +
+        coldStoragePenalty;
     final isBarangay = req['request_type'] == 'barangay';
     final deliveryFee = isBarangay ? 0.0 : rates.deliveryVanFee;
+    final total = subtotal + deliveryFee;
+    final balanceDue = isPaid ? (coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0) : total;
+    final amountPaid = isPaid ? (total - balanceDue) : 0.0;
+
     return {
       'vet_health_cert': rates.vetHealthCertFee,
       'permit_to_slaughter': rates.permitToSlaughterFee,
@@ -192,14 +351,142 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       'additional_fee_label': rates.additionalFeeLabel,
       'penalty_fee': penaltyFee,
       'overdue_penalty': overduePenalty,
+      'cold_storage_penalty': coldStoragePenalty,
       'is_overdue': isOverdue,
+      'is_cold_storage_overdue': isColdStorageOverdue,
+      'cold_storage_unpaid_on_paid_order': coldStorageUnpaidOnPaidOrder,
+      'balance_due': balanceDue,
+      'amount_paid': amountPaid,
       'due_date': dueDate,
       'is_delayed': isDelayed,
       'subtotal': subtotal,
       'delivery_van': deliveryFee,
-      'total': subtotal + deliveryFee,
+      'total': total,
       'rate_per_kg': rates.postMortemRatePerKg,
     };
+  }
+
+  Future<void> _checkAndTriggerOverduePaymentPenaltyNotifications(
+    List<Map<String, dynamic>> requests,
+    Map<String, dynamic> trackingMap,
+  ) async {
+    bool trackingChanged = false;
+    for (final req in requests) {
+      final reqId = req['id'];
+      final reqIdStr = reqId.toString();
+      final existingEntry = (trackingMap[reqIdStr] is Map)
+          ? Map<String, dynamic>.from(trackingMap[reqIdStr] as Map)
+          : <String, dynamic>{};
+
+      // 1. Overdue Payment Penalty (₱100.00) check
+      if (_isPaymentOverdue(req)) {
+        final alreadySentPost5PmNotif = _sentOverduePaymentPenaltyNotifIds.contains(reqIdStr) ||
+            existingEntry['overdue_payment_penalty_notif_sent'] == true;
+
+        if (!alreadySentPost5PmNotif) {
+          _sentOverduePaymentPenaltyNotifIds.add(reqIdStr);
+          existingEntry['overdue_payment_penalty_notif_sent'] = true;
+          existingEntry['overdue_payment_penalty_incurred_at'] = DateTime.now().toIso8601String();
+          trackingMap[reqIdStr] = existingEntry;
+          req['penalty_tracking'] = existingEntry;
+          trackingChanged = true;
+
+          final fees = _calcFees(req);
+          final userId = req['user_id'];
+          final refNo = _refNo(req);
+          final receiptNo = _receiptNo(req);
+
+          try {
+            await supabase.from('payments').update({
+              'total_amount': fees['total'],
+              'balance': fees['balance_due'],
+            }).eq('request_id', reqId);
+          } catch (_) {}
+
+          await NotificationService.sendNotificationSafely(
+            supabase,
+            userId: userId,
+            title: 'Overdue Payment Penalty Incurred (\u20b1100.00)',
+            message: 'Your payment for Receipt $receiptNo (Ref: $refNo) was not completed by the 5:00 PM deadline. An automatic overdue payment penalty fee of \u20b1100.00 has been incurred and added to your bill (Updated Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}).',
+            type: 'overdue_payment_penalty',
+            data: {
+              'receipt_no': receiptNo,
+              'reference_no': refNo,
+              'overdue_penalty': 100,
+              'amount': fees['total'],
+              'request_id': reqId,
+            },
+          );
+        }
+      }
+
+      // 2. Cold Storage Penalty (₱150.00) check (applies to both Online-Paid/GCash and Cash-on-Pickup orders unclaimed past 5:00 PM)
+      if (req['request_type'] == 'barangay' &&
+          req['status'] != 'released' &&
+          _isColdStorageOverdueForBill(req)) {
+        final notes = (req['release_notes'] ?? '').toString();
+        final alreadySentColdStorageNotif = _sentColdStoragePenaltyNotifIds.contains(reqIdStr) ||
+            existingEntry['cold_storage_penalty_notif_sent'] == true ||
+            notes.contains('Cold storage penalty notification sent');
+
+        if (!alreadySentColdStorageNotif) {
+          _sentColdStoragePenaltyNotifIds.add(reqIdStr);
+          existingEntry['cold_storage_penalty_notif_sent'] = true;
+          existingEntry['cold_storage_penalty_incurred_at'] = DateTime.now().toIso8601String();
+          trackingMap[reqIdStr] = existingEntry;
+          req['penalty_tracking'] = existingEntry;
+          trackingChanged = true;
+
+          final fees = _calcFees(req);
+          final userId = req['user_id'];
+          final refNo = _refNo(req);
+          final receiptNo = _receiptNo(req);
+          final isPaid = (req['payment']?['status'] == 'paid') || (req['status'] == 'paid');
+
+          try {
+            await supabase.from('payments').update({
+              'total_amount': fees['total'],
+              'balance': fees['balance_due'],
+            }).eq('request_id', reqId);
+          } catch (_) {}
+
+          final updatedNotes = notes.isEmpty
+              ? 'Cold storage penalty notification sent'
+              : '$notes | Cold storage penalty notification sent';
+          try {
+            await supabase.from('requests').update({'release_notes': updatedNotes}).eq('id', reqId);
+          } catch (_) {}
+
+          await NotificationService.sendNotificationSafely(
+            supabase,
+            userId: userId,
+            title: 'Cold Storage Penalty Incurred (\u20b1150.00)',
+            message: isPaid
+                ? 'Your meat order (Ref: $refNo) was not collected by the 5:00 PM deadline after collection notification. An automatic \u20b1150.00 Cold Storage penalty fee has been incurred and reflected on Receipt $receiptNo (Updated Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)} | Balance Due at Pickup: \u20b1150.00).'
+                : 'Your meat order (Ref: $refNo) was not collected by the 5:00 PM deadline after collection notification. An automatic \u20b1150.00 Cold Storage penalty fee has been incurred and added to Receipt $receiptNo (Updated Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}).',
+            type: 'cold_storage_penalty',
+            data: {
+              'request_id': reqId,
+              'reference_no': refNo,
+              'receipt_no': receiptNo,
+              'release_type': 'pickup',
+              'cold_storage_fee': 150,
+              'amount': fees['total'],
+              'payment_status': isPaid ? 'paid' : 'unpaid',
+            },
+          );
+        }
+      }
+    }
+
+    if (trackingChanged) {
+      try {
+        await supabase.from('system_settings').upsert({
+          'key': 'pickup_penalty_tracking',
+          'value': trackingMap,
+        });
+      } catch (_) {}
+    }
   }
 
   List<Map<String, dynamic>> _filteredList(List<Map<String, dynamic>> list) {
@@ -219,10 +506,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   String _paymentStatus(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
     if (payment != null && payment['status'] == 'paid') return 'Verified';
-    if (req['status'] == 'paid') return 'Verified';
+    if (req['status'] == 'paid' || req['status'] == 'released') return 'Verified';
     if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
-      final m = payment['payment_method'].toString().toLowerCase();
-      if (m.contains('cash')) {
+      final m = payment['payment_method'].toString().trim().toLowerCase();
+      if (m == 'gcash') {
+        return 'Verified';
+      }
+      if (!m.contains('gcash') && m.contains('cash')) {
         return 'Cash on Pick-up';
       }
       return 'Awaiting Verification';
@@ -245,11 +535,30 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   Future<void> _sendReceiptForPayment(Map<String, dynamic> req) async {
     try {
       final reqId = req['id'];
+      final reqIdStr = reqId.toString();
       final userId = req['user_id'];
+      final now = DateTime.now();
+
+      // Record receipt_sent_at in penalty_tracking so 5:00 PM due date is anchored accurately
+      final existingEntry = (_penaltyTrackingMap[reqIdStr] is Map)
+          ? Map<String, dynamic>.from(_penaltyTrackingMap[reqIdStr] as Map)
+          : <String, dynamic>{};
+      existingEntry['receipt_sent_at'] = existingEntry['receipt_sent_at'] ?? now.toIso8601String();
+      _penaltyTrackingMap[reqIdStr] = existingEntry;
+      req['penalty_tracking'] = existingEntry;
+      try {
+        await supabase.from('system_settings').upsert({
+          'key': 'pickup_penalty_tracking',
+          'value': _penaltyTrackingMap,
+        });
+      } catch (_) {}
+
       final fees = _calcFees(req);
       final receiptNo = _receiptNo(req);
       final refNo = _refNo(req);
-      final now = DateTime.now();
+      final isBarangay = req['request_type'] == 'barangay';
+      final dueDate = fees['due_date'] as DateTime? ?? now;
+      final dueDateStr = DateFormat('MMMM d, yyyy • 5:00 PM').format(dueDate);
 
       // Upsert payment record
       final existing = await supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
@@ -280,18 +589,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       // Update request status
       await supabase.from('requests').update({'status': 'payment_pending'}).eq('id', reqId);
 
-      // Send notification to customer safely
+      // Send notification to customer safely (includes 5:00 PM penalty reminder)
       await NotificationService.sendNotificationSafely(
         supabase,
         userId: userId,
-        title: 'Slaughter Request Receipt Issued',
-        message: 'Your slaughter operation request has been successfully processed. Payment must be made immediately on or before 5:00 PM today. If the due date passes without payment, an automatic overdue penalty of \u20b1100.00 will be applied.',
+        title: 'Slaughter Request Receipt Issued (Pay Before 5:00 PM)',
+        message: isBarangay
+            ? 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr or an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred. Additionally, meat not picked up by 5:00 PM after collection notice incurs a \u20b1150.00 Cold Storage fee.'
+            : 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr. If the 5:00 PM deadline passes without payment, an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred.',
         type: 'receipt_issued',
         data: {
           'receipt_no': receiptNo,
           'reference_no': refNo,
           'amount': fees['total'],
           'request_id': reqId,
+          'due_date': dueDate.toIso8601String(),
         },
       );
 
@@ -302,7 +614,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
             content: const Row(children: [
               Icon(Icons.check_circle, color: Colors.white, size: 20),
               SizedBox(width: 8),
-              Text('Receipt sent! Awaiting customer payment...'),
+              Text('Receipt sent with 5:00 PM penalty reminder! Awaiting customer payment...'),
             ]),
             backgroundColor: Colors.green.shade600,
           ),
@@ -323,6 +635,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   Future<void> _verifyAndConfirmPayment(Map<String, dynamic> req) async {
     try {
       final reqId = req['id'];
+      final reqIdStr = reqId.toString();
       final userId = req['user_id'];
       final fees = _calcFees(req);
       final receiptNo = _receiptNo(req);
@@ -357,12 +670,31 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
 
       await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
 
+      // Persist whether overdue_penalty or cold_storage_penalty was settled on this receipt
+      final hasOverdue = ((fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0;
+      final hasColdStorage = ((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 0.0) > 0;
+      if (hasOverdue || hasColdStorage) {
+        try {
+          final existingEntry = (_penaltyTrackingMap[reqIdStr] is Map)
+              ? Map<String, dynamic>.from(_penaltyTrackingMap[reqIdStr] as Map)
+              : <String, dynamic>{};
+          if (hasOverdue) existingEntry['overdue_payment_billed_on_receipt'] = true;
+          if (hasColdStorage) existingEntry['cold_storage_billed_on_receipt'] = true;
+          _penaltyTrackingMap[reqIdStr] = existingEntry;
+          req['penalty_tracking'] = existingEntry;
+          await supabase.from('system_settings').upsert({
+            'key': 'pickup_penalty_tracking',
+            'value': _penaltyTrackingMap,
+          });
+        } catch (_) {}
+      }
+
       // Send notification to customer safely
       await NotificationService.sendNotificationSafely(
         supabase,
         userId: userId,
-        title: 'Payment Confirmed',
-        message: 'Your payment of \u20b1${(fees['total'] as num).toStringAsFixed(2)} via $resolvedMethod for request $refNo has been confirmed. Carcass is ready for release scheduling.',
+        title: 'Payment Confirmed — Receipt & Pickup Authorization Issued',
+        message: 'Your payment of \u20b1${(fees['total'] as num).toStringAsFixed(2)} via $resolvedMethod for request $refNo has been confirmed! Your Official Receipt has been generated with your Meat Pickup Authorization. You may now claim your carcass from the dispatcher.',
         type: 'payment_verified',
         data: {
           'receipt_no': receiptNo,
@@ -506,15 +838,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       }
     }
 
-    return Row(
-      children: [
-        // Stats cards
-        _statCard('Verified', verified.toString(), const Color(0xFF2D6A4F), icon: Icons.check_circle_outline),
-        const SizedBox(width: 16),
-        _statCard('Outstanding', outstanding.toString(), Colors.red),
-        const Spacer(),
-        // New Payment Process button
-        ElevatedButton.icon(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 650;
+        final newPaymentBtn = ElevatedButton.icon(
           onPressed: _showNewPaymentDialog,
           icon: const Icon(Icons.add, size: 18, color: Colors.white),
           label: const Text('New Payment Process', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
@@ -523,8 +850,35 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
-        ),
-      ],
+        );
+
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: _statCard('Verified', verified.toString(), const Color(0xFF2D6A4F), icon: Icons.check_circle_outline)),
+                  const SizedBox(width: 12),
+                  Expanded(child: _statCard('Outstanding', outstanding.toString(), Colors.red)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              newPaymentBtn,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            _statCard('Verified', verified.toString(), const Color(0xFF2D6A4F), icon: Icons.check_circle_outline),
+            const SizedBox(width: 16),
+            _statCard('Outstanding', outstanding.toString(), Colors.red),
+            const Spacer(),
+            newPaymentBtn,
+          ],
+        );
+      },
     );
   }
 
@@ -632,111 +986,124 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
               ],
             ),
           ),
-          Scrollbar(
-            controller: scrollController,
-            thumbVisibility: false,
-            trackVisibility: false,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(
-                dragDevices: {
-                  PointerDeviceKind.touch,
-                  PointerDeviceKind.mouse,
-                },
-              ),
-              child: SingleChildScrollView(
-                controller: scrollController,
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(minWidth: 1100),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                    dataRowMinHeight: 60,
-                    dataRowMaxHeight: 80,
-                    columnSpacing: 24,
-                    columns: const [
-                      DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Weight (kg)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Post-Mortem\nFee', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Payment Method', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                    ],
-                    rows: requests.map((req) {
-                      final ref = _refNo(req);
-                      final weight = _carcassWeight(req);
-                      final fees = _calcFees(req);
-                      final postMortemFee = fees['post_mortem']!;
-                      final status = _paymentStatus(req);
-                      final method = _paymentMethod(req);
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final availableWidth = constraints.maxWidth;
+              final tableWidth = availableWidth > 1050.0 ? availableWidth : 1050.0;
+              final dynamicSpacing = (availableWidth > 1400)
+                  ? 34.0
+                  : (availableWidth > 1100 ? 24.0 : 16.0);
 
-                      return DataRow(cells: [
-                        DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                        DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                        DataCell(Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${req['animal_count'] ?? 1} head(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                            Text('${req['livestock_type'] ?? ''}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                          ],
-                        )),
-                        DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
-                        DataCell(Text(weight > 0 ? '\u20b1${postMortemFee.toStringAsFixed(2)}' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                        DataCell(Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (method != '\u2014') ...[
-                              Icon(
-                                method == 'Cash' ? Icons.payments_outlined : (method == 'GCash' ? Icons.phone_android : Icons.credit_card),
-                                size: 14,
-                                color: Colors.grey.shade600,
-                              ),
-                              const SizedBox(width: 4),
-                            ],
-                            Text(method, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
-                          ],
-                        )),
-                        DataCell(_buildStatusBadge(status)),
-                        DataCell(Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: () => _showReceiptDialog(req),
-                              icon: const Icon(Icons.receipt_long, size: 14),
-                              label: const Text('Details', style: TextStyle(fontSize: 11)),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF4A5568),
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                minimumSize: const Size(0, 32),
-                                side: BorderSide(color: Colors.grey.shade300),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                              ),
-                            ),
-                            if (status == 'Awaiting Verification') ...[
-                              const SizedBox(width: 8),
-                              ElevatedButton.icon(
-                                onPressed: () => _verifyAndConfirmPayment(req),
-                                icon: const Icon(Icons.check_circle, size: 13, color: Colors.white),
-                                label: const Text('Verify', style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF2D6A4F),
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                                  minimumSize: const Size(0, 32),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                  elevation: 0,
+              return Scrollbar(
+                controller: scrollController,
+                thumbVisibility: false,
+                trackVisibility: false,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(
+                    dragDevices: {
+                      PointerDeviceKind.touch,
+                      PointerDeviceKind.mouse,
+                    },
+                  ),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                        dataRowMinHeight: 60,
+                        dataRowMaxHeight: 80,
+                        columnSpacing: dynamicSpacing,
+                        columns: const [
+                          DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Weight (kg)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Post-Mortem\nFee', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Payment Method', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                          DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                        ],
+                        rows: requests.map((req) {
+                          final ref = _refNo(req);
+                          final weight = _carcassWeight(req);
+                          final fees = _calcFees(req);
+                          final postMortemFee = fees['post_mortem']!;
+                          final status = _paymentStatus(req);
+                          final method = _paymentMethod(req);
+
+                          return DataRow(cells: [
+                            DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
+                            DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                            DataCell(Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${req['animal_count'] ?? 1} head(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                Text('${req['livestock_type'] ?? ''}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                              ],
+                            )),
+                            DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
+                            DataCell(Text(weight > 0 ? '\u20b1${postMortemFee.toStringAsFixed(2)}' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                            DataCell(Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (method != '\u2014') ...[
+                                  Icon(
+                                    method == 'Cash' ? Icons.payments_outlined : (method == 'GCash' ? Icons.phone_android : Icons.credit_card),
+                                    size: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
+                                Text(method, style: TextStyle(fontSize: 12, color: Colors.grey.shade700)),
+                              ],
+                            )),
+                            DataCell(_buildStatusBadge(status)),
+                            DataCell(Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: () => _showReceiptDialog(req),
+                                  icon: const Icon(Icons.receipt_long, size: 14),
+                                  label: const Text('Details', style: TextStyle(fontSize: 11)),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF4A5568),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                                    minimumSize: const Size(0, 32),
+                                    side: BorderSide(color: Colors.grey.shade300),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ],
-                        )),
-                      ]);
-                    }).toList(),
+                                if (status == 'Awaiting Verification' || status == 'Cash on Pick-up') ...[
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    onPressed: () => _verifyAndConfirmPayment(req),
+                                    icon: const Icon(Icons.check_circle, size: 13, color: Colors.white),
+                                    label: Text(
+                                      status == 'Cash on Pick-up' ? 'Confirm Payment' : 'Verify',
+                                      style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2D6A4F),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      minimumSize: const Size(0, 32),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                      elevation: 0,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            )),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
           if (requests.isEmpty)
             const Padding(
@@ -831,36 +1198,98 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
-                      color: (fees['is_overdue'] == true) ? const Color(0xFFC53030) : const Color(0xFF2D3748),
+                      color: (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                          ? const Color(0xFFC53030)
+                          : const Color(0xFF2D3748),
                     ),
                   ),
                   Container(
                     margin: const EdgeInsets.only(top: 10, bottom: 4),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: (fees['is_overdue'] == true) ? const Color(0xFFFFF5F5) : const Color(0xFFFFFBEB),
+                      color: (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                          ? const Color(0xFFFFF5F5)
+                          : const Color(0xFFFFFBEB),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: (fees['is_overdue'] == true) ? const Color(0xFFFEB2B2) : const Color(0xFFFBD38D),
+                        color: (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                            ? const Color(0xFFFEB2B2)
+                            : const Color(0xFFFBD38D),
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
-                          (fees['is_overdue'] == true) ? Icons.error_outline : Icons.warning_amber_rounded,
-                          color: (fees['is_overdue'] == true) ? const Color(0xFFC53030) : const Color(0xFFC05621),
+                          (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                              ? Icons.error_outline
+                              : Icons.warning_amber_rounded,
+                          color: (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                              ? const Color(0xFFC53030)
+                              : const Color(0xFFC05621),
                           size: 18,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            (fees['is_overdue'] == true)
-                                ? 'PAYMENT OVERDUE: Due date expired. An automatic penalty of \u20b1100.00 has been added to the balance.'
-                                : 'NOTICE: Payment must be made immediately on or before 5:00 PM today. If the due date passes without payment, an automatic overdue penalty of \u20b1100.00 will be applied.',
+                            (fees['is_overdue'] == true && fees['is_cold_storage_overdue'] == true)
+                                ? 'PENALTIES INCURRED: 5:00 PM deadline expired. An automatic Overdue Payment Penalty (\u20b1100.00) and Cold Storage Penalty (\u20b1150.00) have been added to the balance.'
+                                : (fees['is_overdue'] == true)
+                                    ? 'PAYMENT OVERDUE: 5:00 PM due date expired. An automatic penalty of \u20b1100.00 has been added to the balance.'
+                                    : (fees['is_cold_storage_overdue'] == true)
+                                        ? 'COLD STORAGE OVERDUE: Meat was not picked up by 5:00 PM after collection notice. An automatic Cold Storage fee of \u20b1150.00 has been added to the balance.'
+                                        : isBarangay
+                                            ? 'REMINDER: Payment must be made on or before 5:00 PM today or an automatic \u20b1100.00 Overdue Payment penalty applies. Meat not picked up by 5:00 PM after collection notice incurs a \u20b1150.00 Cold Storage fee.'
+                                            : 'REMINDER: Payment must be made immediately on or before 5:00 PM today. If the due date passes without payment, an automatic overdue penalty of \u20b1100.00 will be applied.',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: (fees['is_overdue'] == true) ? const Color(0xFF9B2C2C) : const Color(0xFF975A16),
+                              color: (fees['is_overdue'] == true || fees['is_cold_storage_overdue'] == true)
+                                  ? const Color(0xFF9B2C2C)
+                                  : const Color(0xFF975A16),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else if (fees['is_cold_storage_overdue'] == true) ...[
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 4),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: (fees['cold_storage_unpaid_on_paid_order'] == true)
+                          ? const Color(0xFFFFF5F5)
+                          : const Color(0xFFF0FDF4),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: (fees['cold_storage_unpaid_on_paid_order'] == true)
+                            ? const Color(0xFFFEB2B2)
+                            : const Color(0xFF86EFAC),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          (fees['cold_storage_unpaid_on_paid_order'] == true)
+                              ? Icons.ac_unit
+                              : Icons.check_circle,
+                          color: (fees['cold_storage_unpaid_on_paid_order'] == true)
+                              ? const Color(0xFFC53030)
+                              : const Color(0xFF15803D),
+                          size: 18,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            (fees['cold_storage_unpaid_on_paid_order'] == true)
+                                ? 'COLD STORAGE PENALTY INCURRED (\u20b1150.00): Carcass was not collected by 5:00 PM after collection notice. Base slaughter fees were paid via ${method.toUpperCase()}, and an additional \u20b1150.00 Cold Storage fee is due upon pickup.'
+                                : 'COLD STORAGE FEE (\u20b1150.00): Settled and included in this receipt.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: (fees['cold_storage_unpaid_on_paid_order'] == true)
+                                  ? const Color(0xFF9B2C2C)
+                                  : const Color(0xFF166534),
                             ),
                           ),
                         ),
@@ -897,6 +1326,18 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     '${fees['additional_fee_label'] ?? 'Additional Surcharge'}:',
                     '\u20b1${((fees['additional_fee'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
                   ),
+                if (((fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _feeRow(
+                    'Overdue Payment Penalty (Past 5:00 PM):',
+                    '\u20b1${((fees['overdue_penalty'] as num?)?.toDouble() ?? 100.0).toStringAsFixed(2)}',
+                    bold: true,
+                  ),
+                if (((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _feeRow(
+                    'Cold Storage Penalty Fee (Unclaimed Past 5:00 PM):',
+                    '\u20b1${((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 150.0).toStringAsFixed(2)}',
+                    bold: true,
+                  ),
                 if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
                   _feeRow(
                     'Legal Finality / Penalty Fee (Delayed Operation):',
@@ -912,15 +1353,80 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 const SizedBox(height: 4),
                 _feeRow('TOTAL AMOUNT:', '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true, large: true),
                 const SizedBox(height: 12),
-                _feeRow('BALANCE:', status == 'Verified' ? '0' : '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
+                if (fees['cold_storage_unpaid_on_paid_order'] == true) ...[
+                  _feeRow('AMOUNT PAID (${method.toUpperCase()}):', '\u20b1${((fees['amount_paid'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
+                  _feeRow('BALANCE (COLD STORAGE FEE DUE AT PICKUP):', '\u20b1150.00', bold: true),
+                ] else ...[
+                  _feeRow('BALANCE:', status == 'Verified' ? '0' : '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
+                ],
                 const SizedBox(height: 12),
 
                 // Payment Details
                 if (status == 'Verified') ...[
                   Text('Payment Method: ${method.toUpperCase()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  const Text('Status: PAID', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  Text(
+                    (fees['cold_storage_unpaid_on_paid_order'] == true)
+                        ? 'Status: PAID (BASE FEES) • \u20b1150.00 COLD STORAGE FEE DUE AT PICKUP'
+                        : 'Status: PAID',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 8),
                   Text('Cashier: ${payment?['cashier_name'] ?? 'Admin'}', style: const TextStyle(fontSize: 13)),
+                  if (isBarangay) ...[
+                    const SizedBox(height: 14),
+                    Builder(
+                      builder: (_) {
+                        final authName = (req['authorized_person_name'] ?? '').toString().trim();
+                        final authContact = (req['authorized_person_contact'] ?? '').toString().trim();
+                        final authRel = (req['authorized_person_relationship'] ?? '').toString().trim();
+                        final authIdType = (req['authorized_person_id_type'] ?? '').toString().trim();
+                        final authIdNum = (req['authorized_person_id_num'] ?? '').toString().trim();
+                        final hasAuth = authName.isNotEmpty;
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0FDF4),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.verified_user, size: 16, color: Color(0xFF15803D)),
+                                  const SizedBox(width: 6),
+                                  const Expanded(
+                                    child: Text(
+                                      'MEAT PICKUP AUTHORIZATION: GRANTED',
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              if (hasAuth) ...[
+                                Text(
+                                  'Authorized Person for Pickup: $authName${authRel.isNotEmpty ? " ($authRel)" : ""}',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                                ),
+                                if (authContact.isNotEmpty)
+                                  Text('Contact: $authContact', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                                if (authIdType.isNotEmpty || authIdNum.isNotEmpty)
+                                  Text('Valid ID: $authIdType — $authIdNum', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                              ] else ...[
+                                Text(
+                                  'Authorized Person for Pickup: ${req['customer_name'] ?? 'Customer'} (Customer Direct)',
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ] else if (method != '—' && method.isNotEmpty) ...[
                   Container(
                     margin: const EdgeInsets.only(top: 8, bottom: 8),
@@ -1178,11 +1684,11 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       final fees = _PaymentCashieringPageState._calcFees(data);
       double total = fees['total']!;
 
-      // If already recorded in payments table, respect that stored total / balance
+      // If already recorded in payments table, use the larger of storedTotal and dynamically calculated total (so penalties incurred after 5:00 PM are included)
       final storedPay = data['payment'] as Map<String, dynamic>?;
       if (storedPay != null && storedPay['total_amount'] != null) {
         final storedTotal = double.tryParse(storedPay['total_amount'].toString());
-        if (storedTotal != null && storedTotal > 0) {
+        if (storedTotal != null && storedTotal > total) {
           total = storedTotal;
           fees['total'] = total;
         }

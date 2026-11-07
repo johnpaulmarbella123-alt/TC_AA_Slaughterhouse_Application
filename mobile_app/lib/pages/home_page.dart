@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../screen/requests.dart';
 import '../screen/notify.dart';
 import '../screen/payment.dart';
@@ -511,7 +512,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 _serviceCard("assets/images/Goat.jpg", "Goat", "Goat Slaughter", "goat"),
                 _serviceCard("assets/images/Sheep.jpg", "Sheep", "Sheep Slaughter", "sheep"),
                 _serviceCard("assets/images/Cara.jpg", "Carabao", "Carabao Slaughter", "carabao"),
-                _serviceCard("assets/images/poultry.jpg", "Poultry", "Poultry Fowl", "poultry"),
               ],
             ),
           ),
@@ -591,9 +591,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
             ),
             const SizedBox(height: 10),
-            _contactCard(Icons.phone, "Phone", "+63 917 123 4567"),
+            _contactCard(
+              Icons.facebook,
+              "Facebook",
+              "Tabaco Veterinary",
+              onTap: _openFacebookProfile,
+            ),
             const SizedBox(height: 8),
-            _contactCard(Icons.email_outlined, "Email", "tabacocityslaughterhouse@gmail.com"),
+            _contactCard(
+              Icons.email_outlined,
+              "Email",
+              "veterinaryofficeabottior@gmail.com",
+              onTap: _openContactEmail,
+            ),
 
             const SizedBox(height: 16),
 
@@ -1276,31 +1286,96 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _contactCard(IconData icon, String title, String value) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black12),
-        borderRadius: BorderRadius.circular(10),
+  Future<void> _openFacebookProfile() async {
+    final fbWebUri = Uri.parse('https://www.facebook.com/profile.php?id=61587119777420');
+    try {
+      final launched = await launchUrl(
+        fbWebUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        await launchUrl(fbWebUri, mode: LaunchMode.platformDefault);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(fbWebUri, mode: LaunchMode.platformDefault);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _openContactEmail() async {
+    final emailUri = Uri(
+      scheme: 'mailto',
+      path: 'veterinaryofficeabottior@gmail.com',
+    );
+    try {
+      final launched = await launchUrl(
+        emailUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched) {
+        await launchUrl(emailUri, mode: LaunchMode.platformDefault);
+      }
+    } catch (_) {
+      try {
+        await launchUrl(emailUri, mode: LaunchMode.platformDefault);
+      } catch (_) {}
+    }
+  }
+
+  Widget _contactCard(
+    IconData icon,
+    String title,
+    String value, {
+    VoidCallback? onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
         color: Colors.white,
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xFF008000), size: 22),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontSize: 11, color: Colors.black54)),
-              Text(value,
-                  style: const TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF008000),
-                      fontWeight: FontWeight.bold)),
-            ],
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.black12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, color: const Color(0xFF008000), size: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(fontSize: 11, color: Colors.black54),
+                      ),
+                      Text(
+                        value,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF008000),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (onTap != null)
+                  const Icon(
+                    Icons.open_in_new,
+                    size: 16,
+                    color: Color(0xFF008000),
+                  ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
+import '../services/app_settings_service.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
   const DocumentVerificationPage({super.key});
@@ -69,6 +71,10 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
   Future<void> _loadRequests({bool silent = false}) async {
     if (!silent && mounted) setState(() => _isLoading = true);
     try {
+      if (AppSettingsService.instance.hasActiveStaffSession ||
+          supabase.auth.currentSession == null) {
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      }
       final all = await supabase.from('requests').select().order('created_at', ascending: false);
       final approved = all.where((r) => r['status'] == 'approved').toList();
       final verified = all.where((r) => r['status'] == 'doc_verified').toList();
@@ -237,36 +243,49 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         const SizedBox(height: 8),
         requests.isEmpty
           ? Padding(padding: const EdgeInsets.all(32), child: Center(child: Column(children: [Icon(Icons.inbox_outlined, size: 40, color: Colors.grey.shade300), const SizedBox(height: 8), Text('No requests pending document verification', style: TextStyle(color: Colors.grey.shade400, fontSize: 13))])))
-          : Scrollbar(
-              controller: scrollCtrl, thumbVisibility: true, trackVisibility: true,
-              child: SingleChildScrollView(
-                controller: scrollCtrl, scrollDirection: Axis.horizontal,
-                child: Padding(padding: const EdgeInsets.only(bottom: 16), child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                  headingTextStyle: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF4A5568), fontSize: 12),
-                  dataTextStyle: const TextStyle(color: Color(0xFF2D3748), fontSize: 12),
-                  columnSpacing: 30, horizontalMargin: 20,
-                  columns: const [
-                    DataColumn(label: Text('Reference #')), DataColumn(label: Text('Customer')),
-                    DataColumn(label: Text('Livestock')), DataColumn(label: Text('Markings')),
-                    DataColumn(label: Text('Required Documents')), DataColumn(label: Text('Schedule Date')),
-                    DataColumn(label: Text('Actions')),
-                  ],
-                  rows: requests.map((req) => DataRow(cells: [
-                    DataCell(Text(_refNo(req), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2D6A4F)))),
-                    DataCell(Text(req['customer_name'] ?? '—')),
-                    DataCell(Text('${(req['animal_count'] ?? 0)} head(s)\n${(req['livestock_type'] ?? '')}')),
-                    DataCell(Text(req['marking'] ?? '—')),
-                    DataCell(SizedBox(width: 250, child: _buildDocBadges(req, isBarangay))),
-                    DataCell(SizedBox(width: 100, child: Text(_formatDate(req['preferred_date'])))),
-                    DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-                      _actionBtn(label: 'Verify', color: const Color(0xFF276749), bgColor: const Color(0xFFF0FFF4), borderColor: const Color(0xFF9AE6B4), onTap: () => _openVerifyDialog(req)),
-                      const SizedBox(width: 6),
-                      _actionBtn(label: 'Reject', color: const Color(0xFFE53E3E), bgColor: const Color(0xFFFFF5F5), borderColor: const Color(0xFFFEB2B2), onTap: () => _rejectRequest(req)),
-                    ])),
-                  ])).toList(),
-                )),
-              ),
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                final availableWidth = constraints.maxWidth;
+                final tableWidth = math.max(1000.0, availableWidth);
+                final colSpacing = (availableWidth > 1400)
+                    ? 36.0
+                    : (availableWidth > 1100 ? 26.0 : 18.0);
+
+                return Scrollbar(
+                  controller: scrollCtrl, thumbVisibility: true, trackVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: scrollCtrl, scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: Padding(padding: const EdgeInsets.only(bottom: 16), child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                        headingTextStyle: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF4A5568), fontSize: 12),
+                        dataTextStyle: const TextStyle(color: Color(0xFF2D3748), fontSize: 12),
+                        columnSpacing: colSpacing, horizontalMargin: 20,
+                        columns: const [
+                          DataColumn(label: Text('Reference #')), DataColumn(label: Text('Customer')),
+                          DataColumn(label: Text('Livestock')), DataColumn(label: Text('Markings')),
+                          DataColumn(label: Text('Required Documents')), DataColumn(label: Text('Schedule Date')),
+                          DataColumn(label: Text('Actions')),
+                        ],
+                        rows: requests.map((req) => DataRow(cells: [
+                          DataCell(Text(_refNo(req), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2D6A4F)))),
+                          DataCell(Text(req['customer_name'] ?? '—')),
+                          DataCell(Text('${(req['animal_count'] ?? 0)} head(s)\n${(req['livestock_type'] ?? '')}')),
+                          DataCell(Text(req['marking'] ?? '—')),
+                          DataCell(SizedBox(width: 250, child: _buildDocBadges(req, isBarangay))),
+                          DataCell(SizedBox(width: 100, child: Text(_formatDate(req['preferred_date'])))),
+                          DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+                            _actionBtn(label: 'Verify', color: const Color(0xFF276749), bgColor: const Color(0xFFF0FFF4), borderColor: const Color(0xFF9AE6B4), onTap: () => _openVerifyDialog(req)),
+                            const SizedBox(width: 6),
+                            _actionBtn(label: 'Reject', color: const Color(0xFFE53E3E), bgColor: const Color(0xFFFFF5F5), borderColor: const Color(0xFFFEB2B2), onTap: () => _rejectRequest(req)),
+                          ])),
+                        ])).toList(),
+                      )),
+                    ),
+                  ),
+                );
+              },
             ),
       ]),
     );
@@ -562,14 +581,23 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
     try {
       final req = widget.request;
       final refNo = 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
+      final notes = _notesCtrl.text.trim();
       await widget.supabase.from('requests').update({'status': 'doc_verified'}).eq('id', req['id']);
       final userId = req['user_id'];
+      final baseMsg =
+          'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.';
+      final fullMsg = notes.isNotEmpty ? '$baseMsg\nNote: $notes' : baseMsg;
       await NotificationService.sendNotificationSafely(
         widget.supabase,
         userId: userId,
         title: 'Documents Verified',
-        message: 'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.',
+        message: fullMsg,
         type: 'doc_verified',
+        referenceNo: refNo,
+        data: {
+          'request_id': req['id'],
+          if (notes.isNotEmpty) 'verification_notes': notes,
+        },
       );
       if (mounted) {
         Navigator.pop(context);

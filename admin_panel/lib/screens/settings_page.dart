@@ -453,7 +453,6 @@ class _SettingsPageState extends State<SettingsPage>
       {'key': 'carabao', 'label': 'Carabao (Water Buffalo)', 'icon': '🐃'},
       {'key': 'goat', 'label': 'Goat (Caprine)', 'icon': '🐐'},
       {'key': 'sheep', 'label': 'Sheep (Ovine)', 'icon': '🐑'},
-      {'key': 'poultry', 'label': 'Poultry (Fowl)', 'icon': '🐔'},
     ];
 
     // Compute preview
@@ -1761,17 +1760,6 @@ class _SettingsPageState extends State<SettingsPage>
                           decoration: const InputDecoration(
                             labelText: 'Max Goats / Day',
                             prefixText: '🐐 ',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextField(
-                          controller: _maxPoultryCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Max Poultry / Day',
-                            prefixText: '🐔 ',
                           ),
                         ),
                       ),

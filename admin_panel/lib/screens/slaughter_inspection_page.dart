@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -79,6 +80,10 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   Future<void> _loadRequests({bool silent = false}) async {
     if (!silent) setState(() => _isLoading = true);
     try {
+      if (AppSettingsService.instance.hasActiveStaffSession ||
+          supabase.auth.currentSession == null) {
+        await AppSettingsService.instance.ensureAdminAuthSession();
+      }
       // Fetch requests that are past Document Verification (doc_verified) or in slaughter phases.
       final data = await supabase
           .from('requests')
@@ -395,27 +400,35 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
               ],
             ),
           ),
-          Scrollbar(
-            controller: scrollController,
-            thumbVisibility: false,
-            trackVisibility: false,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(
-                dragDevices: {
-                  PointerDeviceKind.touch,
-                  PointerDeviceKind.mouse,
-                },
-              ),
-              child: SingleChildScrollView(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final availableWidth = constraints.maxWidth;
+              final tableWidth = math.max(1150.0, availableWidth);
+              final colSpacing = (availableWidth > 1400)
+                  ? 34.0
+                  : (availableWidth > 1100 ? 24.0 : 16.0);
+
+              return Scrollbar(
                 controller: scrollController,
-                scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 1200),
-                child: DataTable(
-                headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                dataRowMinHeight: 60,
-                dataRowMaxHeight: 80,
-                columnSpacing: 30,
+                thumbVisibility: false,
+                trackVisibility: false,
+                child: ScrollConfiguration(
+                  behavior: ScrollConfiguration.of(context).copyWith(
+                    dragDevices: {
+                      PointerDeviceKind.touch,
+                      PointerDeviceKind.mouse,
+                    },
+                  ),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: tableWidth),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
+                        dataRowMinHeight: 60,
+                        dataRowMaxHeight: 80,
+                        columnSpacing: colSpacing,
                 columns: const [
                   DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                   DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -463,7 +476,12 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(req['customer_name']?.toString() ?? '—', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                        Text('09xx', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                        _buildSpecialInstructionBadge(
+                          context,
+                          req['special_instruction']?.toString(),
+                          customerName: req['customer_name']?.toString(),
+                          refNo: ref,
+                        ),
                       ],
                     )),
                     DataCell(Column(
@@ -888,6 +906,119 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
               ),
             ),
             ),
+          );
+        },
+      ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpecialInstructionBadge(BuildContext context, String? instruction, {String? customerName, String? refNo}) {
+    if (instruction == null || instruction.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final text = instruction.trim();
+
+    return Tooltip(
+      message: 'Customer Special Note: $text\n(Click to view details)',
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      textStyle: const TextStyle(color: Colors.white, fontSize: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: InkWell(
+        onTap: () => _showSpecialInstructionDialog(context, text, customerName: customerName, refNo: refNo),
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          margin: const EdgeInsets.only(top: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF3C7),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.6)),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.assignment_outlined, size: 12, color: Color(0xFFB45309)),
+              SizedBox(width: 4),
+              Text(
+                'Special Note',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFB45309),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showSpecialInstructionDialog(BuildContext context, String text, {String? customerName, String? refNo}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.assignment_outlined, color: Color(0xFFB45309), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text('Customer Special Instructions', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (refNo != null || customerName != null) ...[
+              Row(
+                children: [
+                  if (refNo != null)
+                    Text(refNo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D6A4F))),
+                  if (refNo != null && customerName != null)
+                    const Text(' • ', style: TextStyle(color: Colors.grey)),
+                  if (customerName != null)
+                    Text(customerName, style: const TextStyle(fontSize: 13, color: Color(0xFF4A5568), fontWeight: FontWeight.w500)),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: Text(
+                text,
+                style: const TextStyle(fontSize: 13.5, color: Color(0xFF78350F), height: 1.4),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2D6A4F),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Close'),
           ),
         ],
       ),
@@ -1803,6 +1934,50 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                 ],
               ),
               const SizedBox(height: 20),
+              
+              if ((widget.request['special_instruction'] ?? '').toString().trim().isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.speaker_notes, color: Color(0xFFB45309), size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Customer Special Instructions:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              (widget.request['special_instruction'] ?? '').toString().trim(),
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Color(0xFF78350F),
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               
               const Text('Ante-Mortem Result', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
               const SizedBox(height: 6),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Dialog shown when the user taps "View Options" on
 /// `anti_mortem_failed` or `operation_failed` notifications.
@@ -962,19 +963,47 @@ class _OperationFailedSheet extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           _optionButton(
-            icon: Icons.support_agent,
-            label: "Contact Administrator",
-            subtitle: "tabacocityslaughterhouse@gmail.com",
-            color: const Color(0xFF185FA5),
-            onTap: () {
+            icon: Icons.facebook,
+            label: "Facebook — Tabaco Veterinary",
+            subtitle: "Visit official Facebook page",
+            color: const Color(0xFF1877F2),
+            onTap: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      "Contact: tabacocityslaughterhouse@gmail.com\nPhone: +63 917 123 4567"),
-                  duration: Duration(seconds: 4),
-                ),
+              final fbUri = Uri.parse(
+                'https://www.facebook.com/profile.php?id=61587119777420',
               );
+              try {
+                final ok = await launchUrl(
+                  fbUri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!ok) {
+                  await launchUrl(fbUri, mode: LaunchMode.platformDefault);
+                }
+              } catch (_) {}
+            },
+          ),
+          const SizedBox(height: 10),
+          _optionButton(
+            icon: Icons.email_outlined,
+            label: "Email Administrator",
+            subtitle: "veterinaryofficeabottior@gmail.com",
+            color: const Color(0xFF185FA5),
+            onTap: () async {
+              Navigator.pop(context);
+              final emailUri = Uri(
+                scheme: 'mailto',
+                path: 'veterinaryofficeabottior@gmail.com',
+              );
+              try {
+                final ok = await launchUrl(
+                  emailUri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (!ok) {
+                  await launchUrl(emailUri, mode: LaunchMode.platformDefault);
+                }
+              } catch (_) {}
             },
           ),
         ],
