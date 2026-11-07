@@ -715,8 +715,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text("AMOUNT PAID ($paymentMethodLabel):",
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        Expanded(
+                          child: Text("AMOUNT PAID ($paymentMethodLabel):",
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        ),
+                        const SizedBox(width: 8),
                         Text("\u20b1${amountPaid.toStringAsFixed(2)}",
                             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
                       ],
@@ -892,9 +895,13 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Expanded(
+              flex: 3,
+              child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
             const SizedBox(width: 8),
             Flexible(
+              flex: 2,
               child: Text(
                 value,
                 textAlign: TextAlign.end,

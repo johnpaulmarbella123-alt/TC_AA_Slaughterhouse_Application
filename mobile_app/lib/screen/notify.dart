@@ -792,9 +792,12 @@ class _NotifyPageState extends State<NotifyPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Reference Number & Severity Badge Row
-                          Row(
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              if (refNo != null) ...[
+                              if (refNo != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                   decoration: BoxDecoration(
@@ -811,8 +814,6 @@ class _NotifyPageState extends State<NotifyPage> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                              ],
                               if (severity != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -839,7 +840,10 @@ class _NotifyPageState extends State<NotifyPage> {
 
                           // Resolution Stage / Status
                           if (status != null && status.isNotEmpty) ...[
-                            Row(
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 const Text('Resolution Stage: ',
                                     style: TextStyle(

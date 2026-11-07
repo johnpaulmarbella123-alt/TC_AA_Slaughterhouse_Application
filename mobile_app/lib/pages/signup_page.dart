@@ -76,8 +76,9 @@ class _SignupScreenState
         }
       }
 
-      // Send OTP via Supabase
-      await _authService.sendOtp(identifier);
+      // Send OTP via Supabase (with Defense-Ready Smart OTP Fallback)
+      final otpResult = await _authService.sendOtp(identifier);
+      final simulatedOtp = otpResult['simulated'] == true ? otpResult['otp']?.toString() : null;
 
       if (mounted) {
         Navigator.push(
@@ -88,6 +89,7 @@ class _SignupScreenState
               password: password,
               username: name,
               address: address,
+              simulatedOtp: simulatedOtp,
             ),
           ),
         );
@@ -235,7 +237,7 @@ class _SignupScreenState
                       ),
                     ),
 
-                    const SizedBox(height: 100),
+                    const SizedBox(height: 36),
 
                     const Center(
                       child: Text(

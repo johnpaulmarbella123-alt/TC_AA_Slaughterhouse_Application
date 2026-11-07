@@ -1569,8 +1569,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
-          Text(amount, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: large ? 14 : 13,
+                    fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                    color: color)),
+          ),
+          const SizedBox(width: 8),
+          Text(amount,
+              style: TextStyle(
+                  fontSize: large ? 14 : 13,
+                  fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                  color: color)),
         ],
       ),
     );

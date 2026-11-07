@@ -17,8 +17,20 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
           // ── HEADER ──────────────────────────────────────────
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 70, 16, 20),
-            color: const Color(0xFFC8E6C9),
+            padding: const EdgeInsets.fromLTRB(16, 56, 16, 18),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC8E6C9),
+              border: Border(
+                bottom: BorderSide(color: Colors.green.shade200, width: 1),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
             child: Row(
               children: [
                 IconButton(
@@ -140,7 +152,11 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
                   const SizedBox(height: 4),
                   const Text(
                     "Tap any category below to inspect statutory violations and report directly:",
-                    style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF334155),
+                    ),
                   ),
                   const SizedBox(height: 12),
 
