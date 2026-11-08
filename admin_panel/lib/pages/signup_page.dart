@@ -107,7 +107,7 @@ class _SignupPageState extends State<SignupPage> {
       final prefs = await SharedPreferences.getInstance();
       final defaultFullName = email.split('@').first.toUpperCase();
 
-      // Sign up the primary administrator
+      // Sign up administrator in Supabase Auth
       final response = await _supabase.auth.signUp(
         email: email,
         password: password,
@@ -119,9 +119,8 @@ class _SignupPageState extends State<SignupPage> {
 
       if (mounted && response.user != null) {
         final user = response.user!;
-        final bool isEmailConfirmed = response.session != null || user.emailConfirmedAt != null;
 
-        // Ensure profile in public.profiles table has role 'admin'
+        // 1. Ensure profile in public.profiles table has role 'admin'
         try {
           await _supabase.from('profiles').upsert({
             'id': user.id,
@@ -131,14 +130,11 @@ class _SignupPageState extends State<SignupPage> {
           });
         } catch (_) {}
 
-        // If email confirmation is required by Supabase, prompt the admin to check inbox
-        if (!isEmailConfirmed) {
-          _showVerificationLinkSentDialog(email);
-          return;
-        }
-
-        // 1. Mark admin as permanently provisioned in DB and local prefs
+        // 2. Mark admin as permanently provisioned in DB and local prefs
         await prefs.setBool('admin_account_provisioned', true);
+        await prefs.setString('admin_auth_email', email);
+        await prefs.setString('admin_auth_password', password);
+
         try {
           await _supabase.from('system_settings').upsert({
             'key': 'admin_account_provisioned',
@@ -151,7 +147,7 @@ class _SignupPageState extends State<SignupPage> {
           });
         } catch (_) {}
 
-        // 2. Sync with AppSettingsService and add to Staff Accounts list
+        // 3. Sync with AppSettingsService and add to Staff Accounts list
         AppSettingsService.instance.staffAccounts.removeWhere(
           (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
         );
@@ -174,17 +170,64 @@ class _SignupPageState extends State<SignupPage> {
 
         AppSettingsService.instance.syncWithAuthUser(user);
 
+        // Instant Demo Activation: Grant immediate dashboard entry for defense
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Administrator account registered successfully! Welcome aboard.'),
-              backgroundColor: Color(0xFF2D6A4F),
+            SnackBar(
+              content: Text('Demo Administrator account ($email) registered and activated in Supabase!'),
+              backgroundColor: const Color(0xFF2D6A4F),
+              duration: const Duration(seconds: 3),
             ),
           );
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
       }
     } on AuthException catch (error) {
+      final msg = error.message.toLowerCase();
+      // If account already exists in Supabase Auth, sign in to link & activate
+      if (msg.contains('already registered') || msg.contains('already exists')) {
+        try {
+          final loginRes = await _supabase.auth.signInWithPassword(email: email, password: password);
+          if (loginRes.user != null) {
+            final user = loginRes.user!;
+            final defaultFullName = email.split('@').first.toUpperCase();
+            final prefs = await SharedPreferences.getInstance();
+
+            try {
+              await _supabase.from('profiles').upsert({
+                'id': user.id,
+                'full_name': defaultFullName,
+                'role': 'admin',
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+              await _supabase.from('system_settings').upsert({
+                'key': 'admin_account_provisioned',
+                'value': {
+                  'id': user.id,
+                  'email': email,
+                  'role': 'admin',
+                  'created_at': DateTime.now().toIso8601String(),
+                },
+              });
+            } catch (_) {}
+
+            await prefs.setBool('admin_account_provisioned', true);
+            await prefs.setString('admin_auth_email', email);
+            await prefs.setString('admin_auth_password', password);
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Administrator account verified and activated! Welcome aboard.'),
+                  backgroundColor: Color(0xFF2D6A4F),
+                ),
+              );
+              Navigator.pushReplacementNamed(context, '/dashboard');
+              return;
+            }
+          }
+        } catch (_) {}
+      }
       _showError(error.message);
     } catch (error) {
       _showError('An unexpected error occurred during registration.');
@@ -193,94 +236,6 @@ class _SignupPageState extends State<SignupPage> {
         setState(() => _isLoading = false);
       }
     }
-  }
-
-  void _showVerificationLinkSentDialog(String email) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D6A4F).withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.mark_email_read_outlined,
-                  color: Color(0xFF2D6A4F), size: 28),
-            ),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Verification Link Sent',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'A verification email has been dispatched by Supabase to:',
-              style: TextStyle(fontSize: 13.5, color: Colors.black87),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFCBD5E1)),
-              ),
-              child: Text(
-                email,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: Color(0xFF0F172A),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.info_outline, size: 16, color: Color(0xFF2563EB)),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Please check your inbox (and spam folder) and click the confirmation link to activate your administrator account before logging in.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.35),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2D6A4F),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            ),
-            onPressed: () {
-              Navigator.pop(ctx);
-              Navigator.pushReplacementNamed(context, '/login');
-            },
-            child: const Text('Proceed to Login',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showError(String message) {

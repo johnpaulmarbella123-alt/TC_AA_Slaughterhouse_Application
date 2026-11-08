@@ -111,6 +111,30 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
 
+        // Strictly enforce real email confirmation for Clerk and Inspector accounts
+        if (actualRole != 'Admin') {
+          try {
+            final authRes = await _supabase.auth.signInWithPassword(
+              email: email,
+              password: password,
+            );
+            if (authRes.user != null) {
+              final isConfirmed = authRes.session != null || authRes.user!.emailConfirmedAt != null;
+              if (!isConfirmed) {
+                await _supabase.auth.signOut();
+                _showError('Access denied: Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
+                return;
+              }
+            }
+          } on AuthException catch (authErr) {
+            final msg = authErr.message.toLowerCase();
+            if (msg.contains('email not confirmed')) {
+              _showError('Access denied: Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
+              return;
+            }
+          } catch (_) {}
+        }
+
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 

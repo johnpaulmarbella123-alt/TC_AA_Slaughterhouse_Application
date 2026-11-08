@@ -1292,7 +1292,7 @@ class _SettingsPageState extends State<SettingsPage>
                   setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Verification link sent to $email! Provisioned $name as $selectedRole in Supabase.'),
+                      content: Text('Real verification link sent to $email! $name ($selectedRole) must confirm in their inbox before logging in.'),
                       backgroundColor: const Color(0xFF2D6A4F),
                       duration: const Duration(seconds: 4),
                       behavior: SnackBarBehavior.floating,
