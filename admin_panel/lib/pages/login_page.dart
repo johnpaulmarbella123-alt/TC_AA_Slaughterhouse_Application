@@ -20,12 +20,21 @@ class _LoginPageState extends State<LoginPage> {
   bool _keepMeLoggedIn = false;
   bool _isAdminProvisioned = true;
   String _selectedRolePortal = 'Admin'; // 'Admin', 'Clerk', or 'Inspector'
+  String? _errorMessage;
   final _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
     _checkAdminProvisioned();
+    _usernameController.addListener(_clearErrorOnType);
+    _passwordController.addListener(_clearErrorOnType);
+  }
+
+  void _clearErrorOnType() {
+    if (_errorMessage != null) {
+      setState(() => _errorMessage = null);
+    }
   }
 
   Future<void> _checkAdminProvisioned() async {
@@ -44,6 +53,8 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    _usernameController.removeListener(_clearErrorOnType);
+    _passwordController.removeListener(_clearErrorOnType);
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -59,11 +70,14 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      _showError('Please enter email/username and password');
+      _showError('Please enter both email/username and password.');
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
       // 1. Load latest staff accounts & roles from Supabase
@@ -87,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
         final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
         if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
           _showError(
-            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+            'This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
           );
           return;
         }
@@ -107,7 +121,7 @@ class _LoginPageState extends State<LoginPage> {
         }
 
         if (!passOk) {
-          _showError('Invalid email or password.');
+          _showError('The email address or password you entered is incorrect. Please check your credentials and try again.');
           return;
         }
 
@@ -254,14 +268,14 @@ class _LoginPageState extends State<LoginPage> {
     } on AuthException catch (error) {
       final msg = error.message.toLowerCase();
       if (msg.contains('email not confirmed')) {
-        _showError('Email not verified. Please check your inbox and click the confirmation link sent by Supabase.');
-      } else if (msg.contains('invalid login credentials')) {
-        _showError('Invalid email or password. Please verify your credentials or ensure your email has been confirmed.');
+        _showError('Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
+      } else if (msg.contains('invalid login credentials') || msg.contains('invalid') || msg.contains('incorrect')) {
+        _showError('The email address or password you entered is incorrect. Please check your credentials and try again.');
       } else {
         _showError(error.message);
       }
     } catch (error) {
-      _showError('An unexpected error occurred.');
+      _showError('An unexpected authentication error occurred. Please try again.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -270,8 +284,89 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    if (mounted) {
+      setState(() => _errorMessage = message);
+    }
+  }
+
+  Widget _buildErrorBanner() {
+    if (_errorMessage == null) return const SizedBox.shrink();
+
+    final isWrongCreds = _errorMessage!.toLowerCase().contains('invalid') ||
+        _errorMessage!.toLowerCase().contains('incorrect') ||
+        _errorMessage!.toLowerCase().contains('not found');
+
+    final String title = isWrongCreds
+        ? 'Incorrect Email or Password'
+        : (_errorMessage!.toLowerCase().contains('verified')
+            ? 'Email Verification Required'
+            : 'Access Notice');
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF7F1D1D).withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFCA5A5), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 2),
+            child: Icon(
+              Icons.error_outline_rounded,
+              color: Color(0xFFFCA5A5),
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.95),
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: () => setState(() => _errorMessage = null),
+            borderRadius: BorderRadius.circular(12),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close, color: Colors.white70, size: 16),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -422,7 +517,10 @@ class _LoginPageState extends State<LoginPage> {
                   final isSelected = _selectedRolePortal == role;
                   return Expanded(
                     child: GestureDetector(
-                      onTap: () => setState(() => _selectedRolePortal = role),
+                      onTap: () => setState(() {
+                        _selectedRolePortal = role;
+                        _errorMessage = null;
+                      }),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
                         padding: const EdgeInsets.symmetric(vertical: 9),
@@ -456,6 +554,7 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 18),
+            _buildErrorBanner(),
             _buildTextField(
               controller: _usernameController,
               label: 'Email / Username',
