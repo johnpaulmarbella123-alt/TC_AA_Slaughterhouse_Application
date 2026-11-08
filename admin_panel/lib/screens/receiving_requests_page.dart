@@ -517,6 +517,185 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   }
 
   // ════════════════════════════════════════════
+  //  UPDATE APPROVED REQUEST
+  // ════════════════════════════════════════════
+  Future<void> _showUpdateRequestDialog(Map<String, dynamic> request) async {
+    final refNo = _buildRefNo(request);
+    final customerName = (request['customer_name'] ?? 'Customer').toString();
+    final currentMarking = (request['marking'] ?? request['customer_marking'] ?? '').toString();
+    final currentCount = (request['animal_count'] ?? 1).toString();
+    final currentInstruction = (request['special_instruction'] ?? '').toString();
+
+    DateTime selectedDate;
+    try {
+      selectedDate = request['preferred_date'] != null
+          ? DateTime.parse(request['preferred_date'].toString())
+          : DateTime.now();
+    } catch (_) {
+      selectedDate = DateTime.now();
+    }
+
+    final markingCtrl = TextEditingController(text: currentMarking);
+    final countCtrl = TextEditingController(text: currentCount);
+    final instructionCtrl = TextEditingController(text: currentInstruction);
+    final dateCtrl = TextEditingController(text: DateFormat('yyyy-MM-dd').format(selectedDate));
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.edit_note, color: Color(0xFF2D6A4F), size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Update Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    Text('Ref # $refNo • $customerName', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: markingCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Marking Tag / Pen',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.tag),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: countCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Head Count',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.numbers),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: dateCtrl,
+                    readOnly: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Scheduled Date',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.calendar_today),
+                    ),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2035),
+                      );
+                      if (picked != null) {
+                        selectedDate = picked;
+                        setDialogState(() {
+                          dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: instructionCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Special Instructions',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.assignment_outlined),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D6A4F),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (updated != true) return;
+
+    try {
+      final newCount = int.tryParse(countCtrl.text.trim()) ?? (request['animal_count'] ?? 1);
+      final newMarking = markingCtrl.text.trim().toUpperCase();
+      final newDate = dateCtrl.text.trim();
+      final newInstruction = instructionCtrl.text.trim();
+
+      await supabase.from('requests').update({
+        'marking': newMarking,
+        'animal_count': newCount,
+        'preferred_date': newDate,
+        'special_instruction': newInstruction,
+      }).eq('id', request['id']);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Text('Ref # $refNo updated successfully!'),
+              ],
+            ),
+            backgroundColor: const Color(0xFF2D6A4F),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+      _loadRequests(silent: true);
+    } catch (e) {
+      debugPrint('Error updating request: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error updating request: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════
   @override
@@ -803,9 +982,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                                   DataCell(Text(_formatDate(req['preferred_date']))),
                                   DataCell(
                                     OutlinedButton(
-                                      onPressed: () {
-                                        // TODO: Update entry
-                                      },
+                                      onPressed: () => _showUpdateRequestDialog(req),
                                       style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                         side: BorderSide(color: Colors.grey.shade300),

@@ -1,0 +1,14 @@
+{
+  "name": "tc-aa-slaughterhouse-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tabaco City AA Slaughterhouse Management System",
+  "scripts": {
+    "dev": "npm run dev:admin",
+    "start": "npm run dev:admin",
+    "dev:admin": "cd admin_panel && flutter run -d chrome",
+    "dev:mobile": "cd mobile_app && flutter run",
+    "analyze": "cd admin_panel && flutter analyze --no-pub",
+    "build:admin": "cd admin_panel && flutter build web"
+  }
+}

@@ -31,6 +31,7 @@ dev_dependencies:
 
 dependency_overrides:
   image: 4.10.1
+  objective_c: 9.1.0
 
 flutter:
   uses-material-design: true

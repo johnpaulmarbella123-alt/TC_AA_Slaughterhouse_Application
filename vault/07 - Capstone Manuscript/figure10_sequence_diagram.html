@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Figure 10: End-to-End Sequence Diagram (Solid White Background)</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      padding: 40px;
+      background-color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .toolbar {
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      background-color: #ffffff;
+      color: #0f172a;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: all 0.2s;
+    }
+    button:hover {
+      background-color: #0f172a;
+      color: #ffffff;
+    }
+    /* Guaranteed solid white background container with no transparency */
+    #export-card {
+      background-color: #ffffff !important;
+      padding: 40px;
+      border: 2px solid #000000;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+      max-width: 1300px;
+      width: 100%;
+    }
+    h2 {
+      text-align: center;
+      margin: 0 0 24px 0;
+      color: #000000;
+      font-size: 20px;
+    }
+    .mermaid {
+      background-color: #ffffff !important;
+      display: flex;
+      justify-content: center;
+    }
+    .mermaid svg {
+      background-color: #ffffff !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <button onclick="downloadSVG()">📥 Download Clean SVG (Solid White)</button>
+    <button onclick="copyMermaid()">📋 Copy Mermaid Code</button>
+  </div>
+
+  <div id="export-card">
+    <h2>Figure 10. End-to-End Sequence Diagram Across All Actors</h2>
+    <div class="mermaid" id="diagram">
+sequenceDiagram
+    autonumber
+    actor Customer as 👤 Customer
+    actor Staff as 📋💵 Receiving Clerk & Cashier
+    actor Inspector as 🩺 Meat Inspector
+    participant Mobile as 📱 Mobile App
+    participant Admin as 💻 Admin Panel
+    participant DB as 🗄️ PostgreSQL DB
+    participant Storage as 📦 Storage Bucket
+    participant Edge as ⚡ Edge Function
+    participant PayMongo as 💳 PayMongo API
+
+    %% 1. Intake Booking
+    Customer->>Mobile: Fill slaughter intake details & attach permits
+    Mobile->>Storage: Upload VHC & Shipping Permits
+    Storage-->>Mobile: Return document URLs
+    Mobile->>DB: INSERT INTO requests (status='pending')
+    DB-->>Admin: Broadcast new request alert
+
+    %% 2. Intake Approval & Verification
+    Staff->>Admin: Review booking & allocate holding pen
+    Staff->>Admin: Click "Approve Request"
+    Admin->>DB: UPDATE requests SET status='approved'
+    DB-->>Mobile: Notification: "Schedule Approved"
+    
+    Staff->>Admin: Examine physical animal & permits at gate
+    Staff->>Admin: Click "Verify Documents"
+    Admin->>DB: UPDATE requests SET status='doc_verified'
+    Admin->>DB: INSERT INTO slaughter_inspection (request_id, process_stage='Lairage')
+
+    %% 3. Ante-Mortem Inspection
+    Inspector->>Admin: Conduct corral clinical exam
+    alt Ante-Mortem Failed
+        Inspector->>Admin: Mark "Failed" & enter clinical diagnosis
+        Admin->>DB: UPDATE requests SET status='anti_mortem_failed'
+        Admin->>DB: UPDATE slaughter_inspection SET anti_mortem='Failed'
+        DB-->>Mobile: Alert: "Ante-Mortem Failed - View Condemnation Slip"
+    else Ante-Mortem Passed
+        Inspector->>Admin: Mark "Passed" -> Advance to Slaughter Line
+        Admin->>DB: UPDATE requests SET status='slaughter_started'
+    end
+
+    %% 4. Post-Mortem & Carcass Weighing
+    Inspector->>Admin: Examine carcass viscera & input net weight (kg)
+    Inspector->>Admin: Click "Save & Approve Release"
+    Admin->>DB: UPDATE requests SET status='releasable'
+    Admin->>DB: UPDATE slaughter_inspection SET post_mortem='Passed', carcass_weight=W
+    Admin->>DB: INSERT INTO payments (request_id, amount=TotalFee, status='pending')
+    DB-->>Mobile: Notification: "Inspection Passed - Invoice Ready"
+
+    %% 5. Payment Processing
+    alt Pay via GCash
+        Customer->>Mobile: Select GCash -> Tap "Pay Now"
+        Mobile->>Edge: POST /create-gcash-payment {amount, request_id}
+        Edge->>PayMongo: POST /links (Basic Auth)
+        PayMongo-->>Edge: Return checkout_url
+        Edge-->>Mobile: Return checkout_url
+        Mobile->>Customer: Open PayMongo portal in browser
+        Customer->>PayMongo: Complete GCash payment
+        Customer->>Mobile: Return to app
+        Mobile->>Edge: GET /create-gcash-payment?link_id=xxx
+        Edge->>PayMongo: Verify payment status
+        PayMongo-->>Edge: status: "paid"
+        Edge-->>Mobile: status: "paid"
+        Mobile->>DB: UPDATE payments SET status='paid'
+        Mobile->>DB: UPDATE requests SET status='paid'
+    else Pay via Cash
+        Customer->>Staff: Present queue reference at payment window
+        Staff->>Admin: Enter cash tendered & confirm payment
+        Admin->>DB: UPDATE payments SET status='paid', payment_method='Cash'
+        Admin->>DB: UPDATE requests SET status='paid'
+    end
+
+    %% 6. Meat Release
+    Staff->>Admin: Validate receipt RCP-YYYY-XXX at dispatch gate
+    Staff->>Admin: Click "Confirm Release"
+    Admin->>DB: UPDATE requests SET status='completed', released_at=NOW()
+    DB-->>Mobile: Notification: "Meat Successfully Dispatched"
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'default',
+      sequence: {
+        mirrorActors: true,
+        useMaxWidth: false
+      }
+    });
+
+    function copyMermaid() {
+      const code = document.getElementById('diagram').getAttribute('data-processed') ? 
+        `sequenceDiagram\n    autonumber\n    actor Customer as 👤 Customer\n    actor Staff as 📋💵 Receiving Clerk & Cashier\n    actor Inspector as 🩺 Meat Inspector\n    participant Mobile as 📱 Mobile App\n    participant Admin as 💻 Admin Panel\n    participant DB as 🗄️ PostgreSQL DB\n    participant Storage as 📦 Storage Bucket\n    participant Edge as ⚡ Edge Function\n    participant PayMongo as 💳 PayMongo API\n\n    Customer->>Mobile: Fill slaughter intake details & attach permits\n    Mobile->>Storage: Upload VHC & Shipping Permits\n    Storage-->>Mobile: Return document URLs\n    Mobile->>DB: INSERT INTO requests (status='pending')\n    DB-->>Admin: Broadcast new request alert\n\n    Staff->>Admin: Review booking & allocate holding pen\n    Staff->>Admin: Click "Approve Request"\n    Admin->>DB: UPDATE requests SET status='approved'\n    DB-->>Mobile: Notification: "Schedule Approved"\n    \n    Staff->>Admin: Examine physical animal & permits at gate\n    Staff->>Admin: Click "Verify Documents"\n    Admin->>DB: UPDATE requests SET status='doc_verified'\n    Admin->>DB: INSERT INTO slaughter_inspection (request_id, process_stage='Lairage')\n\n    Inspector->>Admin: Conduct corral clinical exam\n    alt Ante-Mortem Failed\n        Inspector->>Admin: Mark "Failed" & enter clinical diagnosis\n        Admin->>DB: UPDATE requests SET status='anti_mortem_failed'\n        Admin->>DB: UPDATE slaughter_inspection SET anti_mortem='Failed'\n        DB-->>Mobile: Alert: "Ante-Mortem Failed - View Condemnation Slip"\n    else Ante-Mortem Passed\n        Inspector->>Admin: Mark "Passed" -> Advance to Slaughter Line\n        Admin->>DB: UPDATE requests SET status='slaughter_started'\n    end\n\n    Inspector->>Admin: Examine carcass viscera & input net weight (kg)\n    Inspector->>Admin: Click "Save & Approve Release"\n    Admin->>DB: UPDATE requests SET status='releasable'\n    Admin->>DB: UPDATE slaughter_inspection SET post_mortem='Passed', carcass_weight=W\n    Admin->>DB: INSERT INTO payments (request_id, amount=TotalFee, status='pending')\n    DB-->>Mobile: Notification: "Inspection Passed - Invoice Ready"\n\n    alt Pay via GCash\n        Customer->>Mobile: Select GCash -> Tap "Pay Now"\n        Mobile->>Edge: POST /create-gcash-payment {amount, request_id}\n        Edge->>PayMongo: POST /links (Basic Auth)\n        PayMongo-->>Edge: Return checkout_url\n        Edge-->>Mobile: Return checkout_url\n        Mobile->>Customer: Open PayMongo portal in browser\n        Customer->>PayMongo: Complete GCash payment\n        Customer->>Mobile: Return to app\n        Mobile->>Edge: GET /create-gcash-payment?link_id=xxx\n        Edge->>PayMongo: Verify payment status\n        PayMongo-->>Edge: status: "paid"\n        Edge-->>Mobile: status: "paid"\n        Mobile->>DB: UPDATE payments SET status='paid'\n        Mobile->>DB: UPDATE requests SET status='paid'\n    else Pay via Cash\n        Customer->>Staff: Present queue reference at payment window\n        Staff->>Admin: Enter cash tendered & confirm payment\n        Admin->>DB: UPDATE payments SET status='paid', payment_method='Cash'\n        Admin->>DB: UPDATE requests SET status='paid'\n    end\n\n    Staff->>Admin: Validate receipt RCP-YYYY-XXX at dispatch gate\n    Staff->>Admin: Click "Confirm Release"\n    Admin->>DB: UPDATE requests SET status='completed', released_at=NOW()\n    DB-->>Mobile: Notification: "Meat Successfully Dispatched"` : '';
+      navigator.clipboard.writeText(code).then(() => alert('Copied Mermaid code to clipboard!'));
+    }
+
+    function downloadSVG() {
+      const svg = document.querySelector('.mermaid svg');
+      if (!svg) return alert('SVG not rendered yet.');
+      
+      // Clone svg and inject an explicit opaque white rect at the back
+      const clone = svg.cloneNode(true);
+      const bbox = svg.viewBox.baseVal;
+      const width = bbox && bbox.width ? bbox.width : svg.scrollWidth || 1200;
+      const height = bbox && bbox.height ? bbox.height : svg.scrollHeight || 1800;
+      
+      const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bgRect.setAttribute('x', '0');
+      bgRect.setAttribute('y', '0');
+      bgRect.setAttribute('width', '100%');
+      bgRect.setAttribute('height', '100%');
+      bgRect.setAttribute('fill', '#ffffff');
+      clone.insertBefore(bgRect, clone.firstChild);
+
+      const svgData = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'figure10_sequence_diagram_white.svg';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>
