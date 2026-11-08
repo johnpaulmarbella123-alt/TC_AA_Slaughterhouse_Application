@@ -33,7 +33,7 @@ class _SignupPageState extends State<SignupPage> {
       final prefs = await SharedPreferences.getInstance();
       bool provisioned = false;
 
-      // 1. Check profiles for existing active admin role
+      // 1. Strict live check: check profiles for an existing active admin user
       try {
         final res = await _supabase
             .from('profiles')
@@ -42,29 +42,19 @@ class _SignupPageState extends State<SignupPage> {
             .limit(1);
         if ((res as List).isNotEmpty) {
           provisioned = true;
+        } else {
+          // If no admin profile exists in Supabase, auto-clean stale settings & local cache
+          try {
+            await _supabase
+                .from('system_settings')
+                .delete()
+                .eq('key', 'admin_account_provisioned');
+          } catch (_) {}
+          await prefs.remove('admin_account_provisioned');
         }
       } catch (_) {}
 
-      // 2. Check system_settings if profiles check was inconclusive
-      if (!provisioned) {
-        try {
-          final settingRow = await _supabase
-              .from('system_settings')
-              .select('value')
-              .eq('key', 'admin_account_provisioned')
-              .maybeSingle();
-          if (settingRow != null && settingRow['value'] != null) {
-            final val = settingRow['value'];
-            if (val is bool) {
-              provisioned = val;
-            } else if (val is Map && val['role'] == 'admin') {
-              provisioned = true;
-            }
-          }
-        } catch (_) {}
-      }
-
-      // Sync local preferences with true remote database state
+      // Sync local preferences with true database reality
       await prefs.setBool('admin_account_provisioned', provisioned);
 
       if (mounted) {
@@ -459,6 +449,17 @@ class _SignupPageState extends State<SignupPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                ),
+                const SizedBox(height: 12),
+                TextButton.icon(
+                  onPressed: () async {
+                    setState(() => _isChecking = true);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.remove('admin_account_provisioned');
+                    await _checkAdminStatus();
+                  },
+                  icon: const Icon(Icons.refresh, size: 16, color: Colors.white70),
+                  label: const Text('Re-check / Register New Admin', style: TextStyle(color: Colors.white70, fontSize: 12)),
                 ),
               ],
             ),

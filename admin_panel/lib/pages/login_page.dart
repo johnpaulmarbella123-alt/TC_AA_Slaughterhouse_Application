@@ -31,18 +31,13 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _checkAdminProvisioned() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
-      if (!provisioned) {
-        final res = await _supabase
-            .from('profiles')
-            .select('id, role')
-            .eq('role', 'admin')
-            .limit(1);
-        if ((res as List).isNotEmpty) {
-          provisioned = true;
-          await prefs.setBool('admin_account_provisioned', true);
-        }
-      }
+      final res = await _supabase
+          .from('profiles')
+          .select('id, role')
+          .eq('role', 'admin')
+          .limit(1);
+      final bool provisioned = (res as List).isNotEmpty;
+      await prefs.setBool('admin_account_provisioned', provisioned);
       if (mounted) setState(() => _isAdminProvisioned = provisioned);
     } catch (_) {}
   }
