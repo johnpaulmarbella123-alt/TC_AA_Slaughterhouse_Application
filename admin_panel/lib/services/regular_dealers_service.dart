@@ -1000,6 +1000,17 @@ class RegularDealersService {
     }
   }
 
+  /// Deletes a dealer from the active roster and persists removal to local cache & Supabase
+  Future<void> deleteDealer(String id) async {
+    _dealers.removeWhere((d) => d.id == id);
+    await _saveLocalCache();
+    await _syncToSupabase();
+
+    try {
+      await supabase.from('regular_dealers').delete().eq('id', id);
+    } catch (_) {}
+  }
+
   /// Sends an email with PDF attachment via Resend REST API
   Future<Map<String, dynamic>> sendReportViaResend({
     required String recipientEmail,

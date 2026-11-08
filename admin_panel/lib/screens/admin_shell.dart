@@ -170,10 +170,15 @@ class _AdminSidebar extends StatefulWidget {
   State<_AdminSidebar> createState() => _AdminSidebarState();
 }
 
-class _AdminSidebarState extends State<_AdminSidebar> {
+class _AdminSidebarState extends State<_AdminSidebar>
+    with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
   int _illegalReportBadgeCount = 0;
   Timer? _badgeTimer;
+  late AnimationController _animController;
+  late Animation<double> _widthAnimation;
+  late Animation<double> _fadeAnimation;
+  bool _isCollapsed = false;
 
   @override
   void initState() {
@@ -181,12 +186,43 @@ class _AdminSidebarState extends State<_AdminSidebar> {
     _fetchBadgeCount();
     _badgeTimer =
         Timer.periodic(const Duration(seconds: 12), (_) => _fetchBadgeCount());
+
+    _animController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    );
+
+    _widthAnimation = Tween<double>(begin: 285.0, end: 72.0).animate(
+      CurvedAnimation(
+        parent: _animController,
+        curve: Curves.easeInOutCubic,
+      ),
+    );
+
+    _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _animController,
+        curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
+      ),
+    );
   }
 
   @override
   void dispose() {
     _badgeTimer?.cancel();
+    _animController.dispose();
     super.dispose();
+  }
+
+  void _toggleCollapse() {
+    setState(() {
+      _isCollapsed = !_isCollapsed;
+      if (_isCollapsed) {
+        _animController.forward();
+      } else {
+        _animController.reverse();
+      }
+    });
   }
 
   Future<void> _fetchBadgeCount() async {
@@ -280,167 +316,216 @@ class _AdminSidebarState extends State<_AdminSidebar> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final settingsService = AppSettingsService.instance;
 
-    return Container(
-      width: 285,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        border: Border(
-          right: BorderSide(
-            color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-            width: 1,
-          ),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
-            blurRadius: 10,
-            offset: const Offset(2, 0),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // ─── LOGO HEADER (Fixed at top) ───
-          _buildLogoHeader(isDark, settingsService),
-          const SizedBox(height: 8),
+    return AnimatedBuilder(
+      animation: _animController,
+      builder: (context, child) {
+        final currentWidth = _widthAnimation.value;
+        final isNarrow = currentWidth < 140;
 
-          // ─── SCROLLABLE NAV ITEMS (Filtered by role!) ───
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              child: Column(
-                children: [
-                  if (settingsService.isModuleAllowed(0))
-                    _buildNavItem(
-                      index: 0,
-                      icon: Icons.dashboard_outlined,
-                      activeIcon: Icons.dashboard,
-                      label: settingsService.currentRole == 'Clerk'
-                          ? 'Clerk Dashboard'
-                          : (settingsService.currentRole == 'Inspector'
-                              ? 'Inspector Dashboard'
-                              : 'Dashboard'),
-                      subtitle: settingsService.currentRole == 'Clerk'
-                          ? 'Pending receiving, verification & billing tasks'
-                          : (settingsService.currentRole == 'Inspector'
-                              ? 'Pending ante-mortem & post-mortem tasks'
-                              : 'Overview & statistics'),
-                      isDark: isDark,
+        return Container(
+          width: currentWidth,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            border: Border(
+              right: BorderSide(
+                color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+                width: 1,
+              ),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                blurRadius: 10,
+                offset: const Offset(2, 0),
+              ),
+            ],
+          ),
+          child: ClipRect(
+            child: SizedBox(
+              width: currentWidth,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    physics: const ClampingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: IntrinsicHeight(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // ─── LOGO HEADER (Fixed compact height) ───
+                            _buildLogoHeader(isDark, settingsService, isNarrow),
+
+                            const SizedBox(height: 6),
+
+                            // ─── OPERATIONAL MODULES (0 through 6) ───
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isNarrow ? 10 : 12,
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (settingsService.isModuleAllowed(0))
+                                    _buildNavItem(
+                                      index: 0,
+                                      icon: Icons.dashboard_outlined,
+                                      activeIcon: Icons.dashboard,
+                                      label: settingsService.currentRole == 'Clerk'
+                                          ? 'Clerk Dashboard'
+                                          : (settingsService.currentRole == 'Inspector'
+                                              ? 'Inspector Dashboard'
+                                              : 'Dashboard'),
+                                      subtitle: settingsService.currentRole == 'Clerk'
+                                          ? 'Pending tasks & billing'
+                                          : (settingsService.currentRole == 'Inspector'
+                                              ? 'Pending tasks & ante-mortem'
+                                              : 'Overview & statistics'),
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  if (settingsService.isModuleAllowed(1)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 1,
+                                      icon: Icons.assignment_outlined,
+                                      activeIcon: Icons.assignment,
+                                      label: 'Receiving & New Requests',
+                                      subtitle: 'Customer details & animal inspection',
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(2)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 2,
+                                      icon: Icons.fact_check_outlined,
+                                      activeIcon: Icons.fact_check,
+                                      label: 'Document Verification',
+                                      subtitle: 'Permits & certificates verification',
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(3)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 3,
+                                      icon: Icons.content_cut_outlined,
+                                      activeIcon: Icons.content_cut,
+                                      label: 'Slaughter & Inspection',
+                                      subtitle: 'Process tagging & post-mortem',
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(4)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 4,
+                                      icon: Icons.payment_outlined,
+                                      activeIcon: Icons.payment,
+                                      label: 'Payment & Cashiering',
+                                      subtitle: 'Fee calculation & receipts',
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(5)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 5,
+                                      icon: Icons.inventory_2_outlined,
+                                      activeIcon: Icons.inventory_2,
+                                      label: 'Meat Releasing',
+                                      subtitle: 'Ready for pickup & release',
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(6)) ...[
+                                    const SizedBox(height: 2),
+                                    _buildNavItem(
+                                      index: 6,
+                                      icon: Icons.assessment_outlined,
+                                      activeIcon: Icons.assessment,
+                                      label: 'Reports & Records',
+                                      subtitle: 'Daily, weekly & monthly analytics',
+                                      badgeCount: _illegalReportBadgeCount,
+                                      isDark: isDark,
+                                      isNarrow: isNarrow,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+
+                            const Spacer(),
+
+                            // ─── 24PX GAP WITH SUBTLE DIVIDER LINE ───
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isNarrow ? 12 : 16,
+                                vertical: 10,
+                              ),
+                              child: Divider(
+                                height: 1,
+                                thickness: 1,
+                                color: isDark
+                                    ? const Color(0xFF334155)
+                                    : Colors.grey.shade200,
+                              ),
+                            ),
+
+                            // ─── SETTINGS / MY PROFILE (Grouped at bottom next to Profile & Logout) ───
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isNarrow ? 10 : 12,
+                              ),
+                              child: _buildNavItem(
+                                index: 7,
+                                icon: settingsService.isAdmin
+                                    ? Icons.settings_outlined
+                                    : Icons.person_outline,
+                                activeIcon: settingsService.isAdmin
+                                    ? Icons.settings
+                                    : Icons.person,
+                                label: settingsService.isAdmin ? 'Settings' : 'My Profile',
+                                subtitle: settingsService.isAdmin
+                                    ? 'Fees, Staff, Schedule, Profile'
+                                    : 'Account profile & password',
+                                isDark: isDark,
+                                isNarrow: isNarrow,
+                              ),
+                            ),
+
+                            const SizedBox(height: 4),
+
+                            // ─── ADMIN FOOTER (Admin Avatar & Logout) ───
+                            _buildAdminFooter(context, isDark, settingsService, isNarrow),
+                          ],
+                        ),
+                      ),
                     ),
-                  if (settingsService.isModuleAllowed(1)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 1,
-                      icon: Icons.assignment_outlined,
-                      activeIcon: Icons.assignment,
-                      label: 'Receiving & New Requests',
-                      subtitle:
-                          'Customer details, animal inspection, reference assignment',
-                      isDark: isDark,
-                    ),
-                  ],
-                  if (settingsService.isModuleAllowed(2)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 2,
-                      icon: Icons.fact_check_outlined,
-                      activeIcon: Icons.fact_check,
-                      label: 'Document Verification',
-                      subtitle: 'Permits and certificates verification',
-                      isDark: isDark,
-                    ),
-                  ],
-                  if (settingsService.isModuleAllowed(3)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 3,
-                      icon: Icons.content_cut_outlined,
-                      activeIcon: Icons.content_cut,
-                      label: 'Slaughter & Inspection',
-                      subtitle:
-                          'Process tagging, post-mortem inspection, MC generation',
-                      isDark: isDark,
-                    ),
-                  ],
-                  if (settingsService.isModuleAllowed(4)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 4,
-                      icon: Icons.payment_outlined,
-                      activeIcon: Icons.payment,
-                      label: 'Payment & Cashiering',
-                      subtitle:
-                          'Fee calculation, payment recording, receipts',
-                      isDark: isDark,
-                    ),
-                  ],
-                  if (settingsService.isModuleAllowed(5)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 5,
-                      icon: Icons.inventory_2_outlined,
-                      activeIcon: Icons.inventory_2,
-                      label: 'Meat Releasing',
-                      subtitle:
-                          'Ready for pickup, collection confirmation',
-                      isDark: isDark,
-                    ),
-                  ],
-                  if (settingsService.isModuleAllowed(6)) ...[
-                    const SizedBox(height: 2),
-                    _buildNavItem(
-                      index: 6,
-                      icon: Icons.assessment_outlined,
-                      activeIcon: Icons.assessment,
-                      label: 'Reports & Records',
-                      subtitle:
-                          'Daily, weekly, monthly reports and analytics',
-                      badgeCount: _illegalReportBadgeCount,
-                      isDark: isDark,
-                    ),
-                  ],
-                ],
+                  );
+                },
               ),
             ),
           ),
-
-          // ─── PINNED / FIXED AT THE TOP OF ADMIN ICON LOGO (NON-SCROLLABLE) ───
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              border: Border(
-                top: BorderSide(
-                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-                  width: 1,
-                ),
-              ),
-            ),
-            child: _buildNavItem(
-              index: 7,
-              icon: settingsService.isAdmin
-                  ? Icons.settings_outlined
-                  : Icons.person_outline,
-              activeIcon: settingsService.isAdmin
-                  ? Icons.settings
-                  : Icons.person,
-              label: settingsService.isAdmin ? 'Settings' : 'My Profile',
-              subtitle: settingsService.isAdmin
-                  ? 'Fees, Staff, Schedule, Profile'
-                  : 'Account profile & password',
-              isDark: isDark,
-            ),
-          ),
-
-          // ─── ADMIN FOOTER (Admin Icon / Profile + Logout) ───
-          _buildAdminFooter(context, isDark, settingsService),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  Widget _buildLogoHeader(bool isDark, AppSettingsService settings) {
+  Widget _buildLogoHeader(
+      bool isDark, AppSettingsService settings, bool isNarrow) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+      height: 66,
+      padding: EdgeInsets.symmetric(
+        horizontal: isNarrow ? 8 : 12,
+        vertical: 6,
+      ),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
@@ -449,56 +534,107 @@ class _AdminSidebarState extends State<_AdminSidebar> {
           ),
         ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ClipOval(
-              child: Image.asset(settings.cityLogoPath, fit: BoxFit.cover),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: isNarrow
+          ? ClipRect(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ClipOval(
+                    child: Image.asset(settings.cityLogoPath, width: 26, height: 26, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(height: 3),
+                  InkWell(
+                    onTap: _toggleCollapse,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Tooltip(
+                      message: 'Expand Sidebar',
+                      child: Padding(
+                        padding: const EdgeInsets.all(2),
+                        child: Icon(
+                          Icons.menu_rounded,
+                          color: isDark ? Colors.white70 : const Color(0xFF2D6A4F),
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Row(
               children: [
-                Text(
-                  settings.headerTitle,
-                  style: TextStyle(
-                    color: isDark
-                        ? const Color(0xFF40916C)
-                        : const Color(0xFF2D6A4F),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                  overflow: TextOverflow.ellipsis,
+                  child: ClipOval(
+                    child: Image.asset(settings.cityLogoPath, fit: BoxFit.cover),
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  settings.headerSubtitle,
-                  style: TextStyle(
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF718096),
-                    fontSize: 12,
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: ClipRect(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            settings.headerTitle,
+                            style: TextStyle(
+                              color: isDark
+                                  ? const Color(0xFF40916C)
+                                  : const Color(0xFF2D6A4F),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            softWrap: false,
+                          ),
+                          const SizedBox(height: 1),
+                          Text(
+                            settings.headerSubtitle,
+                            style: TextStyle(
+                              color: isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF718096),
+                              fontSize: 11,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.clip,
+                            softWrap: false,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.menu_open_rounded,
+                    color: isDark ? Colors.white60 : const Color(0xFF718096),
+                    size: 20,
+                  ),
+                  tooltip: 'Collapse Sidebar',
+                  splashRadius: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: _toggleCollapse,
                 ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -509,9 +645,77 @@ class _AdminSidebarState extends State<_AdminSidebar> {
     required String label,
     required String subtitle,
     required bool isDark,
+    required bool isNarrow,
     int badgeCount = 0,
   }) {
     final isSelected = widget.selectedIndex == index;
+
+    if (isNarrow) {
+      return Tooltip(
+        message: label,
+        waitDuration: const Duration(milliseconds: 200),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            onTap: () => widget.onItemSelected(index),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              width: 52,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: isSelected
+                    ? Border.all(
+                        color: const Color(0xFF2D6A4F).withValues(alpha: 0.4),
+                        width: 1,
+                      )
+                    : null,
+              ),
+              child: Center(
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(
+                      isSelected ? activeIcon : icon,
+                      color: isSelected
+                          ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
+                          : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
+                      size: 20,
+                    ),
+                    if (badgeCount > 0)
+                      Positioned(
+                        right: -7,
+                        top: -5,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDC2626),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                          child: Text(
+                            '$badgeCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Material(
       color: Colors.transparent,
@@ -519,10 +723,8 @@ class _AdminSidebarState extends State<_AdminSidebar> {
       child: InkWell(
         onTap: () => widget.onItemSelected(index),
         borderRadius: BorderRadius.circular(10),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: isSelected
                 ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.1)
@@ -542,72 +744,84 @@ class _AdminSidebarState extends State<_AdminSidebar> {
                 color: isSelected
                     ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
                     : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
-                size: 22,
+                size: 20,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                child: FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: ClipRect(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? (isDark
-                                      ? const Color(0xFF40916C)
-                                      : const Color(0xFF2D6A4F))
-                                  : (isDark
-                                      ? const Color(0xFFF1F5F9)
-                                      : const Color(0xFF2D3748)),
-                              fontWeight: isSelected
-                                  ? FontWeight.w700
-                                  : FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (badgeCount > 0) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFDC2626),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '$badgeCount',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                label,
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? (isDark
+                                          ? const Color(0xFF40916C)
+                                          : const Color(0xFF2D6A4F))
+                                      : (isDark
+                                          ? const Color(0xFFF1F5F9)
+                                          : const Color(0xFF2D3748)),
+                                  fontWeight: isSelected
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  fontSize: 12.5,
+                                  height: 1.15,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                softWrap: false,
                               ),
                             ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: isSelected
-                            ? (isDark
-                                ? const Color(0xFF40916C).withValues(alpha: 0.8)
-                                : const Color(0xFF2D6A4F).withValues(alpha: 0.7))
+                            if (badgeCount > 0) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '$badgeCount',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: isSelected
+                                ? (isDark
+                                    ? const Color(0xFF40916C).withValues(alpha: 0.8)
+                                    : const Color(0xFF2D6A4F).withValues(alpha: 0.7))
                             : (isDark
                                 ? const Color(0xFF64748B)
                                 : const Color(0xFFA0AEC0)),
-                        fontSize: 10.5,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                            fontSize: 10,
+                            height: 1.15,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          softWrap: false,
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -618,19 +832,69 @@ class _AdminSidebarState extends State<_AdminSidebar> {
   }
 
   Widget _buildAdminFooter(
-      BuildContext context, bool isDark, AppSettingsService settings) {
+      BuildContext context, bool isDark, AppSettingsService settings, bool isNarrow) {
+    if (isNarrow) {
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Tooltip(
+              message: '${settings.profileName} (${settings.currentRole})',
+              child: Material(
+                color: Colors.transparent,
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
+                  child: CircleAvatar(
+                    radius: 15,
+                    backgroundColor: isDark
+                        ? const Color(0xFF334155)
+                        : Colors.grey.shade200,
+                    backgroundImage: settings.profilePhotoUrl != null
+                        ? NetworkImage(settings.profilePhotoUrl!)
+                        : null,
+                    child: settings.profilePhotoUrl == null
+                        ? Icon(
+                            Icons.person_outline,
+                            color: isDark
+                                ? Colors.white70
+                                : const Color(0xFF718096),
+                            size: 16,
+                          )
+                        : null,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Tooltip(
+              message: 'Logout',
+              child: IconButton(
+                icon: const Icon(Icons.logout, size: 18),
+                splashRadius: 16,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
+                onPressed: () => _handleLogout(context),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        border: Border(
-          top: BorderSide(
-            color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
-            width: 1,
-          ),
-        ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Admin profile row - clickable to open My Profile tab!
           Material(
@@ -640,11 +904,11 @@ class _AdminSidebarState extends State<_AdminSidebar> {
               onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
               borderRadius: BorderRadius.circular(8),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                 child: Row(
                   children: [
                     CircleAvatar(
-                      radius: 18,
+                      radius: 16,
                       backgroundColor: isDark
                           ? const Color(0xFF334155)
                           : Colors.grey.shade200,
@@ -657,43 +921,53 @@ class _AdminSidebarState extends State<_AdminSidebar> {
                               color: isDark
                                   ? Colors.white70
                                   : const Color(0xFF718096),
-                              size: 20,
+                              size: 18,
                             )
                           : null,
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 8),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            settings.profileName,
-                            style: TextStyle(
-                              color: isDark
-                                  ? Colors.white
-                                  : const Color(0xFF2D3748),
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                      child: FadeTransition(
+                        opacity: _fadeAnimation,
+                        child: ClipRect(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                settings.profileName,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? Colors.white
+                                      : const Color(0xFF2D3748),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                softWrap: false,
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                settings.currentRole,
+                                style: TextStyle(
+                                  color: isDark
+                                      ? const Color(0xFF40916C)
+                                      : const Color(0xFF2D6A4F),
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 10.5,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                softWrap: false,
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            settings.currentRole,
-                            style: TextStyle(
-                              color: isDark
-                                  ? const Color(0xFF40916C)
-                                  : const Color(0xFF2D6A4F),
-                              fontWeight: FontWeight.w500,
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                     Icon(
                       Icons.chevron_right,
-                      size: 18,
+                      size: 16,
                       color: isDark ? Colors.white38 : Colors.grey.shade400,
                     ),
                   ],
@@ -701,22 +975,18 @@ class _AdminSidebarState extends State<_AdminSidebar> {
               ),
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           // Logout button
           SizedBox(
             width: double.infinity,
+            height: 32,
             child: OutlinedButton.icon(
-              onPressed: () async {
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setBool('keepMeLoggedIn', false);
-                await AppSettingsService.instance.setActiveStaffSession(null);
-                await Supabase.instance.client.auth.signOut();
-                if (context.mounted) {
-                  Navigator.pushReplacementNamed(context, '/');
-                }
-              },
-              icon: const Icon(Icons.logout, size: 17),
-              label: const Text('Logout'),
+              onPressed: () => _handleLogout(context),
+              icon: const Icon(Icons.logout, size: 15),
+              label: FadeTransition(
+                opacity: _fadeAnimation,
+                child: const Text('Logout', style: TextStyle(fontSize: 12)),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor:
                     isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
@@ -728,12 +998,22 @@ class _AdminSidebarState extends State<_AdminSidebar> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(vertical: 10),
+                padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),
               ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _handleLogout(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('keepMeLoggedIn', false);
+    await AppSettingsService.instance.setActiveStaffSession(null);
+    await Supabase.instance.client.auth.signOut();
+    if (context.mounted) {
+      Navigator.pushReplacementNamed(context, '/');
+    }
   }
 }

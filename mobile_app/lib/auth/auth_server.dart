@@ -1,32 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthService {
-  final SupabaseClient _supabase = Supabase.instance.client;
 
-  // ══════════════════════════════════════════════════════════════
-  // DEFENSE-READY SMART OTP FALLBACK CACHE (100% RELIABLE FOR LIVE DEFENSE)
-  // ══════════════════════════════════════════════════════════════
-  static final Map<String, String> _defenseOtps = {};
-
-  static String? getDefenseOtp(String identifier) {
-    String clean = identifier.trim();
-    if (clean.startsWith('09')) clean = '+63${clean.substring(1)}';
-    return _defenseOtps[clean];
-  }
-
-  static bool verifyDefenseOtp(String identifier, String inputOtp) {
-    String clean = identifier.trim();
-    if (clean.startsWith('09')) clean = '+63${clean.substring(1)}';
-    final expected = _defenseOtps[clean];
-    return (expected != null && expected == inputOtp.trim()) || inputOtp.trim() == '123456';
-  }
-
-  static void clearDefenseOtp(String identifier) {
-    String clean = identifier.trim();
-    if (clean.startsWith('09')) clean = '+63${clean.substring(1)}';
-    _defenseOtps.remove(clean);
-  }
+  final SupabaseClient _supabase =
+      Supabase.instance.client;
 
   // =========================
   // SIGN IN
@@ -35,44 +12,26 @@ class AuthService {
     String emailOrPhone,
     String password,
   ) async {
+
     if (emailOrPhone.contains('@')) {
+
       return await _supabase.auth.signInWithPassword(
-        email: emailOrPhone.trim(),
+        email: emailOrPhone,
         password: password,
       );
+
     } else {
+
       // Convert local format (09...) to international format (+63...)
-      String phone = emailOrPhone.trim();
+      String phone = emailOrPhone;
       if (phone.startsWith('09')) {
         phone = '+63${phone.substring(1)}';
       }
 
-      try {
-        return await _supabase.auth.signInWithPassword(
-          phone: phone,
-          password: password,
-        );
-      } catch (e) {
-        // Fallback: check if the phone is mapped to an email or synthetic alias
-        final linkedEmail = await findEmailForPhone(phone);
-        if (linkedEmail != null && linkedEmail.isNotEmpty) {
-          try {
-            return await _supabase.auth.signInWithPassword(
-              email: linkedEmail,
-              password: password,
-            );
-          } catch (_) {}
-        }
-        final cleanDigits = phone.replaceAll(RegExp(r'\D'), '');
-        final syntheticEmail = 'user_$cleanDigits@tabaco-abattoir.gov.ph';
-        try {
-          return await _supabase.auth.signInWithPassword(
-            email: syntheticEmail,
-            password: password,
-          );
-        } catch (_) {}
-        rethrow;
-      }
+      return await _supabase.auth.signInWithPassword(
+        phone: phone,
+        password: password,
+      );
     }
   }
 
@@ -140,44 +99,19 @@ Future<AuthResponse> signUp(
   // =========================
   // SEND OTP (EMAIL OR PHONE)
   // =========================
-  Future<Map<String, dynamic>> sendOtp(String emailOrPhone) async {
+  Future<void> sendOtp(String emailOrPhone) async {
     if (emailOrPhone.contains('@')) {
       await _supabase.auth.signInWithOtp(
         email: emailOrPhone.trim(),
       );
-      return {'success': true, 'isEmail': true, 'simulated': false};
     } else {
       String phone = emailOrPhone.trim();
       if (phone.startsWith('09')) {
         phone = '+63${phone.substring(1)}';
       }
-      try {
-        await _supabase.auth.signInWithOtp(
-          phone: phone,
-        );
-        return {'success': true, 'isEmail': false, 'simulated': false};
-      } catch (e) {
-        final errStr = e.toString().toLowerCase();
-        // If Supabase does not have a paid/active SMS provider configured, engage Defense-Ready Smart OTP fallback
-        if (errStr.contains('sms') ||
-            errStr.contains('provider') ||
-            errStr.contains('twilio') ||
-            errStr.contains('not configured') ||
-            errStr.contains('unexpected_failure') ||
-            errStr.contains('signups not allowed')) {
-          // Generate a cryptographically realistic 6-digit verification code
-          final code = (100000 + (DateTime.now().millisecondsSinceEpoch % 900000)).toString();
-          _defenseOtps[phone] = code;
-          debugPrint('📱 [DEFENSE SMART OTP] Fallback OTP generated for $phone: $code');
-          return {
-            'success': true,
-            'isEmail': false,
-            'simulated': true,
-            'otp': code,
-          };
-        }
-        rethrow;
-      }
+      await _supabase.auth.signInWithOtp(
+        phone: phone,
+      );
     }
   }
 
@@ -185,45 +119,23 @@ Future<AuthResponse> signUp(
   // SIGN OUT
   // =========================
   Future<void> signOut() async {
+
     await _supabase.auth.signOut();
   }
 
   // =========================
   // RESET PASSWORD - SEND OTP (EMAIL OR PHONE)
   // =========================
-  Future<Map<String, dynamic>> sendPasswordResetOtp(String emailOrPhone) async {
+  Future<void> sendPasswordResetOtp(String emailOrPhone) async {
     final identifier = emailOrPhone.trim();
     if (identifier.contains('@')) {
       await _supabase.auth.resetPasswordForEmail(identifier);
-      return {'success': true, 'isEmail': true, 'simulated': false};
     } else {
       String phone = identifier;
       if (phone.startsWith('09')) {
         phone = '+63${phone.substring(1)}';
       }
-      try {
-        await _supabase.auth.signInWithOtp(phone: phone);
-        return {'success': true, 'isEmail': false, 'simulated': false};
-      } catch (e) {
-        final errStr = e.toString().toLowerCase();
-        if (errStr.contains('sms') ||
-            errStr.contains('provider') ||
-            errStr.contains('twilio') ||
-            errStr.contains('not configured') ||
-            errStr.contains('unexpected_failure') ||
-            errStr.contains('signups not allowed')) {
-          final code = (100000 + (DateTime.now().millisecondsSinceEpoch % 900000)).toString();
-          _defenseOtps[phone] = code;
-          debugPrint('📱 [DEFENSE RECOVERY OTP] Fallback OTP generated for $phone: $code');
-          return {
-            'success': true,
-            'isEmail': false,
-            'simulated': true,
-            'otp': code,
-          };
-        }
-        rethrow;
-      }
+      await _supabase.auth.signInWithOtp(phone: phone);
     }
   }
 
@@ -243,40 +155,26 @@ Future<AuthResponse> signUp(
         token: token.trim(),
         type: OtpType.recovery,
       );
-      // 2. Update user's password
-      await _supabase.auth.updateUser(
-        UserAttributes(password: newPassword.trim()),
-      );
-      await _supabase.auth.signOut();
     } else {
       String phone = identifier;
       if (phone.startsWith('09')) {
         phone = '+63${phone.substring(1)}';
       }
-
-      if (verifyDefenseOtp(phone, token)) {
-        // Defense mode simulated OTP matched
-        try {
-          await _supabase.auth.updateUser(
-            UserAttributes(password: newPassword.trim()),
-          );
-        } catch (_) {}
-        clearDefenseOtp(phone);
-        await _supabase.auth.signOut();
-      } else {
-        // 1. Verify SMS OTP token for phone with Supabase
-        await _supabase.auth.verifyOTP(
-          phone: phone,
-          token: token.trim(),
-          type: OtpType.sms,
-        );
-        // 2. Update user's password
-        await _supabase.auth.updateUser(
-          UserAttributes(password: newPassword.trim()),
-        );
-        await _supabase.auth.signOut();
-      }
+      // 1. Verify SMS OTP token for phone
+      await _supabase.auth.verifyOTP(
+        phone: phone,
+        token: token.trim(),
+        type: OtpType.sms,
+      );
     }
+
+    // 2. Update user's password
+    await _supabase.auth.updateUser(
+      UserAttributes(password: newPassword.trim()),
+    );
+
+    // 3. Sign out of the temporary session so user can log in with new password
+    await _supabase.auth.signOut();
   }
 
   // =========================

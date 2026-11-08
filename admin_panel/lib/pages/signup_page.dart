@@ -31,29 +31,23 @@ class _SignupPageState extends State<SignupPage> {
   Future<void> _checkAdminStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
+      bool provisioned = false;
 
-      if (!provisioned) {
-        // 1. Check system_settings
-        try {
-          final settingRow = await _supabase
-              .from('system_settings')
-              .select('value')
-              .eq('key', 'admin_account_provisioned')
-              .maybeSingle();
-          if (settingRow != null && settingRow['value'] != null) {
-            provisioned = true;
-          }
-        } catch (_) {}
-      }
+      // 1. First, check RPC function has_registered_admin
+      try {
+        final rpcRes = await _supabase.rpc('has_registered_admin');
+        if (rpcRes is bool) {
+          provisioned = rpcRes;
+        }
+      } catch (_) {}
 
+      // 2. Fallback: check profiles table for role 'admin'
       if (!provisioned) {
-        // 2. Check profiles for existing admin role
         try {
           final res = await _supabase
               .from('profiles')
               .select('id, role')
-              .eq('role', 'admin')
+              .ilike('role', 'admin')
               .limit(1);
           if ((res as List).isNotEmpty) {
             provisioned = true;
@@ -61,15 +55,37 @@ class _SignupPageState extends State<SignupPage> {
         } catch (_) {}
       }
 
+      // 3. Fallback: check system_settings for key 'admin_account_provisioned'
       if (!provisioned) {
-        // 3. Check staff accounts in AppSettingsService
-        final hasAdminInStaff = AppSettingsService.instance.staffAccounts
-            .any((s) => s.role == 'Admin' && s.email.toLowerCase() != 'admin@tabaco.gov.ph');
-        if (hasAdminInStaff) provisioned = true;
+        try {
+          final settingRow = await _supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'admin_account_provisioned')
+              .maybeSingle();
+          if (settingRow != null && settingRow['value'] != null) {
+            final val = settingRow['value'];
+            if (val is Map && val['id'] != null) {
+              final adminProfile = await _supabase
+                  .from('profiles')
+                  .select('id')
+                  .eq('id', val['id'])
+                  .maybeSingle();
+              if (adminProfile != null) {
+                provisioned = true;
+              }
+            } else {
+              provisioned = true;
+            }
+          }
+        } catch (_) {}
       }
 
+      // If no admin is found on Supabase, ensure local cached provisioned flag is cleared
       if (provisioned) {
         await prefs.setBool('admin_account_provisioned', true);
+      } else {
+        await prefs.remove('admin_account_provisioned');
       }
 
       if (mounted) {
@@ -137,6 +153,8 @@ class _SignupPageState extends State<SignupPage> {
 
         // 1. Mark admin as permanently provisioned in DB and local prefs
         await prefs.setBool('admin_account_provisioned', true);
+        await prefs.setString('admin_auth_email', email);
+        await prefs.setString('admin_auth_password', password);
         try {
           await _supabase.from('system_settings').upsert({
             'key': 'admin_account_provisioned',
@@ -160,8 +178,8 @@ class _SignupPageState extends State<SignupPage> {
         } catch (_) {}
 
         // 3. Sync with AppSettingsService and add to Staff Accounts list
-        AppSettingsService.instance.staffAccounts.removeWhere(
-          (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
+        await AppSettingsService.instance.removeStaffAccountWhere(
+          (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph' || s.email.toLowerCase() == 'admin.mendoza@tabaco.gov.ph',
         );
 
         final existsInStaff = AppSettingsService.instance.staffAccounts
@@ -181,6 +199,12 @@ class _SignupPageState extends State<SignupPage> {
         }
 
         AppSettingsService.instance.syncWithAuthUser(user);
+
+        if (_supabase.auth.currentSession == null) {
+          try {
+            await _supabase.auth.signInWithPassword(email: email, password: password);
+          } catch (_) {}
+        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

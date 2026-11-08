@@ -278,12 +278,6 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 12),
-          IconButton(
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_forward, size: 26),
-            color: const Color(0xFF2D3748),
-          ),
         ],
       ),
     );

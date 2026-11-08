@@ -780,12 +780,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 12),
-          IconButton(
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_forward, size: 26),
-            color: const Color(0xFF2D3748),
-          ),
         ],
       ),
     );
@@ -3504,6 +3498,75 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     );
   }
 
+  Future<void> _confirmDeleteDealer(RegularDealer dealer) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Text('Remove Meat Dealer', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Are you sure you want to remove ${dealer.name} (${dealer.markings}) from the Meat Dealers Directory?',
+              style: const TextStyle(fontSize: 14, color: Color(0xFF2D3748)),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              dealer.isNew
+                  ? 'This newly enrolled dealer will be permanently removed from the directory.'
+                  : 'This regular dealer will be removed from the directory listing.',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await RegularDealersService.instance.deleteDealer(dealer.id);
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed ${dealer.name} from Meat Dealers Directory'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildMeatDealersDirectoryTab() {
     final dealersService = RegularDealersService.instance;
     final allDealers = dealersService.allDealers;
@@ -3799,13 +3862,27 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                               ),
                             ),
                             DataCell(
-                              OutlinedButton(
-                                onPressed: () => _openRegisterDealerDialog(editDealer: d),
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  minimumSize: const Size(0, 30),
-                                ),
-                                child: const Text('Edit', style: TextStyle(fontSize: 11)),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  OutlinedButton(
+                                    onPressed: () => _openRegisterDealerDialog(editDealer: d),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      minimumSize: const Size(0, 30),
+                                    ),
+                                    child: const Text('Edit', style: TextStyle(fontSize: 11)),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                                    tooltip: 'Remove Dealer',
+                                    splashRadius: 18,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                    onPressed: () => _confirmDeleteDealer(d),
+                                  ),
+                                ],
                               ),
                             ),
                           ]);

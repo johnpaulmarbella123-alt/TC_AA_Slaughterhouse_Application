@@ -797,7 +797,7 @@ class _NotifyPageState extends State<NotifyPage> {
                             runSpacing: 4,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              if (refNo != null)
+                              if (refNo != null) ...[
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                   decoration: BoxDecoration(
@@ -814,6 +814,7 @@ class _NotifyPageState extends State<NotifyPage> {
                                     ),
                                   ),
                                 ),
+                              ],
                               if (severity != null)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),

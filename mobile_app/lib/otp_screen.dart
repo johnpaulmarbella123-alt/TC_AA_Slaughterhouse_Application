@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'auth/auth_server.dart';
 import 'pages/home_page.dart';
 
 class OtpScreen extends StatefulWidget {
@@ -9,7 +8,6 @@ class OtpScreen extends StatefulWidget {
   final String password;
   final String username;
   final String address;
-  final String? simulatedOtp;
 
   OtpScreen({
     super.key,
@@ -18,7 +16,6 @@ class OtpScreen extends StatefulWidget {
     required this.password,
     required this.username,
     required this.address,
-    this.simulatedOtp,
   }) : identifier = (identifier != null && identifier.isNotEmpty)
             ? identifier
             : (phone ?? '');
@@ -33,16 +30,8 @@ class _OtpScreenState extends State<OtpScreen> {
 
   bool isLoading = false;
   bool isResending = false;
-  bool _showNotificationBanner = true;
-  String? _activeSimulatedOtp;
 
   bool get isEmail => widget.identifier.contains('@');
-
-  @override
-  void initState() {
-    super.initState();
-    _activeSimulatedOtp = widget.simulatedOtp ?? AuthService.getDefenseOtp(widget.identifier);
-  }
 
   Future<void> verifyOtp() async {
     final token = otpController.text.trim();
@@ -56,88 +45,6 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() => isLoading = true);
 
     try {
-      final isDefenseMatch = !isEmail &&
-          ((_activeSimulatedOtp != null && token == _activeSimulatedOtp) ||
-              AuthService.verifyDefenseOtp(widget.identifier, token));
-
-      if (isDefenseMatch) {
-        // ── DEFENSE-READY VERIFICATION & LIVE ACCOUNT PERSISTENCE ──
-        try {
-          final res = await supabase.auth.signUp(
-            phone: widget.identifier,
-            password: widget.password,
-            data: {
-              'display_name': widget.username,
-              'address': widget.address,
-            },
-          );
-          if (res.user != null) {
-            await supabase.from('profiles').upsert({
-              'id': res.user!.id,
-              'display_name': widget.username,
-              'phone': widget.identifier,
-              'address': widget.address,
-            });
-          }
-        } catch (_) {
-          // If phone auth without SMS gateway is restricted in Supabase instance,
-          // persist via synthetic credential alias so account genuinely exists
-          final cleanDigits = widget.identifier.replaceAll(RegExp(r'\D'), '');
-          final syntheticEmail = 'user_$cleanDigits@tabaco-abattoir.gov.ph';
-          try {
-            final res = await supabase.auth.signUp(
-              email: syntheticEmail,
-              password: widget.password,
-              data: {
-                'display_name': widget.username,
-                'address': widget.address,
-                'phone': widget.identifier,
-              },
-            );
-            if (res.user != null) {
-              await supabase.from('profiles').upsert({
-                'id': res.user!.id,
-                'display_name': widget.username,
-                'phone': widget.identifier,
-                'email': syntheticEmail,
-                'address': widget.address,
-              });
-            }
-          } catch (_) {
-            try {
-              await supabase.auth.signInWithPassword(
-                email: syntheticEmail,
-                password: widget.password,
-              );
-            } catch (_) {}
-          }
-        }
-
-        AuthService.clearDefenseOtp(widget.identifier);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Account verified successfully! Welcome.'),
-              backgroundColor: Color(0xFF2D6A4F),
-            ),
-          );
-          try {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setBool('has_previously_logged_in', true);
-          } catch (_) {}
-
-          if (!mounted) return;
-          globalAvatarUrl.value = null;
-          Navigator.pushNamedAndRemoveUntil(
-            context,
-            '/HOME',
-            (route) => false,
-          );
-        }
-        return;
-      }
-
       final response = await supabase.auth.verifyOTP(
         type: isEmail ? OtpType.email : OtpType.sms,
         email: isEmail ? widget.identifier : null,
@@ -235,14 +142,7 @@ class _OtpScreenState extends State<OtpScreen> {
       if (isEmail) {
         await supabase.auth.signInWithOtp(email: widget.identifier);
       } else {
-        final authService = AuthService();
-        final res = await authService.sendOtp(widget.identifier);
-        if (res['simulated'] == true) {
-          setState(() {
-            _activeSimulatedOtp = res['otp']?.toString();
-            _showNotificationBanner = true;
-          });
-        }
+        await supabase.auth.signInWithOtp(phone: widget.identifier);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -272,119 +172,6 @@ class _OtpScreenState extends State<OtpScreen> {
     }
   }
 
-  Widget _buildSmsNotificationBanner(String code) {
-    if (!_showNotificationBanner) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF22C55E),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.mark_chat_unread, color: Colors.white, size: 14),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'MESSAGES',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w800,
-                  color: Color(0xFF94A3B8),
-                  letterSpacing: 0.6,
-                ),
-              ),
-              const SizedBox(width: 6),
-              const Text('•', style: TextStyle(color: Color(0xFF64748B))),
-              const SizedBox(width: 6),
-              const Expanded(
-                child: Text(
-                  'Tabaco Slaughterhouse Auth',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const Text('Just now', style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: () => setState(() => _showNotificationBanner = false),
-                child: const Icon(Icons.close, color: Color(0xFF94A3B8), size: 16),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          RichText(
-            text: TextSpan(
-              style: const TextStyle(fontSize: 12.5, color: Colors.white, height: 1.35),
-              children: [
-                const TextSpan(text: 'Your 6-digit OTP verification code is '),
-                TextSpan(
-                  text: code,
-                  style: const TextStyle(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2.0,
-                    color: Color(0xFF4ADE80),
-                  ),
-                ),
-                const TextSpan(text: '. Do not share this code.'),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              InkWell(
-                onTap: () {
-                  otpController.text = code;
-                  setState(() {});
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF334155)),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.touch_app, size: 13, color: Color(0xFF4ADE80)),
-                      SizedBox(width: 4),
-                      Text(
-                        'Auto-Fill Code',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF4ADE80)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   void dispose() {
     otpController.dispose();
@@ -406,8 +193,6 @@ class _OtpScreenState extends State<OtpScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (!isEmail && _activeSimulatedOtp != null)
-              _buildSmsNotificationBanner(_activeSimulatedOtp!),
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.all(20),

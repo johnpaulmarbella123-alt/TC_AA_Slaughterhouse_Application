@@ -837,12 +837,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
             icon: const Icon(Icons.refresh, size: 20),
             color: const Color(0xFF2D3748),
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_forward, size: 26),
-            color: const Color(0xFF2D3748),
-          ),
         ],
       ),
     );
@@ -1569,19 +1563,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: large ? 14 : 13,
-                    fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-                    color: color)),
-          ),
-          const SizedBox(width: 8),
-          Text(amount,
-              style: TextStyle(
-                  fontSize: large ? 14 : 13,
-                  fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-                  color: color)),
+          Text(label, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
+          Text(amount, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
         ],
       ),
     );

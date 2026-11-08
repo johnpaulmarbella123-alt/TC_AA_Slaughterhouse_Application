@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
+
+  Future<void> _markWelcomeSeenAndNavigate(BuildContext context) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('has_seen_welcome', true);
+    } catch (_) {}
+    if (context.mounted) {
+      Navigator.pushReplacementNamed(context, '/LOGIN');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,9 +86,7 @@ class WelcomeScreen extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/LOGIN');
-                      },
+                      onPressed: () => _markWelcomeSeenAndNavigate(context),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF218358),
                         foregroundColor: Colors.white,
@@ -96,9 +105,7 @@ class WelcomeScreen extends StatelessWidget {
                   const SizedBox(height: 16),
                   // Footer Link
                   GestureDetector(
-                    onTap: () {
-                      Navigator.pushNamed(context, '/LOGIN');
-                    },
+                    onTap: () => _markWelcomeSeenAndNavigate(context),
                     child: RichText(
                       text: const TextSpan(
                         style: TextStyle(color: Colors.black54, fontSize: 14),

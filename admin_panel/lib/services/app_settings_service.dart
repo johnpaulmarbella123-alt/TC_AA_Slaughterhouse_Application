@@ -399,8 +399,7 @@ class AppSettingsService extends ChangeNotifier {
     final session = client.auth.currentSession;
     final isExpired = session?.isExpired ?? true;
     final currentAuthEmail = session?.user.email?.toLowerCase() ?? '';
-    final isStaffOverrideActive = hasActiveStaffSession &&
-        _activeStaffOverrideEmail!.toLowerCase() != 'tcaaslaughterhouse@gmail.com';
+    final isStaffOverrideActive = hasActiveStaffSession;
     final isSignedInAsNonAdminStaff = isStaffOverrideActive &&
         currentAuthEmail.isNotEmpty &&
         currentAuthEmail == _activeStaffOverrideEmail!.toLowerCase() &&
@@ -438,11 +437,6 @@ class AppSettingsService extends ChangeNotifier {
           candidates.add({'email': s.email.trim(), 'password': s.password!});
         }
       }
-
-      candidates.add({
-        'email': 'tcaaslaughterhouse@gmail.com',
-        'password': 'tcaa1234',
-      });
 
       for (final cred in candidates) {
         try {
@@ -553,15 +547,6 @@ class AppSettingsService extends ChangeNotifier {
 
   // 2. Staff Accounts & Roles
   final List<StaffAccount> _staffAccounts = [
-    StaffAccount(
-      id: 'staff-1',
-      fullName: 'Dr. Roberto Mendoza',
-      email: 'admin.mendoza@tabaco.gov.ph',
-      role: 'Admin',
-      isActive: true,
-      createdAt: DateTime(2025, 1, 10),
-      password: 'AdminPassword123!',
-    ),
     StaffAccount(
       id: 'staff-2',
       fullName: 'Elena Santos',
@@ -676,6 +661,12 @@ class AppSettingsService extends ChangeNotifier {
 
   Future<void> deleteStaffAccount(String id) async {
     _staffAccounts.removeWhere((s) => s.id == id);
+    notifyListeners();
+    await _saveStaffToPrefs();
+  }
+
+  Future<void> removeStaffAccountWhere(bool Function(StaffAccount) test) async {
+    _staffAccounts.removeWhere(test);
     notifyListeners();
     await _saveStaffToPrefs();
   }
