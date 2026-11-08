@@ -406,11 +406,11 @@ String? _extractStoragePath(String publicUrl) {
         await prefs.setBool('has_previously_logged_in', true);
       } catch (_) {}
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
       }
     }
   }

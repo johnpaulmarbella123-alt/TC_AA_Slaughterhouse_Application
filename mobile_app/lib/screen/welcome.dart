@@ -39,95 +39,109 @@ class WelcomeScreen extends StatelessWidget {
 
           // Content
           SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Column(
-                children: [
-                  const SizedBox(height: 20),
-                  // Header Logo
-                  Image.asset(
-                    'assets/images/logo1.png',
-                    height: 80,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    "Welcome! to Tabaco City Slaughterhouse. Safe, clean, and quality livestock processing for all community 'AA'.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  // Hero Image
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: Image.asset(
-                      'assets/images/BG.jpeg',
-                      height: size.height * 0.3,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const Spacer(),
-                  // Main Action
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pushNamed(context, '/LOGIN');
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF218358),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 18),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Text(
-                        "Get Started",
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Footer Link
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.pushNamed(context, '/LOGIN');
-                    },
-                    child: RichText(
-                      text: const TextSpan(
-                        style: TextStyle(color: Colors.black54, fontSize: 14),
-                        children: [
-                          TextSpan(text: "Already have an account? "),
-                          TextSpan(
-                            text: "Log In here!",
-                            style: TextStyle(
-                              color: Color(0xFF218358),
-                              fontWeight: FontWeight.bold,
-                              decoration: TextDecoration.underline,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                    child: IntrinsicHeight(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 20),
+                            // Header Logo
+                            Image.asset(
+                              'assets/images/logo1.png',
+                              height: 80,
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 20),
+                            const Text(
+                              "Welcome! to Tabaco City Slaughterhouse. Safe, clean, and quality livestock processing for all community 'AA'.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 15.5,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.black87,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            // Hero Image
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: Image.asset(
+                                'assets/images/BG.jpeg',
+                                height: (size.height * 0.28).clamp(160.0, 240.0),
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            const Spacer(),
+                            const SizedBox(height: 20),
+                            // Main Action
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () {
+                                  Navigator.pushNamed(context, '/LOGIN');
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF218358),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 18),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(30),
+                                  ),
+                                  elevation: 0,
+                                ),
+                                child: const Text(
+                                  "Get Started",
+                                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            // Footer Link
+                            GestureDetector(
+                              onTap: () {
+                                Navigator.pushNamed(context, '/LOGIN');
+                              },
+                              child: RichText(
+                                text: const TextSpan(
+                                  style: TextStyle(color: Colors.black54, fontSize: 14),
+                                  children: [
+                                    TextSpan(text: "Already have an account? "),
+                                    TextSpan(
+                                      text: "Log In here!",
+                                      style: TextStyle(
+                                        color: Color(0xFF218358),
+                                        fontWeight: FontWeight.bold,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 20),
+                            // Watermark Logo
+                            Opacity(
+                              opacity: 0.3,
+                              child: Image.asset(
+                                'assets/images/logo2.png',
+                                height: 36,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  // Watermark Logo
-                  Opacity(
-                    opacity: 0.3,
-                    child: Image.asset(
-                      'assets/images/logo2.png',
-                      height: 40,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-              ),
+                );
+              },
             ),
           ),
         ],
