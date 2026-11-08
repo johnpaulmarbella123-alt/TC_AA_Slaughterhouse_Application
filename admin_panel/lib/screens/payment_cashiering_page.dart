@@ -3,6 +3,7 @@ import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/app_settings_service.dart';
 import '../services/notification_service.dart';
 
@@ -120,39 +121,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       }).toList();
 
       _penaltyTrackingMap = trackingMap;
-
-      // Auto-confirm PayMongo-verified GCash payments (including RCP-2026-122 / pay_R3uyP3LrhWNyTswAgu4zka4y)
-      for (final r in enriched) {
-        final reqId = r['id'];
-        final reqIdStr = reqId?.toString();
-        final payMap = r['payment'] is Map ? Map<String, dynamic>.from(r['payment'] as Map) : null;
-        final methodStr = (payMap?['payment_method'] ?? '').toString().trim().toLowerCase();
-        final isPaymongoGcashPending = payMap != null &&
-            payMap['status'] != 'paid' &&
-            (methodStr == 'gcash' || (reqIdStr == '122' && r['status'] == 'payment_pending'));
-
-        if (isPaymongoGcashPending) {
-          final receiptNo = _receiptNo(r);
-          payMap['payment_method'] = 'GCash';
-          payMap['status'] = 'paid';
-          payMap['balance'] = 0;
-          payMap['receipt_number'] = receiptNo;
-          r['payment'] = payMap;
-          if (r['status'] == 'payment_pending' || r['status'] == 'releasable' || r['status'] == 'mic_generated') {
-            r['status'] = 'paid';
-          }
-          try {
-            await supabase.from('payments').update({
-              'payment_method': 'GCash',
-              'status': 'paid',
-              'balance': 0,
-              'receipt_number': receiptNo,
-              'cashier_name': 'PayMongo (Auto)',
-            }).eq('request_id', reqId);
-            await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
-          } catch (_) {}
-        }
-      }
 
       await _checkAndTriggerOverduePaymentPenaltyNotifications(enriched, trackingMap);
 
@@ -533,10 +501,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     if (req['status'] == 'paid' || req['status'] == 'released') return 'Verified';
     if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
       final m = payment['payment_method'].toString().trim().toLowerCase();
-      if (m == 'gcash') {
+      if (m == 'gcash' || m == 'maya' || m == 'card' || m == 'grabpay' || m.contains('online') || m.contains('paymongo')) {
         return 'Verified';
       }
-      if (!m.contains('gcash') && m.contains('cash')) {
+      if (!m.contains('gcash') && !m.contains('maya') && !m.contains('card') && !m.contains('grabpay') && !m.contains('online') && !m.contains('paymongo') && m.contains('cash')) {
         return 'Cash on Pick-up';
       }
       return 'Awaiting Verification';
@@ -548,9 +516,17 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   String _paymentMethod(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
     if (payment != null && payment['payment_method'] != null) {
-      return payment['payment_method'].toString();
+      final m = payment['payment_method'].toString();
+      if (m.toLowerCase() == 'gcash' || m.toLowerCase().contains('online') || m.toLowerCase().contains('paymongo')) {
+        return 'Online Payment (PayMongo)';
+      }
+      return m;
     }
-    return req['payment_method']?.toString() ?? '—';
+    final reqMethod = req['payment_method']?.toString() ?? '—';
+    if (reqMethod.toLowerCase() == 'gcash' || reqMethod.toLowerCase().contains('online') || reqMethod.toLowerCase().contains('paymongo')) {
+      return 'Online Payment (PayMongo)';
+    }
+    return reqMethod;
   }
 
   // ════════════════════════════════════════════
@@ -613,23 +589,28 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       // Update request status
       await supabase.from('requests').update({'status': 'payment_pending'}).eq('id', reqId);
 
-      // Send notification to customer safely (includes 5:00 PM penalty reminder)
-      await NotificationService.sendNotificationSafely(
-        supabase,
-        userId: userId,
-        title: 'Slaughter Request Receipt Issued (Pay Before 5:00 PM)',
-        message: isBarangay
-            ? 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr or an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred. Additionally, meat not picked up by 5:00 PM after collection notice incurs a \u20b1150.00 Cold Storage fee.'
-            : 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr. If the 5:00 PM deadline passes without payment, an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred.',
-        type: 'receipt_issued',
-        data: {
-          'receipt_no': receiptNo,
-          'reference_no': refNo,
-          'amount': fees['total'],
-          'request_id': reqId,
-          'due_date': dueDate.toIso8601String(),
-        },
-      );
+      // Send notification to customer safely (suppressed for on-site immediate slaughter walk-ins)
+      final isImmediateOnSite = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+          (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+          (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      if (!isImmediateOnSite && userId != null && userId.toString().isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          supabase,
+          userId: userId,
+          title: 'Slaughter Request Receipt Issued (Pay Before 5:00 PM)',
+          message: isBarangay
+              ? 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr or an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred. Additionally, meat not picked up by 5:00 PM after collection notice incurs a \u20b1150.00 Cold Storage fee.'
+              : 'Your slaughter operation request ($refNo) has been processed and Receipt $receiptNo (Total: \u20b1${(fees['total'] as num).toStringAsFixed(2)}) has been issued. REMINDER: Payment must be made on or before $dueDateStr. If the 5:00 PM deadline passes without payment, an automatic \u20b1100.00 Overdue Payment penalty fee will be incurred.',
+          type: 'receipt_issued',
+          data: {
+            'receipt_no': receiptNo,
+            'reference_no': refNo,
+            'amount': fees['total'],
+            'request_id': reqId,
+            'due_date': dueDate.toIso8601String(),
+          },
+        );
+      }
 
       _loadRequests();
       if (mounted) {
@@ -1051,9 +1032,41 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                           final status = _paymentStatus(req);
                           final method = _paymentMethod(req);
 
+                          final isImmediateSlaughter = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+                              (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+                              (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+
                           return DataRow(cells: [
                             DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                            DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                            DataCell(Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                if (isImmediateSlaughter) ...[
+                                  const SizedBox(height: 3),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFF7ED),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFF97316)),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.bolt, size: 11, color: Color(0xFFC2410C)),
+                                        SizedBox(width: 3),
+                                        Text(
+                                          'Waiting On-Site / Immediate',
+                                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            )),
                             DataCell(Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1069,7 +1082,17 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                               children: [
                                 if (method != '\u2014') ...[
                                   Icon(
-                                    method == 'Cash' ? Icons.payments_outlined : (method == 'GCash' ? Icons.phone_android : Icons.credit_card),
+                                    method == 'Cash'
+                                        ? Icons.payments_outlined
+                                        : (method.toLowerCase().contains('online') || method.toLowerCase().contains('paymongo')
+                                            ? Icons.public
+                                            : (method == 'GCash'
+                                                ? Icons.phone_android
+                                                : (method == 'Maya'
+                                                    ? Icons.account_balance_wallet_outlined
+                                                    : (method == 'GrabPay'
+                                                        ? Icons.local_taxi_outlined
+                                                        : Icons.credit_card)))),
                                     size: 14,
                                     color: Colors.grey.shade600,
                                   ),
@@ -1182,6 +1205,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final weight = _carcassWeight(req);
     final payment = req['payment'] as Map<String, dynamic>?;
     final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[req['id'].toString()]) as Map<String, dynamic>?;
+    final isImmediateSlaughter = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+        (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+        (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
     showDialog(
       context: context,
@@ -1211,7 +1237,34 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 const SizedBox(height: 2),
                 Text('Date: ${DateFormat('M/dd/yyyy').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
                 Text('Time: ${DateFormat('h:mm:ss a').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
-                if (status != 'Verified' && status != 'Awaiting Verification') ...[
+                if (isImmediateSlaughter) ...[
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 4),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF7ED),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFEA580C)),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.bolt, color: Color(0xFFC2410C), size: 20),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'IMMEDIATE SLAUGHTER (ON-SITE)\nCustomer waiting at the slaughterhouse for carcass processing. Settle payment at the cashier counter upon inspection completion (no overnight penalty applies).',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF9A3412),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else if (status != 'Verified' && status != 'Awaiting Verification') ...[
                   Text(
                     'Due Date: ${DateFormat('M/dd/yyyy').format(fees['due_date'] as DateTime? ?? DateTime.now())} • 5:00 PM',
                     style: TextStyle(
@@ -1490,51 +1543,68 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (status != 'Verified' && req['status'] != 'payment_pending')
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _sendReceiptForPayment(req);
-                        },
-                        icon: const Icon(Icons.send, size: 16, color: Colors.white),
-                        label: const Text('Send Receipt to Customer', style: TextStyle(color: Colors.white, fontSize: 13)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2D6A4F),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    if (isImmediateSlaughter) ...[
+                      if (status != 'Verified')
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _showNewPaymentDialog(req['id']);
+                          },
+                          icon: const Icon(Icons.payments_outlined, size: 16, color: Colors.white),
+                          label: const Text('Process Payment', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2D6A4F),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
-                      ),
-                    if (status != 'Verified' && method != '—' && method.isNotEmpty)
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _verifyAndConfirmPayment(req);
-                        },
-                        icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
-                        label: Text('Verify & Confirm $method Payment', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2D6A4F),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ] else ...[
+                      if (status != 'Verified' && req['status'] != 'payment_pending')
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _sendReceiptForPayment(req);
+                          },
+                          icon: const Icon(Icons.send, size: 16, color: Colors.white),
+                          label: const Text('Send Receipt to Customer', style: TextStyle(color: Colors.white, fontSize: 13)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2D6A4F),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
-                      )
-                    else if (req['status'] == 'payment_pending' && status != 'Verified')
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange.shade200),
+                      if (status != 'Verified' && method != '—' && method.isNotEmpty)
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _verifyAndConfirmPayment(req);
+                          },
+                          icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                          label: Text('Verify & Confirm $method Payment', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2D6A4F),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        )
+                      else if (req['status'] == 'payment_pending' && status != 'Verified')
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.orange.shade200),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.hourglass_empty, size: 16, color: Colors.orange),
+                              SizedBox(width: 8),
+                              Text('Awaiting Customer Payment', style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
                         ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.hourglass_empty, size: 16, color: Colors.orange),
-                            SizedBox(width: 8),
-                            Text('Awaiting Customer Payment', style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ),
+                    ],
                     if (status != 'Verified') const SizedBox(width: 12),
                     OutlinedButton.icon(
                       onPressed: () => Navigator.pop(context),
@@ -1575,7 +1645,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   // ════════════════════════════════════════════
   //  NEW PAYMENT ENTRY DIALOG (Walk-in)
   // ════════════════════════════════════════════
-  void _showNewPaymentDialog() {
+  void _showNewPaymentDialog([dynamic prefillRequestId]) {
     final allReqs = [..._barangayRequests, ..._marketRequests];
     // Gather orders awaiting or pending payment
     final pendingReqs = allReqs.where((r) {
@@ -1590,6 +1660,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         supabase: supabase,
         pendingRequests: pendingReqs,
         onDone: _loadRequests,
+        initialRequestId: prefillRequestId,
       ),
     );
   }
@@ -1602,10 +1673,12 @@ class _NewPaymentEntryDialog extends StatefulWidget {
   final SupabaseClient supabase;
   final List<Map<String, dynamic>> pendingRequests;
   final VoidCallback onDone;
+  final dynamic initialRequestId;
   const _NewPaymentEntryDialog({
     required this.supabase,
     required this.pendingRequests,
     required this.onDone,
+    this.initialRequestId,
   });
   @override
   State<_NewPaymentEntryDialog> createState() => _NewPaymentEntryDialogState();
@@ -1619,6 +1692,10 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   String _selectedMethod = 'Cash';
   bool _isLoading = false;
   bool _isProcessing = false;
+  bool _isWaitingOnlinePayment = false;
+  bool _paymentCompletedSuccessfully = false;
+  Timer? _pollTimer;
+  String? _checkoutUrl;
   Map<String, dynamic>? _foundRequest;
   Map<String, dynamic> _fees = {};
   late final String _yearPrefix;
@@ -1627,6 +1704,13 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   void initState() {
     super.initState();
     _yearPrefix = 'MI-${DateTime.now().year}-';
+    if (widget.initialRequestId != null) {
+      final idStr = widget.initialRequestId.toString();
+      _refCtrl.text = idStr;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _lookupReference(idStr);
+      });
+    }
   }
 
   Future<void> _lookupReference([String? manualInput]) async {
@@ -1798,7 +1882,9 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         'request_id': reqId,
         'user_id': userId,
         'receipt_number': receiptNo,
-        'payment_method': _selectedMethod,
+        'payment_method': (_selectedMethod.contains('Online') || _selectedMethod.contains('PayMongo'))
+            ? 'GCash'
+            : _selectedMethod,
         'total_amount': _fees['total'],
         'balance': 0,
         'status': 'paid',
@@ -1820,20 +1906,25 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
       await widget.supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
 
-      // Send notification safely
-      await NotificationService.sendNotificationSafely(
-        widget.supabase,
-        userId: userId,
-        title: 'Slaughter Request Receipt Issued',
-        message: 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
-        type: 'receipt_issued',
-        data: {
-          'receipt_no': receiptNo,
-          'reference_no': refNo,
-          'amount': _fees['total'],
-          'request_id': reqId,
-        },
-      );
+      // Send notification safely (suppressed for on-site immediate slaughter walk-ins)
+      final isImmediateOnSite = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+          (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+          (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      if (!isImmediateOnSite && userId != null && userId.toString().isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: 'Slaughter Request Receipt Issued',
+          message: 'Your slaughter operation request has been successfully processed. A receipt has been generated for your transaction and is now available for viewing.',
+          type: 'receipt_issued',
+          data: {
+            'receipt_no': receiptNo,
+            'reference_no': refNo,
+            'amount': _fees['total'],
+            'request_id': reqId,
+          },
+        );
+      }
 
       if (mounted) {
         Navigator.pop(context);
@@ -1860,14 +1951,276 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
     }
   }
 
+  Future<void> _initiateOnlinePayment() async {
+    if (_foundRequest == null) return;
+    setState(() => _isProcessing = true);
+    try {
+      final req = _foundRequest!;
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final receiptNo = 'RCP-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final double total = (_fees['total'] as num?)?.toDouble() ?? _totalAmount;
+
+      // Upsert pending payment row so the server-side fee verification in Edge function matches
+      final existing = await widget.supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
+      final paymentData = {
+        'request_id': reqId,
+        'user_id': userId,
+        'receipt_number': receiptNo,
+        'payment_method': 'GCash',
+        'total_amount': total,
+        'balance': total,
+        'status': 'pending',
+        'cashier_name': 'PayMongo Online',
+        'vet_health_cert_fee': _fees['vet_health_cert'],
+        'permit_fee': _fees['permit_to_slaughter'],
+        'facility_fee': _fees['facility'],
+        'corral_fee': _fees['corral'],
+        'ante_mortem_fee': _fees['ante_mortem'],
+        'post_mortem_fee': _fees['post_mortem'],
+        'delivery_van_fee': _fees['delivery_van'],
+      };
+
+      if (existing != null) {
+        await widget.supabase.from('payments').update(paymentData).eq('request_id', reqId);
+      } else {
+        await widget.supabase.from('payments').insert(paymentData);
+      }
+
+      await widget.supabase.from('requests').update({'status': 'payment_pending'}).eq('id', reqId);
+
+      // Invoke create-gcash-payment edge function
+      final res = await widget.supabase.functions.invoke(
+        'create-gcash-payment',
+        body: {
+          'request_id': reqId,
+          'amount': total,
+          'customerName': _customerName.isNotEmpty ? _customerName : 'Walk-in Customer',
+          'description': 'Slaughter Service Online Payment - Walk-in Customer ($receiptNo)',
+        },
+      );
+
+      final resData = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : null;
+      final checkoutUrl = resData?['checkout_url']?.toString();
+
+      if (checkoutUrl == null || checkoutUrl.isEmpty) {
+        final err = resData?['error']?.toString() ?? resData?['details']?.toString() ?? 'Failed to generate PayMongo checkout URL';
+        throw Exception(err);
+      }
+
+      _checkoutUrl = checkoutUrl;
+      final uri = Uri.parse(checkoutUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+
+      setState(() {
+        _isProcessing = false;
+        _isWaitingOnlinePayment = true;
+      });
+
+      _startOnlinePaymentPolling(reqId, receiptNo);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error generating PayMongo checkout: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  void _startOnlinePaymentPolling(dynamic reqId, String receiptNo) {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 2500), (timer) async {
+      try {
+        final data = await widget.supabase
+            .from('requests')
+            .select('status, payments(*)')
+            .eq('id', reqId)
+            .maybeSingle();
+
+        if (data == null) return;
+        final st = (data['status'] ?? '').toString().toLowerCase();
+        final pRaw = data['payments'];
+        final pMap = pRaw is Map ? pRaw : (pRaw is List && pRaw.isNotEmpty ? pRaw.first as Map : null);
+        final pStatus = (pMap?['status'] ?? '').toString().toLowerCase();
+
+        if (st == 'paid' || pStatus == 'paid') {
+          timer.cancel();
+          if (mounted) {
+            setState(() {
+              _paymentCompletedSuccessfully = true;
+            });
+            await Future.delayed(const Duration(milliseconds: 1500));
+            if (mounted) {
+              Navigator.pop(context);
+              widget.onDone();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(children: [
+                    const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Online payment confirmed for $receiptNo'),
+                  ]),
+                  backgroundColor: Colors.green.shade600,
+                ),
+              );
+            }
+          }
+        }
+      } catch (_) {}
+    });
+  }
+
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _refCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_paymentCompletedSuccessfully) {
+      return Dialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 480,
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Color(0xFF16A34A), size: 64),
+              const SizedBox(height: 16),
+              const Text('Payment Confirmed!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              const SizedBox(height: 8),
+              Text(
+                'Receipt RCP-${DateTime.now().year}-${_foundRequest?['id'].toString().padLeft(3, '0')} has been successfully generated and settled.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13.5, color: Color(0xFF64748B)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_isWaitingOnlinePayment) {
+      final total = (_fees['total'] as num?)?.toDouble() ?? _totalAmount;
+      return Dialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          width: 500,
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFF93C5FD)),
+                ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 3, color: Color(0xFF2563EB)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Awaiting Online Payment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              const SizedBox(height: 6),
+              Text(
+                'PayMongo Checkout has opened in a browser tab for ${_customerName.isNotEmpty ? _customerName : "the customer"}.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Total Due:', style: TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                        Text(
+                          '₱${total.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Row(
+                      children: [
+                        Icon(Icons.lock_outline, size: 14, color: Color(0xFF10B981)),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'Customer can pay via GCash, Maya, Cards (Visa/Mastercard), GrabPay, or QR Ph.',
+                            style: TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      _pollTimer?.cancel();
+                      setState(() => _isWaitingOnlinePayment = false);
+                    },
+                    child: const Text('Cancel & Return', style: TextStyle(color: Colors.grey)),
+                  ),
+                  if (_checkoutUrl != null)
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final uri = Uri.parse(_checkoutUrl!);
+                        if (await canLaunchUrl(uri)) {
+                          await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        }
+                      },
+                      icon: const Icon(Icons.open_in_new, size: 16),
+                      label: const Text('Re-open Checkout Tab'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF2563EB),
+                        side: const BorderSide(color: Color(0xFF93C5FD)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Dialog(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
@@ -2150,22 +2503,28 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                     value: _selectedMethod,
                     isExpanded: true,
                     hint: const Text('Select payment method', style: TextStyle(color: Colors.grey, fontSize: 13)),
-                    items: ['Cash', 'GCash', 'Card']
-                        .map((m) => DropdownMenuItem(
-                              value: m,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    m == 'Cash' ? Icons.payments_outlined : (m == 'GCash' ? Icons.phone_android : Icons.credit_card),
-                                    size: 18,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(m, style: const TextStyle(fontSize: 14)),
-                                ],
-                              ),
-                            ))
-                        .toList(),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'Cash',
+                        child: Row(
+                          children: [
+                            Icon(Icons.payments_outlined, size: 18, color: Color(0xFF2D6A4F)),
+                            SizedBox(width: 8),
+                            Text('Cash', style: TextStyle(fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Online Payment (PayMongo)',
+                        child: Row(
+                          children: [
+                            Icon(Icons.public, size: 18, color: Color(0xFF2563EB)),
+                            SizedBox(width: 8),
+                            Text('Online Payment (PayMongo)', style: TextStyle(fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ],
                     onChanged: (v) {
                       if (v != null) setState(() => _selectedMethod = v);
                     },
@@ -2174,7 +2533,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
               ),
               const SizedBox(height: 28),
 
-              // Process Button
+              // Action Buttons
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -2183,18 +2542,37 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                     child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
                   ),
                   const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _foundRequest != null && !_isProcessing ? _processPayment : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D3748),
-                      disabledBackgroundColor: Colors.grey.shade300,
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  if (_selectedMethod == 'Online Payment (PayMongo)') ...[
+                    ElevatedButton.icon(
+                      onPressed: _foundRequest != null && !_isProcessing ? _initiateOnlinePayment : null,
+                      icon: _isProcessing
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Icon(Icons.open_in_new, size: 16, color: Colors.white),
+                      label: Text(
+                        _isProcessing ? 'Opening...' : 'Open PayMongo Checkout in Browser',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF047857),
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
                     ),
-                    child: _isProcessing
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Text('Process Payment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
+                  ] else ...[
+                    ElevatedButton(
+                      onPressed: _foundRequest != null && !_isProcessing ? _processPayment : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2D3748),
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: _isProcessing
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text('Process Payment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
                 ],
               ),
             ],

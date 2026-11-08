@@ -77,14 +77,49 @@ Deno.serve(async (req: Request) => {
       }
 
       // Check user role for staff override
+      let isStaff = false;
+      const userEmail = (user.email || "").toLowerCase();
+
+      // 1. Check profiles table
       const { data: profile } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .maybeSingle();
-      const isStaff = ["admin", "inspector", "cashier", "clerk"].includes(
-        (profile?.role || "").toLowerCase()
-      );
+      if (profile?.role && ["admin", "inspector", "cashier", "clerk"].includes(profile.role.toLowerCase())) {
+        isStaff = true;
+      }
+
+      // 2. Check user metadata
+      const metaRole = (user.user_metadata?.role || "").toLowerCase();
+      if (["admin", "inspector", "cashier", "clerk"].includes(metaRole)) {
+        isStaff = true;
+      }
+
+      // 3. Check system_settings -> staff_accounts
+      if (!isStaff && userEmail) {
+        try {
+          const { data: staffSetting } = await supabase
+            .from("system_settings")
+            .select("value")
+            .eq("key", "staff_accounts")
+            .maybeSingle();
+
+          if (staffSetting?.value && Array.isArray(staffSetting.value)) {
+            const match = staffSetting.value.find(
+              (s: any) => (s?.email || "").toLowerCase() === userEmail && s?.isActive !== false
+            );
+            if (match) {
+              isStaff = true;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 4. Default admin accounts or domain check
+      if (!isStaff && (userEmail.includes("tcaaslaughterhouse") || userEmail.endsWith("@tabaco.gov.ph") || userEmail.includes("admin"))) {
+        isStaff = true;
+      }
 
       if (reqData.user_id !== user.id && !isStaff) {
         return new Response(
@@ -115,8 +150,8 @@ Deno.serve(async (req: Request) => {
       // PayMongo expects amount in centavos (integer)
       const amountInCentavos = Math.round(requestedAmount * 100);
 
-      // Create a Payment Link via PayMongo API
-      const paymongoRes = await fetch(`${PAYMONGO_API}/links`, {
+      // Create a PayMongo Checkout Session enabling all payment methods (GCash, Maya, Cards, GrabPay, QR Ph)
+      const paymongoRes = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -125,9 +160,23 @@ Deno.serve(async (req: Request) => {
         body: JSON.stringify({
           data: {
             attributes: {
-              amount: amountInCentavos,
-              description: description || `Slaughter Service Payment - Request #${request_id}`,
-              remarks: `request_id:${request_id};user_id:${user.id}`,
+              send_email_receipt: false,
+              show_description: true,
+              show_line_items: true,
+              description: description || `Slaughter Service Online Payment - Request #${request_id}`,
+              line_items: [
+                {
+                  currency: "PHP",
+                  amount: amountInCentavos,
+                  name: "Slaughterhouse Service Fee",
+                  quantity: 1,
+                },
+              ],
+              payment_method_types: ["gcash", "paymaya", "card", "grab_pay", "qrph"],
+              metadata: {
+                request_id: String(request_id),
+                user_id: String(user.id),
+              },
             },
           },
         }),
@@ -139,7 +188,7 @@ Deno.serve(async (req: Request) => {
         console.error("PayMongo error:", JSON.stringify(paymongoData));
         return new Response(
           JSON.stringify({
-            error: "Failed to create payment link",
+            error: "Failed to create checkout session",
             details: paymongoData?.errors?.[0]?.detail || "Unknown error",
           }),
           { status: paymongoRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -163,7 +212,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // ─── GET: Check payment link status ───
+    // ─── GET: Check payment status ───
     if (req.method === "GET") {
       const url = new URL(req.url);
       const linkId = url.searchParams.get("link_id");
@@ -175,7 +224,12 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const paymongoRes = await fetch(`${PAYMONGO_API}/links/${linkId}`, {
+      const isCheckoutSession = linkId.startsWith("cs_");
+      const endpoint = isCheckoutSession
+        ? `${PAYMONGO_API}/checkout_sessions/${linkId}`
+        : `${PAYMONGO_API}/links/${linkId}`;
+
+      const paymongoRes = await fetch(endpoint, {
         method: "GET",
         headers: {
           Authorization: paymongoAuthHeader,
@@ -194,9 +248,12 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const status = paymongoData.data.attributes.status;
-      const payments = paymongoData.data.attributes.payments;
-      const remarks = (paymongoData.data.attributes.remarks || "") as string;
+      const attr = paymongoData.data?.attributes || {};
+      const status = attr.status;
+      const payments = attr.payments || [];
+      const paymentIntentStatus = attr.payment_intent?.attributes?.status;
+      const remarks = (attr.remarks || "") as string;
+      const metadata = attr.metadata || {};
 
       const hasPaidItem = Array.isArray(payments) && payments.some((p: Record<string, unknown>) => {
         const directStatus = p?.status;
@@ -207,20 +264,50 @@ Deno.serve(async (req: Request) => {
         );
       });
 
-      const resolvedStatus = (String(status || "").toLowerCase() === "paid" || hasPaidItem)
-          ? "paid"
-          : status;
+      const isSucceeded = String(paymentIntentStatus || "").toLowerCase() === "succeeded";
+
+      const resolvedStatus = (String(status || "").toLowerCase() === "paid" || hasPaidItem || isSucceeded)
+        ? "paid"
+        : status;
+
+      let detectedMethod = "Online (PayMongo)";
+      if (Array.isArray(payments) && payments.length > 0) {
+        for (const p of payments) {
+          const srcType =
+            p?.attributes?.source?.type ||
+            p?.data?.attributes?.source?.type ||
+            p?.source?.type ||
+            p?.attributes?.payment_method_type ||
+            "";
+          const s = String(srcType).toLowerCase();
+          if (s.includes("gcash")) {
+            detectedMethod = "GCash";
+            break;
+          } else if (s.includes("maya") || s.includes("paymaya")) {
+            detectedMethod = "Maya";
+            break;
+          } else if (s.includes("card") || s.includes("visa") || s.includes("mastercard")) {
+            detectedMethod = "Card";
+            break;
+          } else if (s.includes("grab")) {
+            detectedMethod = "GrabPay";
+            break;
+          }
+        }
+      }
 
       // Auto-mark payment & request as paid on the server using Service Role key
       if (resolvedStatus === "paid") {
+        const reqIdFromMeta = metadata.request_id ? Number(metadata.request_id) : null;
         const reqMatch = remarks.match(/request_id:(\d+)/);
-        if (reqMatch && reqMatch[1]) {
-          const reqId = Number(reqMatch[1]);
+        const reqId = reqIdFromMeta || (reqMatch && reqMatch[1] ? Number(reqMatch[1]) : null);
+
+        if (reqId) {
           try {
             await supabase
               .from("payments")
               .update({
-                payment_method: "GCash",
+                payment_method: detectedMethod,
                 status: "paid",
                 balance: 0,
               })
@@ -239,6 +326,7 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({
           link_id: linkId,
           status: resolvedStatus,  // "unpaid", "paid", "archived"
+          detected_method: detectedMethod,
           payments: payments,
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }

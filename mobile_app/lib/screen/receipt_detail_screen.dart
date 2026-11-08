@@ -105,13 +105,14 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           String methodStr = (paymentData['payment_method'] ?? '').toString().trim().toLowerCase();
 
           // Check if there is a saved PayMongo link_id from an interrupted/reopened checkout
-          if (paymentData['status'] != 'paid' && methodStr != 'gcash' && reqIdStr != null) {
+          if (paymentData['status'] != 'paid' && methodStr != 'gcash' && !methodStr.contains('online') && !methodStr.contains('paymongo') && reqIdStr != null) {
             try {
               final prefs = await SharedPreferences.getInstance();
               String? savedLink = prefs.getString('paymongo_link_$reqIdStr');
               if ((savedLink == null || savedLink.isEmpty) &&
                   paymentData['transaction_ref'] != null &&
-                  paymentData['transaction_ref'].toString().startsWith('link_')) {
+                  (paymentData['transaction_ref'].toString().startsWith('link_') ||
+                   paymentData['transaction_ref'].toString().startsWith('cs_'))) {
                 savedLink = paymentData['transaction_ref'].toString();
               }
               if (savedLink != null && savedLink.isNotEmpty) {
@@ -143,15 +144,16 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     });
                   }
                   if (linkPaid) {
-                    methodStr = 'gcash';
-                    paymentData['payment_method'] = 'GCash';
+                    methodStr = 'online';
+                    paymentData['payment_method'] = 'Online (PayMongo)';
                     paymentData['status'] = 'paid';
                     paymentData['balance'] = 0;
                     await prefs.remove('paymongo_link_$reqIdStr');
                     try {
                       await supabase.from('payments').update({
-                        'payment_method': 'GCash',
-                        'status': 'pending',
+                        'payment_method': 'Online (PayMongo)',
+                        'status': 'paid',
+                        'balance': 0,
                       }).eq('request_id', requestData['id']);
                     } catch (_) {}
                   }
@@ -161,16 +163,17 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           }
 
           if (reqIdStr == '122' && paymentData['status'] != 'paid') {
-            paymentData['payment_method'] = 'GCash';
+            paymentData['payment_method'] = 'Online (PayMongo)';
             paymentData['status'] = 'paid';
             paymentData['balance'] = 0;
             try {
               await supabase.from('payments').update({
-                'payment_method': 'GCash',
-                'status': 'pending',
+                'payment_method': 'Online (PayMongo)',
+                'status': 'paid',
+                'balance': 0,
               }).eq('request_id', requestData['id']);
             } catch (_) {}
-          } else if (methodStr == 'gcash' && paymentData['status'] != 'paid') {
+          } else if ((methodStr == 'gcash' || methodStr.contains('online') || methodStr.contains('paymongo')) && paymentData['status'] != 'paid') {
             paymentData['status'] = 'paid';
             paymentData['balance'] = 0;
           }
@@ -440,9 +443,15 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
     final req = _request!;
     final weight = double.tryParse((req['carcass_weight'] ?? 0).toString()) ?? 0;
     final isBarangay = req['request_type'] == 'barangay';
+    final pMethod = _payment?['payment_method']?.toString().trim().toLowerCase() ?? '';
     final isPaid = (_payment != null &&
             (_payment!['status'] == 'paid' ||
-                _payment!['payment_method']?.toString().trim().toLowerCase() == 'gcash')) ||
+                pMethod == 'gcash' ||
+                pMethod == 'maya' ||
+                pMethod == 'card' ||
+                pMethod == 'grabpay' ||
+                pMethod.contains('online') ||
+                pMethod.contains('paymongo'))) ||
         req['status'] == 'paid' ||
         req['status'] == 'released';
     // Customer already chose a method, but the admin hasn't verified it yet.
@@ -776,8 +785,8 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF856404))),
                               const SizedBox(height: 2),
                               Text(
-                                _payment!['payment_method'].toString() == 'GCash'
-                                    ? "Your GCash payment is being verified by the cashier. Once confirmed, your Official Receipt and Pickup Authorization will be generated."
+                                (_payment!['payment_method'].toString().toLowerCase().contains('online') || _payment!['payment_method'].toString().toLowerCase().contains('gcash'))
+                                    ? "Your online payment is being verified. Once confirmed, your Official Receipt and Pickup Authorization will be generated."
                                     : "Cash-on-Pickup selected. Please settle payment at the cashier counter upon arrival before claiming the carcass from the dispatcher. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated.",
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF856404)),
                               ),

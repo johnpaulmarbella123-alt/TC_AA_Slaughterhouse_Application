@@ -2265,8 +2265,11 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         await widget.supabase.from('slaughter_inspection').insert(inspectionData);
       }
 
-      // Safely dispatch customer notification without blocking the update
-      if (notifTitle != null && notifMessage != null && notifType != null) {
+      // Safely dispatch customer notification without blocking the update (suppressed for on-site immediate slaughter walk-ins)
+      final bool isImmediateSlaughterWalkIn = _antiMortem == 'Separate Facility' ||
+          (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
+          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      if (!isImmediateSlaughterWalkIn && notifTitle != null && notifMessage != null && notifType != null) {
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,
@@ -3115,9 +3118,11 @@ class _MICDialogState extends State<_MICDialog> {
         }).eq('request_id', reqId);
       }
 
-      // 3. Notify customer safely
+      // 3. Notify customer safely (suppressed for on-site immediate slaughter walk-ins)
+      final isImmediateOnSite = (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
+          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
       final userId = widget.request['user_id']?.toString() ?? widget.request['customer_id']?.toString();
-      if (userId != null && userId.isNotEmpty) {
+      if (!isImmediateOnSite && userId != null && userId.isNotEmpty) {
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,

@@ -125,7 +125,7 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
               'status': 'pending',
             }).eq('request_id', p['request_id']);
           } catch (_) {}
-        } else if (methodStr == 'gcash' && p['status'] != 'paid') {
+        } else if ((methodStr == 'gcash' || methodStr.contains('online') || methodStr.contains('paymongo')) && p['status'] != 'paid') {
           p['status'] = 'paid';
           p['balance'] = 0;
         }
@@ -276,7 +276,14 @@ class _ReceiptCard extends StatelessWidget {
     final total = double.tryParse((payment['total_amount'] ?? 0).toString()) ?? 0;
     final status = payment['status']?.toString() ?? 'pending';
     final method = payment['payment_method']?.toString() ?? '';
-    final isPaid = status == 'paid' || method.trim().toLowerCase() == 'gcash';
+    final methodLower = method.trim().toLowerCase();
+    final isPaid = status == 'paid' ||
+        methodLower == 'gcash' ||
+        methodLower == 'maya' ||
+        methodLower == 'card' ||
+        methodLower == 'grabpay' ||
+        methodLower.contains('online') ||
+        methodLower.contains('paymongo');
     final isAwaitingVerification = !isPaid && method.trim().isNotEmpty;
 
     // Try to get request data from join (handle Map or List)
@@ -358,11 +365,13 @@ class _ReceiptCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  method == 'Cash'
+                  methodLower.contains('cash') && !methodLower.contains('online') && !methodLower.contains('paymongo')
                       ? Icons.payments_outlined
-                      : (method == 'GCash'
-                          ? Icons.phone_android
-                          : Icons.credit_card),
+                      : (methodLower.contains('card') || methodLower.contains('visa') || methodLower.contains('mastercard')
+                          ? Icons.credit_card
+                          : (methodLower.contains('gcash') || methodLower.contains('maya')
+                              ? Icons.phone_android
+                              : Icons.account_balance_wallet_outlined)),
                   size: 14,
                   color: Colors.grey.shade500,
                 ),

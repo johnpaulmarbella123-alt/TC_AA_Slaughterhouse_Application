@@ -1963,25 +1963,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
           debugPrint('Error inserting separate facility inspection row: $inspErr');
         }
 
-        if (matchedUserId != null) {
-          final livestockType = _selectedAnimalType ?? 'Livestock';
-          final animalCount = int.tryParse(_animalCountCtrl.text.trim()) ?? 1;
-          await NotificationService.sendNotificationSafely(
-            widget.supabase,
-            userId: matchedUserId,
-            title: 'Separate Facility — Emergency Slaughter',
-            message:
-                'Your $animalCount head(s) of $livestockType ($refNo) arrived deceased due to $_selectedEmergencyCause (non-infectious) and is being processed immediately in the Separate Facility, bypassing the standard slaughterhouse queue.',
-            type: 'separate_facility_slaughter',
-            data: {
-              'request_id': reqId,
-              'livestock_type': livestockType,
-              'animal_count': animalCount,
-              'emergency_cause': _selectedEmergencyCause,
-              'facility': 'Separate Facility',
-            },
-          );
-        }
+        // Walk-in immediate slaughter customers wait on-site at the facility; mobile app notifications suppressed
       }
 
       // Ensure newly entered walk-in meat dealer is permanently locked in registry
@@ -2802,24 +2784,32 @@ class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEBFFF5),
+                    color: widget.isSeparateFacility ? const Color(0xFFFFF7ED) : const Color(0xFFEBFFF5),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.receipt_long, color: Color(0xFF2D6A4F), size: 26),
+                  child: Icon(
+                    widget.isSeparateFacility ? Icons.bolt_rounded : Icons.receipt_long,
+                    color: widget.isSeparateFacility ? const Color(0xFFEA580C) : const Color(0xFF2D6A4F),
+                    size: 26,
+                  ),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Walk-In Receiving & Mobile Claim Stub',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
+                        widget.isSeparateFacility
+                            ? 'Immediate Slaughter Receiving Stub'
+                            : 'Walk-In Receiving & Mobile Claim Stub',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
-                        'Print or provide this Reference No. to the walk-in customer.',
-                        style: TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
+                        widget.isSeparateFacility
+                            ? 'Customer waiting on-site for immediate processing.'
+                            : 'Print or provide this Reference No. to the walk-in customer.',
+                        style: const TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
                       ),
                     ],
                   ),
@@ -2908,57 +2898,59 @@ class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (!widget.isLinkedToAccount) ...[
-                    Container(
-                      width: 82,
-                      height: 82,
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.amber.shade300),
+            if (!widget.isSeparateFacility) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (!widget.isLinkedToAccount) ...[
+                      Container(
+                        width: 82,
+                        height: 82,
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Image.asset(
+                          'assets/images/app_qr_code.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
+                        ),
                       ),
-                      child: Image.asset(
-                        'assets/images/app_qr_code.png',
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
+                      const SizedBox(width: 12),
+                    ] else ...[
+                      Icon(
+                        Icons.verified_user,
+                        size: 24,
+                        color: Colors.blue.shade700,
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Text(
+                        widget.isLinkedToAccount
+                            ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
+                            : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                  ] else ...[
-                    Icon(
-                      Icons.verified_user,
-                      size: 24,
-                      color: Colors.blue.shade700,
-                    ),
-                    const SizedBox(width: 10),
                   ],
-                  Expanded(
-                    child: Text(
-                      widget.isLinkedToAccount
-                          ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
-                          : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

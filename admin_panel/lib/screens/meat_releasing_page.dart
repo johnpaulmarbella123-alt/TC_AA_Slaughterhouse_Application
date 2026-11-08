@@ -874,9 +874,41 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         } catch (_) {}
                       }
 
+                      final isImmediateSlaughter = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+                          (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+                          (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+
                       return DataRow(cells: [
                         DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                        DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                        DataCell(Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                            if (isImmediateSlaughter) ...[
+                              const SizedBox(height: 3),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF7ED),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFFF97316)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.bolt, size: 11, color: Color(0xFFC2410C)),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      'Waiting On-Site / Immediate',
+                                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        )),
                         DataCell(Text(req['contact_number']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 12))),
                         DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
                         DataCell(Text(mic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey.shade700))),
@@ -1264,26 +1296,33 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         });
       } catch (_) {}
 
-      await NotificationService.sendNotificationSafely(
-        supabase,
-        userId: userId,
-        title: isPaid
-            ? 'Meat Ready for Collection (Claim Before 5:00 PM)'
-            : 'Meat Ready for Collection — Payment Required',
-        message: isPaid
-            ? 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! REMINDER: Please pick up your carcass on or before $deadlineStr. If not picked up by 5:00 PM, an automatic \u20b1150.00 Cold Storage penalty fee will apply.'
-            : 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! Before claiming your carcass from the dispatcher, please complete your payment of $amountStr at the Cashier window. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated. REMINDER: Please complete payment and pick up your meat on or before $deadlineStr — a \u20b1150.00 Cold Storage fee applies if unclaimed by 5:00 PM, and a \u20b1100.00 Overdue Payment penalty applies if unpaid by 5:00 PM.',
-        type: 'meat_pickup',
-        data: {
-          'request_id': reqId,
-          'reference_no': ref,
-          'release_type': 'pickup',
-          'payment_status': isPaid ? 'paid' : 'unpaid',
-          'payment_method': payment?['payment_method'] ?? 'Cash on Pickup',
-          'amount': amount,
-          'pickup_deadline': deadline.toIso8601String(),
-        },
-      );
+      // Suppressed for on-site immediate slaughter walk-ins
+      final isImmediateOnSite = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+          (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+          (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+
+      if (!isImmediateOnSite && userId != null && userId.isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          supabase,
+          userId: userId,
+          title: isPaid
+              ? 'Meat Ready for Collection (Claim Before 5:00 PM)'
+              : 'Meat Ready for Collection — Payment Required',
+          message: isPaid
+              ? 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! REMINDER: Please pick up your carcass on or before $deadlineStr. If not picked up by 5:00 PM, an automatic \u20b1150.00 Cold Storage penalty fee will apply.'
+              : 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! Before claiming your carcass from the dispatcher, please complete your payment of $amountStr at the Cashier window. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated. REMINDER: Please complete payment and pick up your meat on or before $deadlineStr — a \u20b1150.00 Cold Storage fee applies if unclaimed by 5:00 PM, and a \u20b1100.00 Overdue Payment penalty applies if unpaid by 5:00 PM.',
+          type: 'meat_pickup',
+          data: {
+            'request_id': reqId,
+            'reference_no': ref,
+            'release_type': 'pickup',
+            'payment_status': isPaid ? 'paid' : 'unpaid',
+            'payment_method': payment?['payment_method'] ?? 'Cash on Pickup',
+            'amount': amount,
+            'pickup_deadline': deadline.toIso8601String(),
+          },
+        );
+      }
 
       _loadRequests(silent: true);
 

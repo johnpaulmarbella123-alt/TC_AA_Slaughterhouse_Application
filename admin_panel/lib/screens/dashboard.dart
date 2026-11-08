@@ -339,41 +339,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
       final reqList = List<Map<String, dynamic>>.from(data);
       for (var req in reqList) {
-        final reqId = req['id'];
-        final reqIdStr = reqId?.toString();
-        final stRaw = req['status']?.toString().toLowerCase() ?? '';
-        final pRaw = req['payments'];
-        Map<String, dynamic>? firstPay;
-        if (pRaw is List && pRaw.isNotEmpty && pRaw.first is Map) {
-          firstPay = Map<String, dynamic>.from(pRaw.first as Map);
-        } else if (pRaw is Map) {
-          firstPay = Map<String, dynamic>.from(pRaw);
-        }
-        final methodStr = (firstPay?['payment_method'] ?? '').toString().trim().toLowerCase();
-        if (firstPay != null &&
-            firstPay['status'] != 'paid' &&
-            (methodStr == 'gcash' || (reqIdStr == '122' && stRaw == 'payment_pending'))) {
-          final receiptNo = 'RCP-${DateTime.now().year}-${reqIdStr?.padLeft(3, '0')}';
-          firstPay['payment_method'] = 'GCash';
-          firstPay['status'] = 'paid';
-          firstPay['balance'] = 0;
-          firstPay['receipt_number'] = receiptNo;
-          req['payments'] = [firstPay];
-          if (stRaw == 'payment_pending' || stRaw == 'releasable' || stRaw == 'mic_generated') {
-            req['status'] = 'paid';
-          }
-          try {
-            await supabase.from('payments').update({
-              'payment_method': 'GCash',
-              'status': 'paid',
-              'balance': 0,
-              'receipt_number': receiptNo,
-              'cashier_name': 'PayMongo (Auto)',
-            }).eq('request_id', reqId);
-            await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
-          } catch (_) {}
-        }
-
         final st = req['status']?.toString().toLowerCase() ?? '';
         final releasedAt = req['released_at'];
 
