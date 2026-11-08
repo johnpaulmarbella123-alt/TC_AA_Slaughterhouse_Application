@@ -385,7 +385,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       isNarrow: isNarrow,
                                     ),
                                   if (settingsService.isModuleAllowed(1)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 1,
                                       icon: Icons.assignment_outlined,
@@ -397,7 +397,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(2)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 2,
                                       icon: Icons.fact_check_outlined,
@@ -409,7 +409,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(3)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 3,
                                       icon: Icons.content_cut_outlined,
@@ -421,7 +421,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(4)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 4,
                                       icon: Icons.payment_outlined,
@@ -433,7 +433,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(5)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 5,
                                       icon: Icons.inventory_2_outlined,
@@ -445,7 +445,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(6)) ...[
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 6,
                                       icon: Icons.assessment_outlined,
@@ -801,7 +801,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                             ],
                           ],
                         ),
-                        const SizedBox(height: 1),
+                        const SizedBox(height: 4),
                         Text(
                           subtitle,
                           style: TextStyle(
