@@ -211,7 +211,11 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     final double postMortemFee = carcassWeightNum * postMortemRatePerKg;
     final bool isMarket = req['request_type'] == 'market' || req['release_type'] == 'delivery';
     final double deliveryFee = isMarket ? 60.0 : 0.0;
-    final double penaltyFee = double.tryParse(req['penalty_fee']?.toString() ?? '0') ?? 0.0;
+    final bool isWarningOnly = (req['process_notes'] ?? '').toString().contains('1ST OFFENSE') ||
+        req['is_warning_only'] == true;
+    final double penaltyFee = isWarningOnly
+        ? 0.0
+        : (double.tryParse(req['penalty_fee']?.toString() ?? '0') ?? 0.0);
     final double calculatedTotal = baseFixedFees + postMortemFee + deliveryFee + penaltyFee;
 
     double totalAmount = calculatedTotal;
@@ -626,6 +630,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
                                   postMortemFee: postMortemFee,
                                   deliveryFee: deliveryFee,
                                   penaltyFee: penaltyFee,
+                                  isWarningOnly: isWarningOnly,
                                   total: totalAmount,
                                   isPaid: isPaid,
                                 ),
@@ -898,6 +903,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     required double postMortemFee,
     required double deliveryFee,
     double penaltyFee = 0.0,
+    bool isWarningOnly = false,
     required double total,
     required bool isPaid,
   }) {
@@ -940,10 +946,17 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
               _breakdownRow('Delivery Van Fee', '₱${deliveryFee.toStringAsFixed(2)}'),
             if (penaltyFee > 0)
               _breakdownRow(
-                'Missed Schedule / Wasted Slot Penalty',
+                'Missed Schedule Slot Penalty (Repeat Offense)',
                 '₱${penaltyFee.toStringAsFixed(2)}',
                 color: const Color(0xFFC2410C),
                 isBold: true,
+              )
+            else if (isWarningOnly)
+              _breakdownRow(
+                'Missed Schedule Notice (1st Offense)',
+                'Warning Issued (₱0.00 Waived)',
+                color: const Color(0xFFD97706),
+                isBold: false,
               ),
             const Divider(height: 20),
             _breakdownRow(

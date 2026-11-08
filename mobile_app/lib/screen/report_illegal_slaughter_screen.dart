@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,8 +17,20 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
           // ── HEADER ──────────────────────────────────────────
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 70, 16, 20),
-            color: const Color(0xFFC8E6C9),
+            padding: const EdgeInsets.fromLTRB(16, 56, 16, 18),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC8E6C9),
+              border: Border(
+                bottom: BorderSide(color: Colors.green.shade200, width: 1),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
             child: Row(
               children: [
                 IconButton(
@@ -51,69 +64,58 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── WHAT TO REPORT ────────────────────────────
-                  _InfoCard(
-                    icon: Icons.description_outlined,
-                    iconColor: const Color(0xFF1565C0),
-                    title: "What to Report",
-                    bgColor: const Color(0xFFE8F0FE),
-                    items: const [
-                      "Slaughtering without proper permits",
-                      "Unsanitary slaughtering conditions",
-                      "No veterinary inspection",
-                      "Illegal meat trade operations",
-                      "Violations of animal welfare standards",
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // ── YOUR PROTECTION ───────────────────────────
+                  // ── YOUR PROTECTION BANNER ─────────────────────
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: const Color(0xFFE4F8F0),
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFA7F3D0)),
                     ),
-                    child: Column(
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 28,
-                              height: 28,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF1E855A),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.verified_user,
-                                  size: 16, color: Colors.white),
-                            ),
-                            const SizedBox(width: 10),
-                            const Text("Your Protection",
-                                style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF0A3D2E))),
-                          ],
+                        Container(
+                          width: 28,
+                          height: 28,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF1E855A),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.verified_user,
+                              size: 16, color: Colors.white),
                         ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          "Reports can be filed anonymously. Your identity will be protected, and you will receive updates via your reference number. All reports are treated with strict confidentiality.",
-                          style: TextStyle(
-                              fontSize: 12, color: Color(0xFF2D6A4F)),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text("Whistleblower Protection (R.A. 10173)",
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      color: Color(0xFF0A3D2E))),
+                              SizedBox(height: 3),
+                              Text(
+                                "Reports can be filed anonymously. Your identity is strictly encrypted and protected. All reports are first reviewed by the abattoir administrator.",
+                                style: TextStyle(
+                                    fontSize: 11, color: Color(0xFF2D6A4F), height: 1.35),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
 
-                  // ── FILE A REPORT BUTTON ──────────────────────
+                  // ── FILE GENERAL REPORT BUTTON ────────────────
                   SizedBox(
                     width: double.infinity,
-                    height: 52,
+                    height: 48,
                     child: ElevatedButton.icon(
                       onPressed: () {
                         showModalBottomSheet(
@@ -124,51 +126,145 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
                         );
                       },
                       icon: const Icon(Icons.warning_amber_rounded, size: 20),
-                      label: const Text("File a Report",
+                      label: const Text("File a General Report",
                           style: TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w600)),
+                              fontSize: 14, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFD32F2F),
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(10)),
                         elevation: 0,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                  // ── EMERGENCY CONTACT ─────────────────────────
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.phone, size: 18, color: Color(0xFF1E855A)),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text("Emergency Hotline",
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600)),
-                              Text(
-                                  "For immediate threats: Contact Tabaco City Slaughterhouse Office",
-                                  style: TextStyle(
-                                      fontSize: 10, color: Colors.grey)),
-                            ],
-                          ),
-                        ),
-                      ],
+                  // ── SECTION: 4 MAJOR VIOLATIONS ───────────────
+                  const Text(
+                    "Violation Guide (What to Look For)",
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0F172A),
                     ),
                   ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    "Tap any category below to inspect statutory violations and report directly:",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Card 1: Dog & Cat Meat Trade
+                  _ExpandableViolationCard(
+                    title: "1. The Dog and Cat Meat Trade",
+                    lawReference: "Anti-Rabies Act (RA 9482) & Animal Welfare Act (RA 8485)",
+                    icon: Icons.pets_outlined,
+                    accentColor: const Color(0xFFB91C1C),
+                    bgColor: const Color(0xFFFEF2F2),
+                    whatToLookFor:
+                        "Holding pens with multiple dogs or cats, transport in cramped wire cages, or clandestine slaughter for meat.",
+                    whyIllegal:
+                        "The Anti-Rabies Act (RA 9482) and Animal Welfare Act (RA 8485) strictly ban the killing, trading, and selling of dogs and cats for human consumption.",
+                    whoToReportTo:
+                        "Philippine National Police (PNP) for immediate rescue/arrest and Animal Welfare NGOs (like PAWS or AKF).",
+                    onReport: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const _ReportFormSheet(
+                          initialCategory: "The Dog and Cat Meat Trade",
+                        ),
+                      );
+                    },
+                  ),
+
+                  // Card 2: Hot Meat Operations
+                  _ExpandableViolationCard(
+                    title: "2. 'Hot Meat' Operations (Mane-mane)",
+                    lawReference: "Meat Inspection Code of the Philippines (RA 9296 / RA 10536)",
+                    icon: Icons.restaurant_outlined,
+                    accentColor: const Color(0xFFC2410C),
+                    bgColor: const Color(0xFFFFF7ED),
+                    whatToLookFor:
+                        "Slaughtering livestock (pigs, cows, goats) in backyards, hidden warehouses, or abandoned areas instead of official facilities, usually late at night or early morning.",
+                    whyIllegal:
+                        "All meat intended for public sale must undergo official ante/post-mortem examination. Uninspected 'hot meat' poses massive public health risks (African Swine Fever, Anthrax, bacterial contamination).",
+                    whoToReportTo:
+                        "Tabaco City Slaughterhouse / City Veterinary Office (CVO) & National Meat Inspection Service (NMIS).",
+                    onReport: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const _ReportFormSheet(
+                          initialCategory: '"Hot Meat" Operations (Clandestine Slaughter)',
+                        ),
+                      );
+                    },
+                  ),
+
+                  // Card 3: Prohibited Livestock (Carabao / Horse)
+                  _ExpandableViolationCard(
+                    title: "3. Slaughter of Prohibited Livestock",
+                    lawReference: "Executive Order 626-A & Bureau of Animal Industry (BAI) Rules",
+                    icon: Icons.agriculture_outlined,
+                    accentColor: const Color(0xFF4338CA),
+                    bgColor: const Color(0xFFEEF2FF),
+                    whatToLookFor:
+                        "The slaughter of healthy, working carabaos (water buffaloes) or horses for meat without specialized municipal permits.",
+                    whyIllegal:
+                        "EO 626-A protects carabaos to ensure they are preserved for agricultural work. Carabaos can generally only be slaughtered if old, infertile, or critically injured with strict BAI clearance. Commercial horse slaughter is barred under welfare standards.",
+                    whoToReportTo:
+                        "National Meat Inspection Service (NMIS) and the Bureau of Animal Industry (BAI).",
+                    onReport: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const _ReportFormSheet(
+                          initialCategory: "Slaughter of Prohibited Livestock (Carabao/Horse)",
+                        ),
+                      );
+                    },
+                  ),
+
+                  // Card 4: Severe Cruelty & Torture
+                  _ExpandableViolationCard(
+                    title: "4. Severe Cruelty & Torture During Slaughter",
+                    lawReference: "The Animal Welfare Act of 1998 (RA 8485 / RA 10631)",
+                    icon: Icons.warning_rounded,
+                    accentColor: const Color(0xFF991B1B),
+                    bgColor: const Color(0xFFFEF2F2),
+                    whatToLookFor:
+                        "Methods that cause prolonged pain, such as bludgeoning, burning animals alive, bleeding them out without proper stunning, or slaughtering pregnant livestock.",
+                    whyIllegal:
+                        "The Animal Welfare Act mandates humane handling and slaughter methods. Only approved, painless stunning methods are allowed in accredited slaughterhouses.",
+                    whoToReportTo:
+                        "Philippine National Police (PNP) and Bureau of Animal Industry (BAI).",
+                    onReport: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        backgroundColor: Colors.transparent,
+                        builder: (_) => const _ReportFormSheet(
+                          initialCategory: "Severe Animal Cruelty & Torture During Slaughter",
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // ── DIRECT AUTHORITY ESCALATION DIRECTORY ────
+                  const _AuthorityHotlinesCard(),
+                  const SizedBox(height: 24),
                 ],
               ),
             ),
@@ -180,22 +276,215 @@ class ReportIllegalSlaughterScreen extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// INFO CARD — reusable for "What to Report"
+// EXPANDABLE VIOLATION CARD
 // ═══════════════════════════════════════════════════════════════════
-class _InfoCard extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
+class _ExpandableViolationCard extends StatefulWidget {
   final String title;
+  final String lawReference;
+  final IconData icon;
+  final Color accentColor;
   final Color bgColor;
-  final List<String> items;
+  final String whatToLookFor;
+  final String whyIllegal;
+  final String whoToReportTo;
+  final VoidCallback onReport;
 
-  const _InfoCard({
-    required this.icon,
-    required this.iconColor,
+  const _ExpandableViolationCard({
     required this.title,
+    required this.lawReference,
+    required this.icon,
+    required this.accentColor,
     required this.bgColor,
-    required this.items,
+    required this.whatToLookFor,
+    required this.whyIllegal,
+    required this.whoToReportTo,
+    required this.onReport,
   });
+
+  @override
+  State<_ExpandableViolationCard> createState() => _ExpandableViolationCardState();
+}
+
+class _ExpandableViolationCardState extends State<_ExpandableViolationCard> {
+  bool _isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isExpanded ? const Color(0xFF0F172A) : Colors.grey.shade200,
+          width: _isExpanded ? 1.4 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () => setState(() => _isExpanded = !_isExpanded),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: widget.bgColor,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(widget.icon, color: widget.accentColor, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            widget.lawReference,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      _isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                      color: Colors.grey.shade600,
+                      size: 22,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (_isExpanded) ...[
+              const Divider(height: 1),
+              Container(
+                padding: const EdgeInsets.all(14),
+                color: const Color(0xFFFAFAFA),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _detailSection(
+                      label: "What to look for",
+                      content: widget.whatToLookFor,
+                      icon: Icons.visibility_outlined,
+                      color: const Color(0xFF0F172A),
+                    ),
+                    const SizedBox(height: 10),
+                    _detailSection(
+                      label: "Why it's illegal",
+                      content: widget.whyIllegal,
+                      icon: Icons.gavel_outlined,
+                      color: const Color(0xFF0F172A),
+                    ),
+                    const SizedBox(height: 10),
+                    _detailSection(
+                      label: "Who to report to",
+                      content: widget.whoToReportTo,
+                      icon: Icons.shield_outlined,
+                      color: const Color(0xFF0F172A),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 40,
+                      child: ElevatedButton.icon(
+                        onPressed: widget.onReport,
+                        icon: const Icon(Icons.campaign_rounded, size: 18),
+                        label: const Text(
+                          "Report This Violation",
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F172A),
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detailSection({
+    required String label,
+    required String content,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: color,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Padding(
+          padding: const EdgeInsets.only(left: 19),
+          child: Text(
+            content,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF0F172A),
+              height: 1.4,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DIRECT AUTHORITY ESCALATION DIRECTORY
+// ═══════════════════════════════════════════════════════════════════
+class _AuthorityHotlinesCard extends StatelessWidget {
+  const _AuthorityHotlinesCard();
 
   @override
   Widget build(BuildContext context) {
@@ -203,40 +492,105 @@ class _InfoCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, size: 20, color: iconColor),
-              const SizedBox(width: 8),
-              Text(title,
-                  style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: iconColor)),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ...items.map((item) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Row(
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.emergency_outlined, size: 20, color: Color(0xFFDC2626)),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("• ",
-                        style: TextStyle(fontSize: 13, color: iconColor)),
-                    Expanded(
-                      child: Text(item,
-                          style: TextStyle(fontSize: 12, color: iconColor)),
+                    Text(
+                      "Direct Authority Escalation Directory",
+                      style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                    Text(
+                      "Contact relevant agencies directly for urgent crimes or regional jurisdiction.",
+                      style: TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
                     ),
                   ],
                 ),
-              )),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          // 1. PNP
+          _hotlineRow(
+            icon: Icons.local_police_outlined,
+            iconColor: const Color(0xFF1D4ED8),
+            agency: "Philippine National Police (PNP)",
+            scope: "Ongoing crimes, animal torture, emergency raids, police blotter",
+            actionText: "SMS: Text PNP <Msg> to 2920 • Dial Emergency",
+          ),
+          const Divider(height: 16),
+          // 2. NMIS
+          _hotlineRow(
+            icon: Icons.verified_outlined,
+            iconColor: const Color(0xFFD97706),
+            agency: "National Meat Inspection Service (NMIS)",
+            scope: "Commercial hot meat, uninspected transit (ADR Form No. 1 / RTOC)",
+            actionText: "Tel: (02) 8924-7980 • Email: nmis@nmis.gov.ph",
+          ),
+          const Divider(height: 16),
+          // 3. Tabaco CVO / Slaughterhouse
+          _hotlineRow(
+            icon: Icons.location_city_outlined,
+            iconColor: const Color(0xFF059669),
+            agency: "Tabaco City Veterinary Office & Abattoir",
+            scope: "Slaughterhouse receiving desk & local abattoir administration",
+            actionText: "Visit Slaughterhouse Office • Open 24/7 Receiving",
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _hotlineRow({
+    required IconData icon,
+    required Color iconColor,
+    required String agency,
+    required String scope,
+    required String actionText,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: iconColor),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(agency, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+              const SizedBox(height: 1),
+              Text(scope, style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B))),
+              const SizedBox(height: 3),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(actionText, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: iconColor)),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -245,7 +599,8 @@ class _InfoCard extends StatelessWidget {
 // REPORT FORM BOTTOM SHEET
 // ═══════════════════════════════════════════════════════════════════
 class _ReportFormSheet extends StatefulWidget {
-  const _ReportFormSheet();
+  final String? initialCategory;
+  const _ReportFormSheet({this.initialCategory});
 
   @override
   State<_ReportFormSheet> createState() => _ReportFormSheetState();
@@ -255,6 +610,15 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
   final supabase = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _picker = ImagePicker();
+
+  static const List<String> _violationCategories = [
+    'The Dog and Cat Meat Trade',
+    '"Hot Meat" Operations (Clandestine Slaughter)',
+    'Slaughter of Prohibited Livestock (Carabao/Horse)',
+    'Severe Animal Cruelty & Torture During Slaughter',
+    'General / Other Illegal Slaughter Violation',
+  ];
+  late String _selectedCategory;
 
   final _locationCtrl = TextEditingController();
   final _dateCtrl = TextEditingController();
@@ -266,6 +630,15 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
   bool _isSubmitting = false;
   File? _evidencePhoto;
   String? _evidenceFileName;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCategory = widget.initialCategory != null &&
+            _violationCategories.contains(widget.initialCategory)
+        ? widget.initialCategory!
+        : _violationCategories.first;
+  }
 
   @override
   void dispose() {
@@ -379,6 +752,8 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       final isoDate =
           "${parts[2]}-${parts[1].padLeft(2, '0')}-${parts[0].padLeft(2, '0')}";
 
+      final fullDescription = '[Category: $_selectedCategory] ${_descriptionCtrl.text.trim()}';
+
       // 3. Insert report
       final report = await supabase
           .from('reports')
@@ -386,7 +761,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
             'user_id': _isAnonymous ? null : user.id,
             'location': _locationCtrl.text.trim(),
             'incident_date': isoDate,
-            'description': _descriptionCtrl.text.trim(),
+            'description': fullDescription,
             'photo_url': photoUrl,
             'is_anonymous': _isAnonymous,
             'reporter_name':
@@ -408,31 +783,34 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
           .update({'reference_no': refNo})
           .eq('id', report['id']);
 
-      // 6. Create notification for user and admin alert
+      // 6. Create notifications
+      final isSevere = _selectedCategory.contains('Cruelty') || _selectedCategory.contains('Dog and Cat');
       final reportPayload = {
         'reference_no': refNo,
         'report_id': report['id'],
         'location': _locationCtrl.text.trim(),
         'incident_date': isoDate,
-        'description': _descriptionCtrl.text.trim(),
+        'violation_category': _selectedCategory,
+        'description': fullDescription,
         'photo_url': photoUrl,
         'is_anonymous': _isAnonymous,
         'reporter_name':
             _isAnonymous ? 'Anonymous' : _nameCtrl.text.trim(),
         'contact_number':
             _isAnonymous ? null : _phoneCtrl.text.trim(),
-        'status': 'Submitted',
-        'priority': 'High',
+        'status': 'Pending Review',
+        'priority': isSevere ? 'Severe' : 'Moderate',
+        'severity_level': isSevere ? 'Severe' : 'Moderate',
         'created_at': DateTime.now().toIso8601String(),
       };
 
       try {
-        // Insert alert notification so mobile user and admin panel immediately detect the new report
+        // A. Insert admin alert notification so admin panel immediately detects the new report
         await supabase.from('notifications').insert({
-          'user_id': _isAnonymous ? null : user.id,
-          'title': '🚨 Illegal Slaughter Report Filed',
+          'user_id': null, // broadcast to all abattoir staff / admins
+          'title': '🚨 New Illegal Slaughter Tip: $_selectedCategory ($refNo)',
           'message':
-              'New illegal slaughter report submitted.\nRef: $refNo\nLocation: ${_locationCtrl.text.trim()}',
+              'New citizen report filed for $_selectedCategory.\nRef: $refNo\nLocation: ${_locationCtrl.text.trim()}',
           'is_read': false,
           'type': 'admin_illegal_report',
           'reference_no': refNo,
@@ -441,15 +819,29 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
             if (_isAnonymous) 'user_id': null,
           },
         });
+
+        // B. If NOT anonymous, send explicit customer submission confirmation to customer's personal notifications feed
+        if (!_isAnonymous) {
+          await supabase.from('notifications').insert({
+            'user_id': user.id,
+            'title': '✅ Report Submission Confirmed ($refNo)',
+            'message':
+                'Your illegal slaughter report regarding "$_selectedCategory" has been safely submitted to Tabaco City Slaughterhouse & City Veterinary Office.\n\nReference: $refNo\nStatus: Pending Review\nLocation: ${_locationCtrl.text.trim()}\n\nOur veterinary inspectors are conducting initial triage. You will receive updates as the investigation progresses.',
+            'is_read': false,
+            'type': 'report_filed',
+            'reference_no': refNo,
+            'data': reportPayload,
+          });
+        }
       } catch (e) {
         debugPrint('Notification insert error: $e');
       }
 
       if (!mounted) return;
 
-      // 7. Show success dialog
+      // 7. Show success confirmation dialog
       Navigator.pop(context); // close bottom sheet
-      _showSuccessDialog(context, refNo);
+      _showSuccessDialog(context, refNo, _isAnonymous);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -462,53 +854,182 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
     }
   }
 
-  void _showSuccessDialog(BuildContext ctx, String refNo) {
+  void _showSuccessDialog(BuildContext ctx, String refNo, bool isAnonymous) {
     showDialog(
       context: ctx,
       barrierDismissible: false,
       builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 56,
-              height: 56,
-              decoration: const BoxDecoration(
-                color: Color(0xFFFFEBEE),
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: isAnonymous ? const Color(0xFFEFF6FF) : const Color(0xFFF0FDF4),
                 shape: BoxShape.circle,
+                border: Border.all(
+                  color: isAnonymous ? const Color(0xFFBFDBFE) : const Color(0xFFBBF7D0),
+                  width: 1.5,
+                ),
               ),
-              child: const Icon(Icons.check_circle,
-                  color: Color(0xFFD32F2F), size: 32),
+              child: Icon(
+                isAnonymous ? Icons.shield_outlined : Icons.check_circle_outline,
+                color: isAnonymous ? const Color(0xFF2563EB) : const Color(0xFF16A34A),
+                size: 32,
+              ),
             ),
             const SizedBox(height: 14),
-            const Text('Report Submitted!',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(
+              isAnonymous ? 'Protected Anonymous Submission' : 'Report Submitted Successfully!',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF0F172A),
+              ),
+            ),
             const SizedBox(height: 6),
             Text(
-              'Your report has been filed and will be investigated.\n\nReference: $refNo',
+              isAnonymous
+                  ? 'Your identity has been fully protected. The abattoir inspection team has received your report for triage.'
+                  : 'Your report has been received by the Tabaco City Slaughterhouse & City Veterinary Office.',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.35),
             ),
-            const SizedBox(height: 4),
-            const Text(
-              'Save this reference number for tracking.',
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF1E855A)),
+            const SizedBox(height: 14),
+
+            // Reference Number Container with 1-tap Copy
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'TRACKING REFERENCE NUMBER',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        refNo,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: refNo));
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            SnackBar(
+                              content: Text('Copied reference number: $refNo'),
+                              duration: const Duration(seconds: 2),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.copy, size: 12, color: Color(0xFF2563EB)),
+                              SizedBox(width: 4),
+                              Text(
+                                'Copy',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF2563EB),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Dynamic Advisory Note
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isAnonymous ? const Color(0xFFFFFBEB) : const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isAnonymous ? const Color(0xFFFDE68A) : const Color(0xFFBBF7D0),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    isAnonymous ? Icons.lock_outline : Icons.notifications_active_outlined,
+                    size: 15,
+                    color: isAnonymous ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      isAnonymous
+                          ? 'Privacy Note: To ensure total confidentiality, no notifications are linked to your user account. Keep your reference code if you wish to follow up via hotlines.'
+                          : 'Notification Active: A submission confirmation has been added to your Notifications tab. You will receive updates as the investigation progresses.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isAnonymous ? const Color(0xFF92400E) : const Color(0xFF166534),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dCtx); // close dialog
-              Navigator.pop(ctx); // back to requests
-            },
-            child: const Text('Done',
-                style: TextStyle(
-                    color: Color(0xFF0A3D2E), fontWeight: FontWeight.w600)),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F172A),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              onPressed: () {
+                Navigator.pop(dCtx); // close dialog
+                Navigator.pop(ctx); // back to previous screen
+              },
+              child: const Text('Done', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
@@ -586,6 +1107,40 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              // ── VIOLATION CATEGORY ──────────────────────────
+              _label("Violation Category", required: true),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedCategory,
+                    isExpanded: true,
+                    icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFD32F2F)),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    items: _violationCategories.map((cat) {
+                      return DropdownMenuItem<String>(
+                        value: cat,
+                        child: Text(cat, overflow: TextOverflow.ellipsis),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) setState(() => _selectedCategory = val);
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
 
               // ── LOCATION ────────────────────────────────────
               _label("Location of Incident", required: true),

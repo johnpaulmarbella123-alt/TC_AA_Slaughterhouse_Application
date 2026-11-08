@@ -194,14 +194,25 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         req['status'] == 'anti_mortem_failed') {
       return false;
     }
-    // Explicit penalty fee on request (e.g. Missed Schedule / Wasted Slot Penalty)
-    if (req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0) {
-      return true;
-    }
     final reqIdStr = req['id']?.toString() ?? '';
     final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
-    if (tracking != null && tracking['penalty_fee'] != null && (double.tryParse(tracking['penalty_fee'].toString()) ?? 0.0) > 0) {
-      return true;
+    if (tracking != null && tracking['is_warning_only'] == true) {
+      return false;
+    }
+    if ((req['process_notes'] ?? '').toString().contains('1ST OFFENSE') ||
+        (req['process_notes'] ?? '').toString().contains('FORMAL WARNING')) {
+      return false;
+    }
+    // Explicit penalty fee on request (e.g. Missed Schedule / Wasted Slot Penalty)
+    if (req['penalty_fee'] != null) {
+      final pf = double.tryParse(req['penalty_fee'].toString()) ?? 0.0;
+      if (pf > 0) return true;
+      if (pf == 0.0 && req['penalty_reason'] != null) return false;
+    }
+    if (tracking != null && tracking['penalty_fee'] != null) {
+      final pf = double.tryParse(tracking['penalty_fee'].toString()) ?? 0.0;
+      if (pf > 0) return true;
+      if (pf == 0.0) return false;
     }
     final notes = (req['process_notes'] ?? '').toString();
     if (notes.toLowerCase().contains('missed schedule') || notes.toLowerCase().contains('wasted slot')) {
@@ -308,7 +319,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final reqIdStr = req['id'].toString();
     final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
     final isDelayed = hasTechnicalDelay(req);
-    final penaltyFee = isDelayed
+    final isWarningOnly = (tracking != null && tracking['is_warning_only'] == true) ||
+        (req['is_warning_only'] == true) ||
+        (req['process_notes'] ?? '').toString().contains('1ST OFFENSE');
+    final penaltyFee = (!isWarningOnly && isDelayed)
         ? ((req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0)
             ? (double.tryParse(req['penalty_fee'].toString()) ?? 500.0)
             : ((tracking != null && tracking['penalty_fee'] != null && (double.tryParse(tracking['penalty_fee'].toString()) ?? 0.0) > 0)
@@ -1173,6 +1187,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final method = _paymentMethod(req);
     final weight = _carcassWeight(req);
     final payment = req['payment'] as Map<String, dynamic>?;
+    final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[req['id'].toString()]) as Map<String, dynamic>?;
 
     showDialog(
       context: context,
@@ -1350,9 +1365,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                   ),
                 if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
                   _feeRow(
-                    'Missed Schedule / Wasted Slot Penalty:',
+                    'Missed Schedule Slot Penalty (Repeat Offense):',
                     '\u20b1${((fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}',
                     bold: true,
+                    color: const Color(0xFFB91C1C),
+                  )
+                else if (tracking?['is_warning_only'] == true ||
+                    req['is_warning_only'] == true ||
+                    (req['process_notes'] ?? '').toString().contains('1ST OFFENSE'))
+                  _feeRow(
+                    'Missed Schedule Notice (1st Offense):',
+                    'Warning Issued (\u20b10.00 Waived)',
+                    bold: false,
+                    color: const Color(0xFFB45309),
                   ),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade300),
@@ -1538,14 +1563,25 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     );
   }
 
-  Widget _feeRow(String label, String amount, {bool bold = false, bool large = false}) {
+  Widget _feeRow(String label, String amount, {bool bold = false, bool large = false, Color? color}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
-          Text(amount, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal)),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(
+                    fontSize: large ? 14 : 13,
+                    fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                    color: color)),
+          ),
+          const SizedBox(width: 8),
+          Text(amount,
+              style: TextStyle(
+                  fontSize: large ? 14 : 13,
+                  fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                  color: color)),
         ],
       ),
     );
@@ -2067,18 +2103,42 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF7ED),
+                    color: const Color(0xFFFEF2F2),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFEA580C).withValues(alpha: 0.5)),
+                    border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.5)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFC2410C)),
+                      const Icon(Icons.event_busy, size: 18, color: Color(0xFFDC2626)),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Includes \u20b1${((_fees['penalty_fee'] as num).toDouble()).toStringAsFixed(2)} Missed Schedule / Wasted Slot Penalty',
-                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                          'Includes \u20b1${((_fees['penalty_fee'] as num).toDouble()).toStringAsFixed(2)} Missed Schedule Slot Penalty (Repeat Offense)',
+                          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (_foundRequest?['is_warning_only'] == true ||
+                  (_foundRequest?['penalty_tracking'] is Map && _foundRequest!['penalty_tracking']['is_warning_only'] == true) ||
+                  (_foundRequest?['process_notes'] ?? '').toString().contains('1ST OFFENSE')) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.5)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD97706)),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Missed Schedule Notice: 1st Offense Formal Warning Issued (\u20b10.00 Fee Waived)',
+                          style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
                         ),
                       ),
                     ],

@@ -148,6 +148,8 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           r['penalty_fee'] = t['penalty_fee'];
           r['penalty_reason'] = t['penalty_reason'];
           r['actual_date'] = t['actual_date'];
+          r['is_warning_only'] = t['is_warning_only'];
+          r['offense_level'] = t['offense_level'];
         }
         return r;
       }).toList();
@@ -752,6 +754,43 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                         ),
                                       ],
                                     )
+                                  : (req['is_warning_only'] == true ||
+                                          (req['penalty_fee'] == 0.0 && req['penalty_reason'] != null) ||
+                                          (req['process_notes'] ?? '').toString().contains('1ST OFFENSE'))
+                                      ? Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 15),
+                                                const SizedBox(width: 4),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.amber.shade50,
+                                                    borderRadius: BorderRadius.circular(12),
+                                                    border: Border.all(color: Colors.amber.shade300),
+                                                  ),
+                                                  child: Text(
+                                                    '1st Offense Warning',
+                                                    style: TextStyle(fontSize: 10, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'Fee Waived (₱0.00)',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.amber.shade900,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        )
                                   : (req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0)
                                       ? Column(
                                           mainAxisAlignment: MainAxisAlignment.center,
@@ -770,7 +809,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                                     border: Border.all(color: Colors.red.shade200),
                                                   ),
                                                   child: Text(
-                                                    'Missed Schedule',
+                                                    'Repeat Slot Penalty',
                                                     style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w600),
                                                   ),
                                                 ),
@@ -1792,6 +1831,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   bool _technicalError = false;
   final _delayReasonCtrl = TextEditingController();
   bool _isMissedSchedule = false;
+  int _customerPriorMissedCount = 0;
   String _emergencyCause = 'Heat Stroke';
   final List<String> _emergencyCauses = const [
     'Heat Stroke',
@@ -1909,6 +1949,11 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     if (req['penalty_fee'] != null && (double.tryParse(req['penalty_fee'].toString()) ?? 0.0) > 0) {
       _isMissedSchedule = true;
     }
+    if (req['is_warning_only'] == true || (req['process_notes'] ?? '').toString().contains('1ST OFFENSE')) {
+      _isMissedSchedule = true;
+    }
+
+    _loadCustomerMissedScheduleHistory();
 
     _carcassCtrl.addListener(() {
       if (mounted) {
@@ -1917,6 +1962,51 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         });
       }
     });
+  }
+
+  Future<void> _loadCustomerMissedScheduleHistory() async {
+    if (!mounted) return;
+    try {
+      final customerKey = (widget.request['user_id'] ??
+              widget.request['contact_number'] ??
+              widget.request['customer_name'] ??
+              '')
+          .toString()
+          .trim();
+      final currentReqId = widget.request['id']?.toString() ?? '';
+
+      final row = await widget.supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'customer_missed_schedule_history')
+          .maybeSingle();
+
+      if (row != null && row['value'] is Map) {
+        final histMap = Map<String, dynamic>.from(row['value']);
+        if (customerKey.isNotEmpty && histMap.containsKey(customerKey)) {
+          final cData = histMap[customerKey];
+          if (cData is Map) {
+            final records = (cData['records'] as List?) ?? [];
+            final priorRecords = records
+                .where((rec) => rec['request_id']?.toString() != currentReqId)
+                .toList();
+            if (mounted) {
+              setState(() {
+                _customerPriorMissedCount = priorRecords.length;
+              });
+            }
+          } else if (cData is num) {
+            if (mounted) {
+              setState(() {
+                _customerPriorMissedCount = cData.toInt();
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading customer missed schedule history: $e');
+    }
   }
 
   Future<void> _updateProcess({bool notifyDelay = false}) async {
@@ -1943,6 +2033,16 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
 
       // Validate inputs if needed...
       
+      final customerKey = (widget.request['user_id'] ??
+              widget.request['contact_number'] ??
+              widget.request['customer_name'] ??
+              '')
+          .toString()
+          .trim();
+      final isRepeatOffense = _customerPriorMissedCount >= 1;
+      final offenseLevel = isRepeatOffense ? (_customerPriorMissedCount + 1) : 1;
+      final double computedPenaltyFee = _isMissedSchedule ? (isRepeatOffense ? 500.0 : 0.0) : 0.0;
+
       String newStatus = widget.request['status'];
       String? notifTitle;
       String? notifMessage;
@@ -2025,7 +2125,9 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           'inspector_name': _inspectorCtrl.text,
           'post_mortem': _postMortem,
           'process_stage': _processStage,
-          'penalty_fee': _isMissedSchedule ? 500.0 : 0.0,
+          'penalty_fee': computedPenaltyFee,
+          'is_warning_only': !isRepeatOffense,
+          'offense_level': offenseLevel,
         };
       } else if (_antiMortem == 'Separate Facility') {
         newStatus = 'slaughter_started';
@@ -2071,14 +2173,55 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         }
         if (_isMissedSchedule) {
           final reqTrack = Map<String, dynamic>.from(trackMap[reqId.toString()] ?? {});
-          reqTrack['penalty_fee'] = 500.0;
-          reqTrack['penalty_reason'] = 'Missed Schedule / Wasted Slot';
+          reqTrack['penalty_fee'] = computedPenaltyFee;
+          reqTrack['penalty_reason'] = isRepeatOffense
+              ? 'Repeat Missed Schedule (#$offenseLevel) / Wasted Slot Penalty'
+              : '1st Offense Missed Schedule (Warning Notice)';
+          reqTrack['is_warning_only'] = !isRepeatOffense;
+          reqTrack['offense_level'] = offenseLevel;
           reqTrack['actual_date'] = nowStr;
           trackMap[reqId.toString()] = reqTrack;
           await widget.supabase.from('system_settings').upsert({
             'key': 'pickup_penalty_tracking',
             'value': trackMap,
           });
+
+          // Also record customer offense in customer_missed_schedule_history
+          try {
+            final histRow = await widget.supabase
+                .from('system_settings')
+                .select('value')
+                .eq('key', 'customer_missed_schedule_history')
+                .maybeSingle();
+            Map<String, dynamic> allHist = {};
+            if (histRow != null && histRow['value'] is Map) {
+              allHist = Map<String, dynamic>.from(histRow['value']);
+            }
+            final cEntry = Map<String, dynamic>.from((allHist[customerKey] as Map?) ?? {});
+            final recordsList = List<Map<String, dynamic>>.from((cEntry['records'] as List?) ?? []);
+            recordsList.removeWhere((r) => r['request_id']?.toString() == reqId.toString());
+            recordsList.add({
+              'request_id': reqId,
+              'reference_no': 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}',
+              'scheduled_date': widget.request['preferred_date'],
+              'actual_date': nowStr,
+              'offense_level': offenseLevel,
+              'action': isRepeatOffense ? 'penalty_charged' : 'warning_issued',
+              'penalty_fee': computedPenaltyFee,
+              'recorded_at': DateTime.now().toIso8601String(),
+            });
+            cEntry['count'] = recordsList.length;
+            cEntry['records'] = recordsList;
+            if (customerKey.isNotEmpty) {
+              allHist[customerKey] = cEntry;
+              await widget.supabase.from('system_settings').upsert({
+                'key': 'customer_missed_schedule_history',
+                'value': allHist,
+              });
+            }
+          } catch (histErr) {
+            debugPrint('Error updating customer_missed_schedule_history: $histErr');
+          }
         } else if (notifyDelay && trackMap.containsKey(reqId.toString())) {
           trackMap.remove(reqId.toString());
           await widget.supabase.from('system_settings').upsert({
@@ -2093,7 +2236,9 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       final delayReason = _delayReasonCtrl.text.trim();
       String processNotes = _notesCtrl.text.trim();
       if (_isMissedSchedule && !processNotes.contains('MISSED SCHEDULE')) {
-        final missedTag = '[MISSED SCHEDULE / WASTED SLOT PENALTY: ₱500.00 | Actual: $nowStr]';
+        final missedTag = isRepeatOffense
+            ? '[REPEAT OFFENSE (#$offenseLevel): MISSED SCHEDULE PENALTY ₱500.00 | Actual: $nowStr]'
+            : '[1ST OFFENSE: MISSED SCHEDULE FORMAL WARNING (₱0.00 WAIVED) | Actual: $nowStr]';
         processNotes = processNotes.isEmpty ? missedTag : '$missedTag | $processNotes';
       }
       if (_antiMortem == 'Separate Facility' && !processNotes.contains('SEPARATE FACILITY')) {
@@ -2136,6 +2281,54 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           type: notifType,
           data: notifData,
         );
+      }
+
+      // If missed schedule occurred, send dedicated Schedule Notice
+      if (_isMissedSchedule) {
+        final prefStr = widget.request['preferred_date']?.toString() ?? 'scheduled date';
+        String schedDisplay = prefStr;
+        try {
+          schedDisplay = DateFormat('MMMM d, yyyy').format(DateTime.parse(prefStr));
+        } catch (_) {}
+        final refNum = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+        if (!isRepeatOffense) {
+          await NotificationService.sendNotificationSafely(
+            widget.supabase,
+            userId: userId,
+            title: '⚠️ Schedule Notice: 1st Offense Warning (Fee Waived)',
+            message: 'You missed your reserved slaughter schedule for $refNum on $schedDisplay. Under Tabaco City abattoir guidelines, grace is granted for your 1st offense with ₱0.00 penalty. Please ensure livestock arrives on your scheduled date in future bookings, as repeat missed schedules will automatically incur a ₱500.00 Wasted Slot Penalty.',
+            type: 'missed_schedule_warning',
+            referenceNo: refNum,
+            data: {
+              'request_id': reqId,
+              'reference_no': refNum,
+              'offense_level': 1,
+              'penalty_fee': 0.0,
+              'is_warning_only': true,
+              'scheduled_date': prefStr,
+              'actual_date': nowStr,
+            },
+          );
+        } else {
+          await NotificationService.sendNotificationSafely(
+            widget.supabase,
+            userId: userId,
+            title: '⛔ Missed Schedule Penalty Applied (₱500.00)',
+            message: 'You missed your reserved slaughter schedule for $refNum on $schedDisplay. Having previously received a formal warning, an automatic ₱500.00 Wasted Slot Penalty has been charged to your bill (Repeat Offense #$offenseLevel).',
+            type: 'missed_schedule_penalty',
+            referenceNo: refNum,
+            data: {
+              'request_id': reqId,
+              'reference_no': refNum,
+              'offense_level': offenseLevel,
+              'penalty_fee': 500.0,
+              'is_warning_only': false,
+              'scheduled_date': prefStr,
+              'actual_date': nowStr,
+            },
+          );
+        }
       }
 
       if (mounted) {
@@ -2644,14 +2837,24 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                       schedDisplay = schedPref;
                     }
                   }
+                  final bool isRepeat = _customerPriorMissedCount >= 1;
+                  final Color cardBg = !_isMissedSchedule
+                      ? const Color(0xFFF9FAFB)
+                      : (isRepeat ? const Color(0xFFFEF2F2) : const Color(0xFFFFFBEB));
+                  final Color cardBorder = !_isMissedSchedule
+                      ? Colors.grey.shade300
+                      : (isRepeat ? const Color(0xFFEF4444) : const Color(0xFFFDE68A));
+                  final Color primaryTextColor = !_isMissedSchedule
+                      ? Colors.black87
+                      : (isRepeat ? const Color(0xFF991B1B) : const Color(0xFF92400E));
+                  final Color checkboxActiveColor = isRepeat ? const Color(0xFFDC2626) : const Color(0xFFD97706);
+
                   return Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _isMissedSchedule ? const Color(0xFFFEF2F2) : const Color(0xFFF9FAFB),
+                      color: cardBg,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: _isMissedSchedule ? const Color(0xFFEF4444) : Colors.grey.shade300,
-                      ),
+                      border: Border.all(color: cardBorder),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2660,26 +2863,53 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                           children: [
                             Checkbox(
                               value: _isMissedSchedule,
-                              activeColor: const Color(0xFFDC2626),
+                              activeColor: checkboxActiveColor,
                               onChanged: (v) => setState(() => _isMissedSchedule = v ?? false),
                             ),
                             const SizedBox(width: 4),
-                            const Expanded(
+                            Expanded(
                               child: Text(
-                                'Missed Schedule / Wasted Slot Penalty (₱500.00)',
+                                !_isMissedSchedule
+                                    ? 'Missed Schedule / Wasted Slot Check'
+                                    : (isRepeat
+                                        ? 'Missed Schedule (Repeat Offense #${_customerPriorMissedCount + 1} — ₱500.00 Penalty)'
+                                        : 'Missed Schedule (1st Offense — Formal Warning)'),
                                 style: TextStyle(
-                                  fontSize: 14,
+                                  fontSize: 13.5,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF991B1B),
+                                  color: primaryTextColor,
                                 ),
                               ),
                             ),
+                            if (_isMissedSchedule)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isRepeat ? const Color(0xFFFEE2E2) : const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isRepeat ? const Color(0xFFFCA5A5) : const Color(0xFFFCD34D),
+                                  ),
+                                ),
+                                child: Text(
+                                  isRepeat ? '₱500.00 Penalty' : '₱0.00 Fee Waived',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: isRepeat ? const Color(0xFFB91C1C) : const Color(0xFFB45309),
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                         Padding(
                           padding: const EdgeInsets.only(left: 36, right: 8, bottom: 4),
                           child: Text(
-                            'Apply if the customer failed to bring their livestock on their reserved schedule ($schedDisplay) and brought it on a later date. The ₱500 penalty compensates for the reserved slaughter slot that was wasted.',
+                            !_isMissedSchedule
+                                ? 'Check if the customer arrived on a date later than their scheduled reservation ($schedDisplay).'
+                                : (isRepeat
+                                    ? 'Repeat Violation: Customer has $_customerPriorMissedCount previous missed schedule violation(s) on record. Under abattoir regulations, the statutory ₱500.00 Wasted Slot Penalty is automatically added to their cashiering bill.'
+                                    : '1st Offense Grace Policy: The customer failed to arrive on their scheduled slot ($schedDisplay). Valid excuses are granted grace with ₱0 penalty fee on their 1st offense. A formal warning notice will be issued to their mobile account explaining that subsequent missed bookings will incur an automatic ₱500 penalty.'),
                             style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700, height: 1.35),
                           ),
                         ),

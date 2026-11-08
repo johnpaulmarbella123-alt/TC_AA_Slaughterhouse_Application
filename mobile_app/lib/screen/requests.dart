@@ -1313,25 +1313,29 @@ class _RequestsContentState extends State<RequestsContent> {
                         prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF1E855A)),
                         suffixIcon: _customerNameController.text.isNotEmpty
                             ? Padding(
-                                padding: const EdgeInsets.only(right: 12),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      _isRegularDealer ? Icons.verified : Icons.check_circle,
-                                      size: 16,
-                                      color: const Color(0xFF1E855A),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      _isRegularDealer ? "Regular Dealer" : "Verified",
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Color(0xFF1E855A),
+                                padding: const EdgeInsets.only(right: 10),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _isRegularDealer ? Icons.verified : Icons.check_circle,
+                                        size: 15,
+                                        color: const Color(0xFF1E855A),
                                       ),
-                                    ),
-                                  ],
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        _isRegularDealer ? "Regular Dealer" : "Verified",
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF1E855A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               )
                             : null,

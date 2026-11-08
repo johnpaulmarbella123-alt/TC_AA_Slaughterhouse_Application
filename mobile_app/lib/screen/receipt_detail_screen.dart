@@ -40,6 +40,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
   Map<String, dynamic>? _request;
   Map<String, dynamic>? _payment;
   Map<String, double> _fees = {};
+  bool _isWarningOnly = false;
 
   @override
   void initState() {
@@ -213,14 +214,18 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         final isBarangay = requestData['request_type'] == 'barangay';
         final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
 
+        final isWarningOnly = (penaltyTracking?['is_warning_only'] == true) ||
+            (requestData['is_warning_only'] == true) ||
+            (requestData['process_notes'] ?? '').toString().contains('1ST OFFENSE');
         final explicitPenaltyVal = double.tryParse(requestData['penalty_fee']?.toString() ?? '0') ?? 0.0;
         final trackingPenaltyVal = double.tryParse(penaltyTracking?['penalty_fee']?.toString() ?? '0') ?? 0.0;
-        final hasExplicitMissedSlotPenalty = explicitPenaltyVal > 0 ||
-            trackingPenaltyVal > 0 ||
-            (requestData['penalty_reason']?.toString().contains('Missed') ?? false) ||
-            (penaltyTracking?['penalty_reason']?.toString().contains('Missed') ?? false) ||
-            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('missed schedule') ||
-            (requestData['process_notes'] ?? '').toString().toLowerCase().contains('wasted slot');
+        final hasExplicitMissedSlotPenalty = !isWarningOnly &&
+            (explicitPenaltyVal > 0 ||
+                trackingPenaltyVal > 0 ||
+                (requestData['penalty_reason']?.toString().contains('Repeat') ?? false) ||
+                (penaltyTracking?['penalty_reason']?.toString().contains('Repeat') ?? false) ||
+                ((requestData['process_notes'] ?? '').toString().toLowerCase().contains('missed schedule') && !isWarningOnly) ||
+                ((requestData['process_notes'] ?? '').toString().toLowerCase().contains('wasted slot') && !isWarningOnly));
         final penaltyFee = hasExplicitMissedSlotPenalty
             ? (explicitPenaltyVal > 0 ? explicitPenaltyVal : (trackingPenaltyVal > 0 ? trackingPenaltyVal : 500.0))
             : 0.0;
@@ -312,6 +317,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         setState(() {
           _request = requestData;
           _payment = paymentData;
+          _isWarningOnly = isWarningOnly;
           if (paymentData != null && totalFromPay != null) {
             final vanFee = double.tryParse((paymentData['delivery_van_fee'] ?? deliveryFee).toString()) ?? deliveryFee;
             final computedTotal = subtotal + vanFee;
@@ -676,8 +682,17 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   ),
                 if (((_fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
                   _lineItem(
-                    "Missed Schedule / Wasted Slot Penalty:",
+                    "Missed Schedule Slot Penalty (Repeat Offense):",
                     "\u20b1${((_fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}",
+                    bold: true,
+                    valueColor: const Color(0xFFB91C1C),
+                  )
+                else if (_isWarningOnly)
+                  _lineItem(
+                    "Missed Schedule Notice (1st Offense):",
+                    "Warning Issued (\u20b10.00 Waived)",
+                    bold: false,
+                    valueColor: const Color(0xFFB45309),
                   ),
                 const SizedBox(height: 8),
                 Divider(color: Colors.grey.shade300),
@@ -700,8 +715,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text("AMOUNT PAID ($paymentMethodLabel):",
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        Expanded(
+                          child: Text("AMOUNT PAID ($paymentMethodLabel):",
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        ),
+                        const SizedBox(width: 8),
                         Text("\u20b1${amountPaid.toStringAsFixed(2)}",
                             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
                       ],
@@ -877,9 +895,13 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            Expanded(
+              flex: 3,
+              child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
             const SizedBox(width: 8),
             Flexible(
+              flex: 2,
               child: Text(
                 value,
                 textAlign: TextAlign.end,
@@ -890,15 +912,28 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         ),
       );
 
-  static Widget _lineItem(String label, String amount) => Padding(
+  static Widget _lineItem(String label, String amount,
+          {bool bold = false, Color? valueColor}) =>
+      Padding(
         padding: const EdgeInsets.only(bottom: 4),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Flexible(child: Text(label, style: const TextStyle(fontSize: 12))),
+            Flexible(
+                child: Text(label,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight:
+                            bold ? FontWeight.bold : FontWeight.normal,
+                        color: valueColor))),
             const SizedBox(width: 8),
-            Text(amount, style: const TextStyle(fontSize: 12)),
+            Text(amount,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight:
+                        bold ? FontWeight.bold : FontWeight.normal,
+                    color: valueColor)),
           ],
         ),
       );
