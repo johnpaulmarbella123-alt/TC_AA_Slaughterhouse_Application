@@ -146,13 +146,7 @@ class _ProfileContentState extends State<ProfileContent> with WidgetsBindingObse
 
       final dbEmail = data['email']?.toString() ?? '';
       final authEmail = user.email ?? '';
-      final isDbSynthetic = dbEmail.toLowerCase().contains('@tabaco-abattoir.gov.ph');
-      final isAuthSynthetic = authEmail.toLowerCase().contains('@tabaco-abattoir.gov.ph');
-
-      // Filter out internal synthetic emails so they never show in UI
-      final resolvedEmail = (!isDbSynthetic && dbEmail.isNotEmpty)
-          ? dbEmail
-          : (!isAuthSynthetic ? authEmail : '');
+      final resolvedEmail = dbEmail.isNotEmpty ? dbEmail : authEmail;
 
       if (mounted) {
         setState(() {
@@ -167,16 +161,8 @@ class _ProfileContentState extends State<ProfileContent> with WidgetsBindingObse
         });
       }
 
-      // Automatically clean up any synthetic email stored in profiles table
-      if (isDbSynthetic) {
-        try {
-          await Supabase.instance.client
-              .from('profiles')
-              .update({'email': null})
-              .eq('id', user.id);
-        } catch (_) {}
-      } else if (dbEmail.isEmpty && authEmail.isNotEmpty && !isAuthSynthetic) {
-        // Sync legitimate auth email to profiles table if missing
+      // Automatically sync email to profiles table if missing
+      if (dbEmail.isEmpty && authEmail.isNotEmpty) {
         try {
           await Supabase.instance.client
               .from('profiles')
@@ -391,25 +377,23 @@ String? _extractStoragePath(String publicUrl) {
     final user = Supabase.instance.client.auth.currentUser;
     final authPhone = user?.phone ?? '';
     final authEmail = user?.email ?? '';
-    final isAuthSynthetic = authEmail.toLowerCase().contains('@tabaco-abattoir.gov.ph');
-    final isStateEmailSynthetic = email.toLowerCase().contains('@tabaco-abattoir.gov.ph');
 
-    // 1. If user signed up with a legitimate email, show their email
-    if (authEmail.isNotEmpty && !isAuthSynthetic) {
-      return authEmail;
-    }
-    if (email.isNotEmpty && email != 'EMPTY' && !isStateEmailSynthetic) {
-      return email;
-    }
-
-    // 2. Otherwise (user signed up with a phone number), show their phone number
-    if (phoneNumber.isNotEmpty && phoneNumber != 'EMPTY') {
-      return phoneNumber;
-    }
+    // If user logged in / signed up with a phone number
     if (authPhone.isNotEmpty) {
       return authPhone;
     }
-
+    // If user logged in / signed up with an email
+    if (authEmail.isNotEmpty) {
+      return authEmail;
+    }
+    // If email is saved in profile
+    if (email.isNotEmpty && email != 'EMPTY') {
+      return email;
+    }
+    // If phone is saved in profile
+    if (phoneNumber.isNotEmpty && phoneNumber != 'EMPTY') {
+      return phoneNumber;
+    }
     return '';
   }
 
@@ -422,11 +406,11 @@ String? _extractStoragePath(String publicUrl) {
         await prefs.setBool('has_previously_logged_in', true);
       } catch (_) {}
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
       }
     }
   }

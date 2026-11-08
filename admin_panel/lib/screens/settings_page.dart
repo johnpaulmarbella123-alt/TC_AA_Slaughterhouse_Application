@@ -1008,64 +1008,29 @@ class _SettingsPageState extends State<SettingsPage>
           const SizedBox(height: 16),
 
           // Staff Accounts Table
-          if (_settingsService.staffAccounts.isEmpty)
-            Card(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
-                child: Center(
-                  child: Column(
-                    children: [
-                      Icon(Icons.badge_outlined,
-                          size: 48,
-                          color: isDark ? Colors.grey.shade600 : Colors.grey.shade400),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No Staff Members Added Yet',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        "Click '+ Add Staff Member' above to provision Clerk, Inspector, or Admin accounts.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-          else
-            Card(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-              child: Column(
-                children: [
-                  for (int index = 0;
-                      index < _settingsService.staffAccounts.length;
-                      index++) ...[
-                    if (index > 0)
-                      Divider(
-                        color: isDark
-                            ? const Color(0xFF334155)
-                            : Colors.grey.shade200,
-                        height: 1,
-                      ),
-                    _buildStaffRow(
-                      _settingsService.staffAccounts[index],
-                      isDark,
-                      rolesList,
+          Card(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            child: Column(
+              children: [
+                for (int index = 0;
+                    index < _settingsService.staffAccounts.length;
+                    index++) ...[
+                  if (index > 0)
+                    Divider(
+                      color: isDark
+                          ? const Color(0xFF334155)
+                          : Colors.grey.shade200,
+                      height: 1,
                     ),
-                  ],
+                  _buildStaffRow(
+                    _settingsService.staffAccounts[index],
+                    isDark,
+                    rolesList,
+                  ),
                 ],
-              ),
+              ],
             ),
+          ),
           const SizedBox(height: 24),
 
           // Role Permission Matrix Card
@@ -1268,9 +1233,9 @@ class _SettingsPageState extends State<SettingsPage>
                     try {
                       await Supabase.instance.client.from('profiles').upsert({
                         'id': authRes.user!.id,
-                        'display_name': name,
-                        'email': email,
+                        'full_name': name,
                         'role': selectedRole.toLowerCase(),
+                        'updated_at': DateTime.now().toIso8601String(),
                       });
                     } catch (_) {}
                   }
@@ -1292,10 +1257,8 @@ class _SettingsPageState extends State<SettingsPage>
                   setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Real verification link sent to $email! $name ($selectedRole) must confirm in their inbox before logging in.'),
+                      content: Text('Successfully provisioned $name ($selectedRole)! Account ready for login.'),
                       backgroundColor: const Color(0xFF2D6A4F),
-                      duration: const Duration(seconds: 4),
-                      behavior: SnackBarBehavior.floating,
                     ),
                   );
                 }

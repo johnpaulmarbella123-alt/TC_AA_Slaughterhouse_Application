@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../pages/home_page.dart';
 import '../screen/welcome.dart';
+import '../pages/login_page.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -21,6 +23,8 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<Widget> _determineInitialScreen() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasPreviouslyLoggedIn = prefs.getBool('has_previously_logged_in') ?? false;
       final session = Supabase.instance.client.auth.currentSession;
 
       if (session != null) {
@@ -29,6 +33,7 @@ class _AuthGateState extends State<AuthGate> {
           final userRes = await Supabase.instance.client.auth.getUser();
           if (userRes.user != null) {
             // User exists and session is valid -> Go directly to Home Page
+            await prefs.setBool('has_previously_logged_in', true);
             return const HomeScreen();
           }
         } catch (_) {
@@ -36,12 +41,19 @@ class _AuthGateState extends State<AuthGate> {
           try {
             await Supabase.instance.client.auth.signOut();
           } catch (_) {}
-          return const WelcomeScreen();
+          // Since they had an account, show Login page directly
+          return const LoginScreen();
         }
       }
 
-      // No active session: Always show WelcomeScreen (Get Started)
-      return const WelcomeScreen();
+      // No active session:
+      // 1. User had an account and logged out -> Show LoginScreen directly
+      // 2. First-time fresh install -> Show WelcomeScreen (Get Started)
+      if (hasPreviouslyLoggedIn) {
+        return const LoginScreen();
+      } else {
+        return const WelcomeScreen();
+      }
     } catch (_) {
       return const WelcomeScreen();
     }

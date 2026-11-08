@@ -1208,44 +1208,55 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
               child: Row(
                 children: [
-                  Text(
-                    ref,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: [
+                        Text(
+                          ref,
+                          style: const TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _IllegalSlaughterReportsViewState.getStatusBgColor(status),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _IllegalSlaughterReportsViewState.getStatusTextColor(status),
+                            ),
+                          ),
+                        ),
+                        _IllegalSlaughterReportsViewState.buildSeverityBadge(_severityLevel),
+                      ],
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _IllegalSlaughterReportsViewState.getStatusBgColor(status),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Text(
-                      status,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _IllegalSlaughterReportsViewState.getStatusTextColor(status),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFEF4444)),
+                        tooltip: 'Delete Report',
+                        splashRadius: 18,
+                        onPressed: _confirmDeleteReport,
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  _IllegalSlaughterReportsViewState.buildSeverityBadge(_severityLevel),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20, color: Color(0xFFEF4444)),
-                    tooltip: 'Delete Report',
-                    splashRadius: 18,
-                    onPressed: _confirmDeleteReport,
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    icon: const Icon(Icons.close, size: 20, color: Color(0xFF64748B)),
-                    splashRadius: 18,
-                    onPressed: () => Navigator.of(context).pop(),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20, color: Color(0xFF64748B)),
+                        splashRadius: 18,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1485,9 +1496,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.local_police, size: 16, color: Color(0xFFDC2626)),
                 SizedBox(width: 6),
-                Text(
-                  'PNP & Law Enforcement Direct Escalation (Active Crime)',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF991B1B)),
+                Expanded(
+                  child: Text(
+                    'PNP & Law Enforcement Direct Escalation (Active Crime)',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF991B1B)),
+                  ),
                 ),
               ],
             ),
@@ -1522,9 +1535,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.check_circle_outline, size: 13, color: Color(0xFFDC2626)),
                 SizedBox(width: 4),
-                Text(
-                  'Recommended Action: Endorse to Philippine National Police (PNP)',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626)),
+                Expanded(
+                  child: Text(
+                    'Recommended Action: Endorse to Philippine National Police (PNP)',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626)),
+                  ),
                 ),
               ],
             ),
@@ -1546,9 +1561,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.business_center_outlined, size: 16, color: Color(0xFFD97706)),
                 SizedBox(width: 6),
-                Text(
-                  'NMIS Administrative & Regulatory Crackdown',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                Expanded(
+                  child: Text(
+                    'NMIS Administrative & Regulatory Crackdown',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF92400E)),
+                  ),
                 ),
               ],
             ),
@@ -1583,9 +1600,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.check_circle_outline, size: 13, color: Color(0xFFD97706)),
                 SizedBox(width: 4),
-                Text(
-                  'Recommended Action: Endorse to NMIS (National Meat Inspection Service)',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFD97706)),
+                Expanded(
+                  child: Text(
+                    'Recommended Action: Endorse to NMIS (National Meat Inspection Service)',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFD97706)),
+                  ),
                 ),
               ],
             ),
@@ -1608,9 +1627,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.verified_outlined, size: 16, color: Color(0xFF16A34A)),
                 SizedBox(width: 6),
-                Text(
-                  'Slaughterhouse & CVO Internal Resolution',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                Expanded(
+                  child: Text(
+                    'Slaughterhouse & CVO Internal Resolution',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                  ),
                 ),
               ],
             ),
@@ -1643,9 +1664,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               children: const [
                 Icon(Icons.check_circle_outline, size: 13, color: Color(0xFF16A34A)),
                 SizedBox(width: 4),
-                Text(
-                  'Recommended Action: Tabaco City Slaughterhouse / CVO Internal Unit',
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                Expanded(
+                  child: Text(
+                    'Recommended Action: Tabaco City Slaughterhouse / CVO Internal Unit',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                  ),
                 ),
               ],
             ),

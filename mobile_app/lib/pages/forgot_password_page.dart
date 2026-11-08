@@ -31,7 +31,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   // Active identifier being recovered
   String _activeIdentifier = '';
   String? _enteredPhone;
-  String? _simulatedOtp;
   bool get _isEmail => _activeIdentifier.contains('@');
 
   // Resend Timer
@@ -161,42 +160,30 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         // Look up registered email linked to this phone number
         final linkedEmail = await _authService.findEmailForPhone(formattedPhone);
 
-        if (linkedEmail != null && linkedEmail.isNotEmpty) {
-          final res = await _authService.sendPasswordResetOtp(linkedEmail);
-          final simCode = res['simulated'] == true ? res['otp']?.toString() : null;
+        if (linkedEmail == null || linkedEmail.isEmpty) {
           if (!mounted) return;
-
-          _startResendTimer();
-          setState(() {
-            _activeIdentifier = linkedEmail;
-            _enteredPhone = rawInput;
-            _simulatedOtp = simCode;
-            _currentStep = 1;
-          });
-
           _showSnackbar(
-            'Account found! 6-digit code sent to your linked email (${_maskEmail(linkedEmail)}).',
-            isError: false,
+            'No registered account found with mobile number $rawInput. Please enter your email address.',
+            isError: true,
           );
-        } else {
-          // Send directly to phone with Defense Smart OTP Fallback
-          final res = await _authService.sendPasswordResetOtp(formattedPhone);
-          final simCode = res['simulated'] == true ? res['otp']?.toString() : null;
-          if (!mounted) return;
-
-          _startResendTimer();
-          setState(() {
-            _activeIdentifier = formattedPhone;
-            _enteredPhone = rawInput;
-            _simulatedOtp = simCode;
-            _currentStep = 1;
-          });
-
-          _showSnackbar(
-            '6-digit recovery code generated for $rawInput.',
-            isError: false,
-          );
+          return;
         }
+
+        // Send 6-digit recovery OTP directly to their linked email
+        await _authService.sendPasswordResetOtp(linkedEmail);
+        if (!mounted) return;
+
+        _startResendTimer();
+        setState(() {
+          _activeIdentifier = linkedEmail;
+          _enteredPhone = rawInput;
+          _currentStep = 1;
+        });
+
+        _showSnackbar(
+          'Account found! 6-digit code sent to your linked email (${_maskEmail(linkedEmail)}).',
+          isError: false,
+        );
       } catch (e) {
         if (!mounted) return;
         _showSnackbar('Error sending code: $e', isError: true);
@@ -215,16 +202,13 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     setState(() => _isResending = true);
 
     try {
-      final res = await _authService.sendPasswordResetOtp(_activeIdentifier);
-      if (res['simulated'] == true) {
-        setState(() => _simulatedOtp = res['otp']?.toString());
-      }
+      await _authService.sendPasswordResetOtp(_activeIdentifier);
       if (!mounted) return;
 
       _startResendTimer();
       _showSnackbar(
         _enteredPhone != null
-            ? 'A new recovery code has been generated for ${_enteredPhone ?? _activeIdentifier}.'
+            ? 'A new recovery code has been sent to ${_maskEmail(_activeIdentifier)}.'
             : 'A new recovery code has been sent to your email.',
         isError: false,
       );
@@ -609,10 +593,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
                   // ─── STEP 1: OTP & NEW PASSWORD FORM ───
                   if (_currentStep == 1) ...[
-                    if (_simulatedOtp != null) ...[
-                      _buildSmsNotificationBanner(_simulatedOtp!),
-                    ],
-
                     // OTP Input
                     TextField(
                       controller: _otpController,
@@ -789,107 +769,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(vertical: 16),
         ),
-      ),
-    );
-  }
-
-  Widget _buildSmsNotificationBanner(String code) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.chat_bubble_outline_rounded,
-                color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Text(
-                      'MESSAGES',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                    Text(
-                      ' • now',
-                      style: TextStyle(color: Colors.white38, fontSize: 10),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                RichText(
-                  text: TextSpan(
-                    style: const TextStyle(color: Colors.white, fontSize: 12.5),
-                    children: [
-                      const TextSpan(text: 'Tabaco Slaughterhouse: Reset OTP is '),
-                      TextSpan(
-                        text: code,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF4ADE80),
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: () {
-              _otpController.text = code;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Recovery OTP auto-filled!'),
-                  duration: Duration(seconds: 1),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF22C55E),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Auto-Fill',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
       ),
     );
   }

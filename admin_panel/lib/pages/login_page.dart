@@ -20,41 +20,35 @@ class _LoginPageState extends State<LoginPage> {
   bool _keepMeLoggedIn = false;
   bool _isAdminProvisioned = true;
   String _selectedRolePortal = 'Admin'; // 'Admin', 'Clerk', or 'Inspector'
-  String? _errorMessage;
   final _supabase = Supabase.instance.client;
 
   @override
   void initState() {
     super.initState();
     _checkAdminProvisioned();
-    _usernameController.addListener(_clearErrorOnType);
-    _passwordController.addListener(_clearErrorOnType);
-  }
-
-  void _clearErrorOnType() {
-    if (_errorMessage != null) {
-      setState(() => _errorMessage = null);
-    }
   }
 
   Future<void> _checkAdminProvisioned() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final res = await _supabase
-          .from('profiles')
-          .select('id, role')
-          .eq('role', 'admin')
-          .limit(1);
-      final bool provisioned = (res as List).isNotEmpty;
-      await prefs.setBool('admin_account_provisioned', provisioned);
+      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
+      if (!provisioned) {
+        final res = await _supabase
+            .from('profiles')
+            .select('id, role')
+            .eq('role', 'admin')
+            .limit(1);
+        if ((res as List).isNotEmpty) {
+          provisioned = true;
+          await prefs.setBool('admin_account_provisioned', true);
+        }
+      }
       if (mounted) setState(() => _isAdminProvisioned = provisioned);
     } catch (_) {}
   }
 
   @override
   void dispose() {
-    _usernameController.removeListener(_clearErrorOnType);
-    _passwordController.removeListener(_clearErrorOnType);
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -70,14 +64,11 @@ class _LoginPageState extends State<LoginPage> {
     final password = _passwordController.text;
 
     if (email.isEmpty || password.isEmpty) {
-      _showError('Please enter both email/username and password.');
+      _showError('Please enter email/username and password');
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    setState(() => _isLoading = true);
 
     try {
       // 1. Load latest staff accounts & roles from Supabase
@@ -101,7 +92,7 @@ class _LoginPageState extends State<LoginPage> {
         final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
         if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
           _showError(
-            'This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
           );
           return;
         }
@@ -121,32 +112,8 @@ class _LoginPageState extends State<LoginPage> {
         }
 
         if (!passOk) {
-          _showError('The email address or password you entered is incorrect. Please check your credentials and try again.');
+          _showError('Invalid email or password.');
           return;
-        }
-
-        // Strictly enforce real email confirmation for Clerk and Inspector accounts
-        if (actualRole != 'Admin') {
-          try {
-            final authRes = await _supabase.auth.signInWithPassword(
-              email: email,
-              password: password,
-            );
-            if (authRes.user != null) {
-              final isConfirmed = authRes.session != null || authRes.user!.emailConfirmedAt != null;
-              if (!isConfirmed) {
-                await _supabase.auth.signOut();
-                _showError('Access denied: Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
-                return;
-              }
-            }
-          } on AuthException catch (authErr) {
-            final msg = authErr.message.toLowerCase();
-            if (msg.contains('email not confirmed')) {
-              _showError('Access denied: Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
-              return;
-            }
-          } catch (_) {}
         }
 
         final prefs = await SharedPreferences.getInstance();
@@ -207,29 +174,6 @@ class _LoginPageState extends State<LoginPage> {
         if (actualRole == 'Admin') {
           await prefs.setString('admin_auth_email', email);
           await prefs.setString('admin_auth_password', password);
-          await prefs.setBool('admin_account_provisioned', true);
-
-          try {
-            await _supabase.from('system_settings').upsert({
-              'key': 'admin_account_provisioned',
-              'value': {
-                'id': user.id,
-                'email': email,
-                'role': 'admin',
-                'created_at': DateTime.now().toIso8601String(),
-              },
-            });
-          } catch (_) {}
-
-          try {
-            await _supabase.from('profiles').upsert({
-              'id': user.id,
-              'display_name': user.userMetadata?['full_name']?.toString() ?? email.split('@').first.toUpperCase(),
-              'email': email,
-              'role': 'admin',
-            });
-          } catch (_) {}
-
           final existingAdminIdx = AppSettingsService.instance.staffAccounts.indexWhere(
             (s) => s.email.toLowerCase() == email.toLowerCase(),
           );
@@ -266,16 +210,9 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } on AuthException catch (error) {
-      final msg = error.message.toLowerCase();
-      if (msg.contains('email not confirmed')) {
-        _showError('Staff email has not been verified yet. Please check your inbox and click the confirmation link sent by Supabase.');
-      } else if (msg.contains('invalid login credentials') || msg.contains('invalid') || msg.contains('incorrect')) {
-        _showError('The email address or password you entered is incorrect. Please check your credentials and try again.');
-      } else {
-        _showError(error.message);
-      }
+      _showError(error.message);
     } catch (error) {
-      _showError('An unexpected authentication error occurred. Please try again.');
+      _showError('An unexpected error occurred.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -284,89 +221,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _showError(String message) {
-    if (mounted) {
-      setState(() => _errorMessage = message);
-    }
-  }
-
-  Widget _buildErrorBanner() {
-    if (_errorMessage == null) return const SizedBox.shrink();
-
-    final isWrongCreds = _errorMessage!.toLowerCase().contains('invalid') ||
-        _errorMessage!.toLowerCase().contains('incorrect') ||
-        _errorMessage!.toLowerCase().contains('not found');
-
-    final String title = isWrongCreds
-        ? 'Incorrect Email or Password'
-        : (_errorMessage!.toLowerCase().contains('verified')
-            ? 'Email Verification Required'
-            : 'Access Notice');
-
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF7F1D1D).withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFFCA5A5), width: 1.2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 2),
-            child: Icon(
-              Icons.error_outline_rounded,
-              color: Color(0xFFFCA5A5),
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.2,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  _errorMessage!,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.95),
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 6),
-          InkWell(
-            onTap: () => setState(() => _errorMessage = null),
-            borderRadius: BorderRadius.circular(12),
-            child: const Padding(
-              padding: EdgeInsets.all(4),
-              child: Icon(Icons.close, color: Colors.white70, size: 16),
-            ),
-          ),
-        ],
-      ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
     );
   }
 
@@ -517,10 +373,7 @@ class _LoginPageState extends State<LoginPage> {
                   final isSelected = _selectedRolePortal == role;
                   return Expanded(
                     child: GestureDetector(
-                      onTap: () => setState(() {
-                        _selectedRolePortal = role;
-                        _errorMessage = null;
-                      }),
+                      onTap: () => setState(() => _selectedRolePortal = role),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
                         padding: const EdgeInsets.symmetric(vertical: 9),
@@ -554,7 +407,6 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 18),
-            _buildErrorBanner(),
             _buildTextField(
               controller: _usernameController,
               label: 'Email / Username',

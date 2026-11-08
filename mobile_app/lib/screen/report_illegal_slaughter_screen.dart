@@ -563,19 +563,23 @@ class _AuthorityHotlinesCard extends StatelessWidget {
               const SizedBox(height: 1),
               Text(scope, style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B))),
               const SizedBox(height: 3),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(5),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Text(
-                  actionText,
-                  style: const TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF000000),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Text(
+                    actionText,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF000000),
+                    ),
                   ),
                 ),
               ),
@@ -852,159 +856,166 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       barrierDismissible: false,
       builder: (dCtx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 58,
-              height: 58,
-              decoration: BoxDecoration(
-                color: isAnonymous ? const Color(0xFFEFF6FF) : const Color(0xFFF0FDF4),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isAnonymous ? const Color(0xFFBFDBFE) : const Color(0xFFBBF7D0),
-                  width: 1.5,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        contentPadding: const EdgeInsets.fromLTRB(18, 22, 18, 16),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: isAnonymous ? const Color(0xFFEFF6FF) : const Color(0xFFF0FDF4),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isAnonymous ? const Color(0xFFBFDBFE) : const Color(0xFFBBF7D0),
+                    width: 1.5,
+                  ),
+                ),
+                child: Icon(
+                  isAnonymous ? Icons.shield_outlined : Icons.check_circle_outline,
+                  color: isAnonymous ? const Color(0xFF2563EB) : const Color(0xFF16A34A),
+                  size: 30,
                 ),
               ),
-              child: Icon(
-                isAnonymous ? Icons.shield_outlined : Icons.check_circle_outline,
-                color: isAnonymous ? const Color(0xFF2563EB) : const Color(0xFF16A34A),
-                size: 32,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              isAnonymous ? 'Protected Anonymous Submission' : 'Report Submitted Successfully!',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF0F172A),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              isAnonymous
-                  ? 'Your identity has been fully protected. The abattoir inspection team has received your report for triage.'
-                  : 'Your report has been received by the Tabaco City Slaughterhouse & City Veterinary Office.',
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.35),
-            ),
-            const SizedBox(height: 14),
-
-            // Reference Number Container with 1-tap Copy
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: Column(
-                children: [
-                  const Text(
-                    'TRACKING REFERENCE NUMBER',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.6,
-                      color: Color(0xFF64748B),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        refNo,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.0,
-                          color: Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      InkWell(
-                        onTap: () {
-                          Clipboard.setData(ClipboardData(text: refNo));
-                          ScaffoldMessenger.of(ctx).showSnackBar(
-                            SnackBar(
-                              content: Text('Copied reference number: $refNo'),
-                              duration: const Duration(seconds: 2),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(6),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFEFF6FF),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFFBFDBFE)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.copy, size: 12, color: Color(0xFF2563EB)),
-                              SizedBox(width: 4),
-                              Text(
-                                'Copy',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: Color(0xFF2563EB),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // Dynamic Advisory Note
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: isAnonymous ? const Color(0xFFFFFBEB) : const Color(0xFFF0FDF4),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isAnonymous ? const Color(0xFFFDE68A) : const Color(0xFFBBF7D0),
+              const SizedBox(height: 12),
+              Text(
+                isAnonymous ? 'Protected Anonymous Submission' : 'Report Submitted Successfully!',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15.5,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0F172A),
                 ),
               ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    isAnonymous ? Icons.lock_outline : Icons.notifications_active_outlined,
-                    size: 15,
-                    color: isAnonymous ? const Color(0xFFD97706) : const Color(0xFF16A34A),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      isAnonymous
-                          ? 'Privacy Note: To ensure total confidentiality, no notifications are linked to your user account. Keep your reference code if you wish to follow up via hotlines.'
-                          : 'Notification Active: A submission confirmation has been added to your Notifications tab. You will receive updates as the investigation progresses.',
+              const SizedBox(height: 6),
+              Text(
+                isAnonymous
+                    ? 'Your identity has been fully protected. The abattoir inspection team has received your report for triage.'
+                    : 'Your report has been received by the Tabaco City Slaughterhouse & City Veterinary Office.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B), height: 1.35),
+              ),
+              const SizedBox(height: 14),
+
+              // Reference Number Container with 1-tap Copy (Auto-scaling to prevent any overflow)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'TRACKING REFERENCE NUMBER',
                       style: TextStyle(
-                        fontSize: 11,
-                        color: isAnonymous ? const Color(0xFF92400E) : const Color(0xFF166534),
-                        height: 1.35,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                        color: Color(0xFF64748B),
                       ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 5),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            refNo,
+                            style: const TextStyle(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          InkWell(
+                            onTap: () {
+                              Clipboard.setData(ClipboardData(text: refNo));
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(
+                                  content: Text('Copied reference number: $refNo'),
+                                  duration: const Duration(seconds: 2),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.copy, size: 12, color: Color(0xFF2563EB)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Copy',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF2563EB),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+
+              // Dynamic Advisory Note
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isAnonymous ? const Color(0xFFFFFBEB) : const Color(0xFFF0FDF4),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isAnonymous ? const Color(0xFFFDE68A) : const Color(0xFFBBF7D0),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      isAnonymous ? Icons.lock_outline : Icons.notifications_active_outlined,
+                      size: 15,
+                      color: isAnonymous ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        isAnonymous
+                            ? 'Privacy Note: To ensure total confidentiality, no notifications are linked to your user account. Keep your reference code if you wish to follow up via hotlines.'
+                            : 'Notification Active: A submission confirmation has been added to your Notifications tab. You will receive updates as the investigation progresses.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isAnonymous ? const Color(0xFF92400E) : const Color(0xFF166534),
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           SizedBox(

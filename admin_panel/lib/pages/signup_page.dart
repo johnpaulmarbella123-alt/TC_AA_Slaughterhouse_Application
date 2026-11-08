@@ -31,31 +31,46 @@ class _SignupPageState extends State<SignupPage> {
   Future<void> _checkAdminStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      bool provisioned = false;
+      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
 
-      // 1. Strict live check: check profiles for an existing active admin user
-      try {
-        final res = await _supabase
-            .from('profiles')
-            .select('id, role')
-            .eq('role', 'admin')
-            .limit(1);
-        if ((res as List).isNotEmpty) {
-          provisioned = true;
-        } else {
-          // If no admin profile exists in Supabase, auto-clean stale settings & local cache
-          try {
-            await _supabase
-                .from('system_settings')
-                .delete()
-                .eq('key', 'admin_account_provisioned');
-          } catch (_) {}
-          await prefs.remove('admin_account_provisioned');
-        }
-      } catch (_) {}
+      if (!provisioned) {
+        // 1. Check system_settings
+        try {
+          final settingRow = await _supabase
+              .from('system_settings')
+              .select('value')
+              .eq('key', 'admin_account_provisioned')
+              .maybeSingle();
+          if (settingRow != null && settingRow['value'] != null) {
+            provisioned = true;
+          }
+        } catch (_) {}
+      }
 
-      // Sync local preferences with true database reality
-      await prefs.setBool('admin_account_provisioned', provisioned);
+      if (!provisioned) {
+        // 2. Check profiles for existing admin role
+        try {
+          final res = await _supabase
+              .from('profiles')
+              .select('id, role')
+              .eq('role', 'admin')
+              .limit(1);
+          if ((res as List).isNotEmpty) {
+            provisioned = true;
+          }
+        } catch (_) {}
+      }
+
+      if (!provisioned) {
+        // 3. Check staff accounts in AppSettingsService
+        final hasAdminInStaff = AppSettingsService.instance.staffAccounts
+            .any((s) => s.role == 'Admin' && s.email.toLowerCase() != 'admin@tabaco.gov.ph');
+        if (hasAdminInStaff) provisioned = true;
+      }
+
+      if (provisioned) {
+        await prefs.setBool('admin_account_provisioned', true);
+      }
 
       if (mounted) {
         setState(() {
@@ -107,7 +122,7 @@ class _SignupPageState extends State<SignupPage> {
       final prefs = await SharedPreferences.getInstance();
       final defaultFullName = email.split('@').first.toUpperCase();
 
-      // Sign up administrator in Supabase Auth
+      // Sign up the primary administrator
       final response = await _supabase.auth.signUp(
         email: email,
         password: password,
@@ -120,23 +135,8 @@ class _SignupPageState extends State<SignupPage> {
       if (mounted && response.user != null) {
         final user = response.user!;
 
-        // 1. Ensure profile in public.profiles table has role 'admin'
-        try {
-          await _supabase.from('profiles').upsert({
-            'id': user.id,
-            'display_name': defaultFullName,
-            'email': email,
-            'role': 'admin',
-          });
-        } catch (e) {
-          debugPrint('profiles upsert notice: $e');
-        }
-
-        // 2. Mark admin as permanently provisioned in DB and local prefs
+        // 1. Mark admin as permanently provisioned in DB and local prefs
         await prefs.setBool('admin_account_provisioned', true);
-        await prefs.setString('admin_auth_email', email);
-        await prefs.setString('admin_auth_password', password);
-
         try {
           await _supabase.from('system_settings').upsert({
             'key': 'admin_account_provisioned',
@@ -149,7 +149,21 @@ class _SignupPageState extends State<SignupPage> {
           });
         } catch (_) {}
 
+        // 2. Ensure profile in public.profiles table has role 'admin'
+        try {
+          await _supabase.from('profiles').upsert({
+            'id': user.id,
+            'full_name': defaultFullName,
+            'role': 'admin',
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
+
         // 3. Sync with AppSettingsService and add to Staff Accounts list
+        AppSettingsService.instance.staffAccounts.removeWhere(
+          (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
+        );
+
         final existsInStaff = AppSettingsService.instance.staffAccounts
             .any((s) => s.email.toLowerCase() == email.toLowerCase());
         if (!existsInStaff) {
@@ -168,68 +182,20 @@ class _SignupPageState extends State<SignupPage> {
 
         AppSettingsService.instance.syncWithAuthUser(user);
 
-        // Instant Demo Activation: Grant immediate dashboard entry for defense
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Demo Administrator account ($email) registered and activated in Supabase!'),
-              backgroundColor: const Color(0xFF2D6A4F),
-              duration: const Duration(seconds: 3),
+            const SnackBar(
+              content: Text('Administrator account registered successfully! Welcome aboard.'),
+              backgroundColor: Color(0xFF2D6A4F),
             ),
           );
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
       }
     } on AuthException catch (error) {
-      final msg = error.message.toLowerCase();
-      // If account already exists in Supabase Auth, sign in to link & activate
-      if (msg.contains('already registered') || msg.contains('already exists')) {
-        try {
-          final loginRes = await _supabase.auth.signInWithPassword(email: email, password: password);
-          if (loginRes.user != null) {
-            final user = loginRes.user!;
-            final defaultFullName = email.split('@').first.toUpperCase();
-            final prefs = await SharedPreferences.getInstance();
-
-            try {
-              await _supabase.from('profiles').upsert({
-                'id': user.id,
-                'display_name': defaultFullName,
-                'email': email,
-                'role': 'admin',
-              });
-              await _supabase.from('system_settings').upsert({
-                'key': 'admin_account_provisioned',
-                'value': {
-                  'id': user.id,
-                  'email': email,
-                  'role': 'admin',
-                  'created_at': DateTime.now().toIso8601String(),
-                },
-              });
-            } catch (_) {}
-
-            await prefs.setBool('admin_account_provisioned', true);
-            await prefs.setString('admin_auth_email', email);
-            await prefs.setString('admin_auth_password', password);
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Administrator account verified and activated! Welcome aboard.'),
-                  backgroundColor: Color(0xFF2D6A4F),
-                ),
-              );
-              Navigator.pushReplacementNamed(context, '/dashboard');
-              return;
-            }
-          }
-        } catch (_) {}
-      }
       _showError(error.message);
     } catch (error) {
-      debugPrint('Registration error: $error');
-      _showError('Registration error: $error');
+      _showError('An unexpected error occurred during registration.');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -403,17 +369,6 @@ class _SignupPageState extends State<SignupPage> {
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: () async {
-                    setState(() => _isChecking = true);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.remove('admin_account_provisioned');
-                    await _checkAdminStatus();
-                  },
-                  icon: const Icon(Icons.refresh, size: 16, color: Colors.white70),
-                  label: const Text('Re-check / Register New Admin', style: TextStyle(color: Colors.white70, fontSize: 12)),
                 ),
               ],
             ),
