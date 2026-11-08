@@ -99,7 +99,6 @@ class _OtpScreenState extends State<OtpScreen> {
                 'id': res.user!.id,
                 'display_name': widget.username,
                 'phone': widget.identifier,
-                'email': syntheticEmail,
                 'address': widget.address,
               });
             }

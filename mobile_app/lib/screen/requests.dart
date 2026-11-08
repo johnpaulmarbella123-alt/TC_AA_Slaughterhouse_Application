@@ -253,8 +253,10 @@ class _RequestsContentState extends State<RequestsContent> {
         resolvedName = officialDealerName;
       }
 
-      // Fallback if still empty: email username
-      if ((resolvedName == null || resolvedName.isEmpty) && user.email != null) {
+      // Fallback if still empty: email username (only if legitimate non-synthetic email)
+      if ((resolvedName == null || resolvedName.isEmpty) &&
+          user.email != null &&
+          !user.email!.toLowerCase().contains('@tabaco-abattoir.gov.ph')) {
         resolvedName = user.email!.split('@').first;
       }
 

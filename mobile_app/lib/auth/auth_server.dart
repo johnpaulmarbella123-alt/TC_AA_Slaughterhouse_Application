@@ -121,7 +121,9 @@ Future<AuthResponse> signUp(
   if (user != null) {
 
       final isEmail = emailOrPhone.contains('@');
-      final emailValue = isEmail ? emailOrPhone : (user.email ?? '');
+      final rawEmail = isEmail ? emailOrPhone : (user.email ?? '');
+      final isSynthetic = rawEmail.toLowerCase().contains('@tabaco-abattoir.gov.ph');
+      final emailValue = (!isSynthetic && rawEmail.isNotEmpty) ? rawEmail : null;
       final phoneValue = isEmail ? (user.phone ?? '') : emailOrPhone;
 
       await _supabase
@@ -129,7 +131,7 @@ Future<AuthResponse> signUp(
           .upsert({
         'id': user.id,
         'display_name': displayName,
-        'email': emailValue.isNotEmpty ? emailValue : null,
+        'email': emailValue,
         'phone': phoneValue,
         'address': address,
       });
