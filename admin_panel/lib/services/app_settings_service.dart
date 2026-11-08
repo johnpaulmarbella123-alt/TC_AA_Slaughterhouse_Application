@@ -551,36 +551,8 @@ class AppSettingsService extends ChangeNotifier {
     }
   }
 
-  // 2. Staff Accounts & Roles
-  final List<StaffAccount> _staffAccounts = [
-    StaffAccount(
-      id: 'staff-1',
-      fullName: 'Dr. Roberto Mendoza',
-      email: 'admin.mendoza@tabaco.gov.ph',
-      role: 'Admin',
-      isActive: true,
-      createdAt: DateTime(2025, 1, 10),
-      password: 'AdminPassword123!',
-    ),
-    StaffAccount(
-      id: 'staff-2',
-      fullName: 'Elena Santos',
-      email: 'clerk@tabaco.gov.ph',
-      role: 'Clerk',
-      isActive: true,
-      createdAt: DateTime(2025, 2, 1),
-      password: 'ClerkPassword123!',
-    ),
-    StaffAccount(
-      id: 'staff-4',
-      fullName: 'Dr. Maria Clara Reyes',
-      email: 'inspector@tabaco.gov.ph',
-      role: 'Inspector',
-      isActive: true,
-      createdAt: DateTime(2025, 2, 12),
-      password: 'InspectorPassword123!',
-    ),
-  ];
+  // 2. Staff Accounts & Roles (Starts empty for true clean-slate first use)
+  final List<StaffAccount> _staffAccounts = [];
 
   List<StaffAccount> get staffAccounts => List.unmodifiable(_staffAccounts);
 
@@ -609,8 +581,8 @@ class AppSettingsService extends ChangeNotifier {
         .toList();
     if (fallback.isNotEmpty) return fallback;
 
-    // Standard default if no staff has inspector role yet
-    return ['Dr. Maria Clara Reyes'];
+    // Standard neutral default if no staff has inspector role yet
+    return ['Official Meat Inspector'];
   }
 
   String _currentRole = 'Admin';
@@ -645,6 +617,20 @@ class AppSettingsService extends ChangeNotifier {
     _staffAccounts.add(staff);
     notifyListeners();
     await _saveStaffToPrefs();
+
+    // Persist to Supabase profiles table
+    try {
+      final client = Supabase.instance.client;
+      await client.from('profiles').upsert({
+        'id': staff.id,
+        'full_name': staff.fullName,
+        'role': staff.role.toLowerCase(),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+      debugPrint('addStaffAccount: Upserted staff ${staff.fullName} into profiles.');
+    } catch (e) {
+      debugPrint('addStaffAccount profiles upsert notice: $e');
+    }
   }
 
   Future<void> toggleStaffStatus(String id) async {
@@ -659,9 +645,22 @@ class AppSettingsService extends ChangeNotifier {
   Future<void> updateStaffRole(String id, String newRole) async {
     final idx = _staffAccounts.indexWhere((s) => s.id == id);
     if (idx != -1) {
-      _staffAccounts[idx].role = StaffAccount.normalizeRole(newRole);
+      final normalizedRole = StaffAccount.normalizeRole(newRole);
+      _staffAccounts[idx].role = normalizedRole;
       notifyListeners();
       await _saveStaffToPrefs();
+
+      // Persist updated role in Supabase profiles table
+      try {
+        final client = Supabase.instance.client;
+        await client.from('profiles').update({
+          'role': normalizedRole.toLowerCase(),
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', id);
+        debugPrint('updateStaffRole: Updated staff $id role to $normalizedRole in profiles.');
+      } catch (e) {
+        debugPrint('updateStaffRole profiles update notice: $e');
+      }
     }
   }
 
@@ -675,9 +674,21 @@ class AppSettingsService extends ChangeNotifier {
   }
 
   Future<void> deleteStaffAccount(String id) async {
+    final toRemove = _staffAccounts.firstWhere((s) => s.id == id, orElse: () => StaffAccount(id: '', fullName: '', email: '', role: 'Admin', createdAt: DateTime.now()));
     _staffAccounts.removeWhere((s) => s.id == id);
     notifyListeners();
     await _saveStaffToPrefs();
+
+    // Delete staff entry from Supabase profiles table
+    try {
+      final client = Supabase.instance.client;
+      if (toRemove.id.isNotEmpty) {
+        await client.from('profiles').delete().eq('id', toRemove.id);
+      }
+      debugPrint('deleteStaffAccount: Removed staff $id from profiles.');
+    } catch (e) {
+      debugPrint('deleteStaffAccount profiles delete notice: $e');
+    }
   }
 
   /// Determines whether a sidebar navigation index is permitted for the active role.

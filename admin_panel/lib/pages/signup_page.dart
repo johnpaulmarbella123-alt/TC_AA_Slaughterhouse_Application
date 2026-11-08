@@ -31,10 +31,22 @@ class _SignupPageState extends State<SignupPage> {
   Future<void> _checkAdminStatus() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
+      bool provisioned = false;
 
+      // 1. Check profiles for existing active admin role
+      try {
+        final res = await _supabase
+            .from('profiles')
+            .select('id, role')
+            .eq('role', 'admin')
+            .limit(1);
+        if ((res as List).isNotEmpty) {
+          provisioned = true;
+        }
+      } catch (_) {}
+
+      // 2. Check system_settings if profiles check was inconclusive
       if (!provisioned) {
-        // 1. Check system_settings
         try {
           final settingRow = await _supabase
               .from('system_settings')
@@ -42,35 +54,18 @@ class _SignupPageState extends State<SignupPage> {
               .eq('key', 'admin_account_provisioned')
               .maybeSingle();
           if (settingRow != null && settingRow['value'] != null) {
-            provisioned = true;
+            final val = settingRow['value'];
+            if (val is bool) {
+              provisioned = val;
+            } else if (val is Map && val['role'] == 'admin') {
+              provisioned = true;
+            }
           }
         } catch (_) {}
       }
 
-      if (!provisioned) {
-        // 2. Check profiles for existing admin role
-        try {
-          final res = await _supabase
-              .from('profiles')
-              .select('id, role')
-              .eq('role', 'admin')
-              .limit(1);
-          if ((res as List).isNotEmpty) {
-            provisioned = true;
-          }
-        } catch (_) {}
-      }
-
-      if (!provisioned) {
-        // 3. Check staff accounts in AppSettingsService
-        final hasAdminInStaff = AppSettingsService.instance.staffAccounts
-            .any((s) => s.role == 'Admin' && s.email.toLowerCase() != 'admin@tabaco.gov.ph');
-        if (hasAdminInStaff) provisioned = true;
-      }
-
-      if (provisioned) {
-        await prefs.setBool('admin_account_provisioned', true);
-      }
+      // Sync local preferences with true remote database state
+      await prefs.setBool('admin_account_provisioned', provisioned);
 
       if (mounted) {
         setState(() {
@@ -134,6 +129,23 @@ class _SignupPageState extends State<SignupPage> {
 
       if (mounted && response.user != null) {
         final user = response.user!;
+        final bool isEmailConfirmed = response.session != null || user.emailConfirmedAt != null;
+
+        // Ensure profile in public.profiles table has role 'admin'
+        try {
+          await _supabase.from('profiles').upsert({
+            'id': user.id,
+            'full_name': defaultFullName,
+            'role': 'admin',
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        } catch (_) {}
+
+        // If email confirmation is required by Supabase, prompt the admin to check inbox
+        if (!isEmailConfirmed) {
+          _showVerificationLinkSentDialog(email);
+          return;
+        }
 
         // 1. Mark admin as permanently provisioned in DB and local prefs
         await prefs.setBool('admin_account_provisioned', true);
@@ -149,17 +161,7 @@ class _SignupPageState extends State<SignupPage> {
           });
         } catch (_) {}
 
-        // 2. Ensure profile in public.profiles table has role 'admin'
-        try {
-          await _supabase.from('profiles').upsert({
-            'id': user.id,
-            'full_name': defaultFullName,
-            'role': 'admin',
-            'updated_at': DateTime.now().toIso8601String(),
-          });
-        } catch (_) {}
-
-        // 3. Sync with AppSettingsService and add to Staff Accounts list
+        // 2. Sync with AppSettingsService and add to Staff Accounts list
         AppSettingsService.instance.staffAccounts.removeWhere(
           (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
         );
@@ -201,6 +203,94 @@ class _SignupPageState extends State<SignupPage> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  void _showVerificationLinkSentDialog(String email) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D6A4F).withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.mark_email_read_outlined,
+                  color: Color(0xFF2D6A4F), size: 28),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Verification Link Sent',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'A verification email has been dispatched by Supabase to:',
+              style: TextStyle(fontSize: 13.5, color: Colors.black87),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+              ),
+              child: Text(
+                email,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 16, color: Color(0xFF2563EB)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Please check your inbox (and spam folder) and click the confirmation link to activate your administrator account before logging in.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.35),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2D6A4F),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pushReplacementNamed(context, '/login');
+            },
+            child: const Text('Proceed to Login',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showError(String message) {

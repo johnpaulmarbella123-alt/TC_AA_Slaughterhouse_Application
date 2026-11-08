@@ -1693,7 +1693,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     final driverName = req['driver_name']?.toString() ?? 'Assigned driver';
     final defaultClerk = AppSettingsService.instance.profileName.isNotEmpty
         ? AppSettingsService.instance.profileName
-        : 'Elena Santos';
+        : 'Authorized Releasing Officer';
     final dispatcherCtrl = TextEditingController(text: defaultClerk);
     final ref = _refNo(req);
     final customer = req['customer_name']?.toString() ?? 'Market Customer';
@@ -1840,7 +1840,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   void _showReleaseDialog(Map<String, dynamic> req, {required bool isDelivery}) {
     final defaultClerk = AppSettingsService.instance.profileName.isNotEmpty
         ? AppSettingsService.instance.profileName
-        : 'Elena Santos';
+        : 'Authorized Releasing Officer';
     final releaseByCtrl = TextEditingController(text: defaultClerk);
     final dispatcherStaffIdCtrl = TextEditingController(text: 'EMP-01');
     final customerName = req['customer_name']?.toString() ?? '';

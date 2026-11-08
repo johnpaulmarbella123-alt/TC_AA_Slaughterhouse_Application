@@ -1520,7 +1520,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       final animalCount = req['animal_count'] ?? 1;
       final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
           ? AppSettingsService.instance.configuredInspectors.first
-          : 'Dr. Maria Clara Reyes';
+          : 'Official Meat Inspector';
       final inspectorName = (req['inspector_name']?.toString().trim().isNotEmpty == true)
           ? req['inspector_name'].toString().trim()
           : defaultInspector;
@@ -1618,7 +1618,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       final existingInsp = await supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
       final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
           ? AppSettingsService.instance.configuredInspectors.first
-          : 'Dr. Maria Clara Reyes';
+          : 'Official Meat Inspector';
       final resolvedNotes = notes.isNotEmpty
           ? 'Cleared after confinement and observation: $notes'
           : 'Cleared after confinement and observation. Resumed active slaughter at Stunning stage.';
@@ -1914,7 +1914,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     } else if (_inspectors.isNotEmpty) {
       _selectedInspector = _inspectors.first;
     } else {
-      _selectedInspector = existingInspector ?? 'Dr. Maria Clara Reyes';
+      _selectedInspector = existingInspector ?? (_inspectors.isNotEmpty ? _inspectors.first : 'Official Meat Inspector');
     }
     _inspectorCtrl.text = _selectedInspector ?? '';
 
@@ -2972,7 +2972,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   Widget _buildInspectorField() {
     // If only one inspector is configured in the system, show automatically with no other options
     if (_inspectors.length <= 1) {
-      final name = _selectedInspector ?? (_inspectors.isNotEmpty ? _inspectors.first : 'Dr. Maria Clara Reyes');
+      final name = _selectedInspector ?? (_inspectors.isNotEmpty ? _inspectors.first : 'Official Meat Inspector');
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -3704,7 +3704,7 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
       final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
       final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
           ? AppSettingsService.instance.configuredInspectors.first
-          : 'Dr. Maria Clara Reyes';
+          : 'Official Meat Inspector';
       final existingInsp = widget.request['inspector_name']?.toString().trim();
       final resolvedInsp = (existingInsp != null && existingInsp.isNotEmpty) ? existingInsp : defaultInspector;
 

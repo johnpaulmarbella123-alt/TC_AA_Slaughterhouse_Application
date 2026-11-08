@@ -174,6 +174,29 @@ class _LoginPageState extends State<LoginPage> {
         if (actualRole == 'Admin') {
           await prefs.setString('admin_auth_email', email);
           await prefs.setString('admin_auth_password', password);
+          await prefs.setBool('admin_account_provisioned', true);
+
+          try {
+            await _supabase.from('system_settings').upsert({
+              'key': 'admin_account_provisioned',
+              'value': {
+                'id': user.id,
+                'email': email,
+                'role': 'admin',
+                'created_at': DateTime.now().toIso8601String(),
+              },
+            });
+          } catch (_) {}
+
+          try {
+            await _supabase.from('profiles').upsert({
+              'id': user.id,
+              'full_name': user.userMetadata?['full_name']?.toString() ?? email.split('@').first.toUpperCase(),
+              'role': 'admin',
+              'updated_at': DateTime.now().toIso8601String(),
+            });
+          } catch (_) {}
+
           final existingAdminIdx = AppSettingsService.instance.staffAccounts.indexWhere(
             (s) => s.email.toLowerCase() == email.toLowerCase(),
           );
@@ -210,7 +233,14 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } on AuthException catch (error) {
-      _showError(error.message);
+      final msg = error.message.toLowerCase();
+      if (msg.contains('email not confirmed')) {
+        _showError('Email not verified. Please check your inbox and click the confirmation link sent by Supabase.');
+      } else if (msg.contains('invalid login credentials')) {
+        _showError('Invalid email or password. Please verify your credentials or ensure your email has been confirmed.');
+      } else {
+        _showError(error.message);
+      }
     } catch (error) {
       _showError('An unexpected error occurred.');
     } finally {
