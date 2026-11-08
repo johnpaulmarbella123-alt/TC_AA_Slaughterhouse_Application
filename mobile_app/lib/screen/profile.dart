@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../auth/auth_server.dart';
 import '../pages/home_page.dart'; // for globalAvatarUrl
 import 'dart:async';
@@ -401,16 +400,12 @@ String? _extractStoragePath(String publicUrl) {
     try {
       globalAvatarUrl.value = null;
       await _authService.signOut();
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setBool('has_previously_logged_in', true);
-      } catch (_) {}
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (route) => false);
+        Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (route) => false);
       }
     }
   }

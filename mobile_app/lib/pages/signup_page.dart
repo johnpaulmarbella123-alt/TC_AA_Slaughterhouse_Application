@@ -19,6 +19,7 @@ class _SignupScreenState
 
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _hasAgreedToTerms = false;
 
   final _nameController =
       TextEditingController();
@@ -35,6 +36,39 @@ class _SignupScreenState
   final _authService = AuthService();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _promptMandatoryTerms();
+    });
+  }
+
+  Future<void> _promptMandatoryTerms() async {
+    if (_hasAgreedToTerms) return;
+    final agreed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => TermsAndConditionsDialog(
+        isMandatory: true,
+        onAccepted: () {
+          setState(() => _hasAgreedToTerms = true);
+        },
+      ),
+    );
+
+    if (agreed != true && !_hasAgreedToTerms && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must read and agree to the Terms & Conditions before creating an account.'),
+          backgroundColor: Colors.black87,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context);
+    }
+  }
+
+  @override
   void dispose() {
 
     _nameController.dispose();
@@ -46,6 +80,11 @@ class _SignupScreenState
   }
 
   Future<void> _signUp() async {
+
+    if (!_hasAgreedToTerms) {
+      await _promptMandatoryTerms();
+      if (!_hasAgreedToTerms) return;
+    }
 
     setState(() => _isLoading = true);
 
@@ -378,25 +417,43 @@ class _SignupScreenState
                         onTap: () {
                           showDialog(
                             context: context,
-                            builder: (ctx) => const TermsAndConditionsDialog(),
+                            builder: (ctx) => TermsAndConditionsDialog(
+                              onAccepted: () {
+                                setState(() => _hasAgreedToTerms = true);
+                              },
+                            ),
                           );
                         },
-                        child: RichText(
-                          textAlign: TextAlign.center,
-                          text: const TextSpan(
-                            style: TextStyle(color: Colors.black54, fontSize: 12),
-                            children: [
-                              TextSpan(text: "By signing up, you agree to our\n"),
-                              TextSpan(
-                                text: "Terms & Conditions and User Agreement",
-                                style: TextStyle(
-                                  color: Color(0xFF218358),
-                                  fontWeight: FontWeight.bold,
-                                  decoration: TextDecoration.underline,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (_hasAgreedToTerms) ...[
+                              const Icon(Icons.check_circle_rounded, color: Color(0xFF218358), size: 16),
+                              const SizedBox(width: 6),
+                            ],
+                            Flexible(
+                              child: RichText(
+                                textAlign: TextAlign.center,
+                                text: TextSpan(
+                                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                  children: [
+                                    TextSpan(
+                                      text: _hasAgreedToTerms ? "You have agreed to our\n" : "By signing up, you agree to our\n",
+                                    ),
+                                    const TextSpan(
+                                      text: "Terms & Conditions and User Agreement",
+                                      style: TextStyle(
+                                        color: Color(0xFF218358),
+                                        fontWeight: FontWeight.bold,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

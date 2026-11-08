@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../screen/how_it_works.dart';
 import '../widgets/terms_and_conditions_dialog.dart';
@@ -54,25 +56,172 @@ class _LoginScreenState extends State<LoginScreen> {
       // ignore: avoid_print
       print('Login error: $e');
       if (mounted) {
-        String msg = e.toString();
+        final msg = e.toString();
+        final lower = msg.toLowerCase();
         if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
-          msg = 'No internet connection. Please check your Wi-Fi or mobile data.';
-        } else if (msg.contains('Invalid login credentials')) {
-          msg = 'Invalid credentials. Please check your email/phone and password.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No internet connection. Please check your Wi-Fi or mobile data.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          // Check live status of the account via RPC to determine exact error
+          bool isAccountUnverifiedOrNonExistent = true;
+          try {
+            final res = await Supabase.instance.client.rpc(
+              'check_account_status',
+              params: {'identifier': _emailController.text.trim()},
+            );
+            if (res != null) {
+              final Map data = res is Map ? res : jsonDecode(res.toString());
+              final bool exists = data['exists'] == true;
+              final bool isVerified = data['is_verified'] == true;
+              if (exists && isVerified) {
+                isAccountUnverifiedOrNonExistent = false;
+              } else {
+                isAccountUnverifiedOrNonExistent = true;
+              }
+            }
+          } catch (_) {
+            // Fallback: check error text
+            if (lower.contains('email not confirmed') ||
+                lower.contains('not confirmed') ||
+                lower.contains('user not found') ||
+                lower.contains('not registered') ||
+                lower.contains('no user')) {
+              isAccountUnverifiedOrNonExistent = true;
+            } else {
+              isAccountUnverifiedOrNonExistent = false;
+            }
+          }
+
+          if (mounted) {
+            if (isAccountUnverifiedOrNonExistent) {
+              _showFacebookStyleLoginErrorDialog(isUnverified: true);
+            } else {
+              _showFacebookStyleLoginErrorDialog(isPasswordError: true);
+            }
+          }
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(msg),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
       }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  void _showFacebookStyleLoginErrorDialog({
+    bool isPasswordError = true,
+    bool isUnverified = false,
+    String? customTitle,
+    String? customMessage,
+  }) {
+    final title = customTitle ??
+        (isUnverified
+            ? 'Account Not Verified'
+            : (isPasswordError ? 'Incorrect password' : 'Account not found'));
+    final message = customMessage ??
+        (isUnverified
+            ? "Your account has not been verified yet. Please sign up or complete verification to proceed."
+            : (isPasswordError
+                ? "We can help you log in to your account if you've forgotten your password."
+                : "We couldn't find an account matching that email or mobile number. Would you like to create one?"));
+    final primaryActionText = isUnverified
+        ? 'Sign Up'
+        : (isPasswordError ? 'Forgotten password' : 'Create an account');
+
+    const brandGreen = Color(0xFF218358);
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+                child: Column(
+                  children: [
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF64748B),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+              InkWell(
+                onTap: () {
+                  Navigator.pop(ctx);
+                  if (isUnverified) {
+                    Navigator.pushNamed(context, '/SIGNUP');
+                  } else if (isPasswordError) {
+                    Navigator.pushNamed(context, '/FORGOT_PASSWORD');
+                  } else {
+                    Navigator.pushNamed(context, '/SIGNUP');
+                  }
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  alignment: Alignment.center,
+                  child: Text(
+                    primaryActionText,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: brandGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+              InkWell(
+                onTap: () => Navigator.pop(ctx),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'Try Again',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: brandGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override

@@ -589,12 +589,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             icon: const Icon(Icons.refresh, size: 20),
             color: const Color(0xFF2D3748),
           ),
-          const SizedBox(width: 4),
-          IconButton(
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_forward, size: 26),
-            color: const Color(0xFF2D3748),
-          ),
         ],
       ),
     );

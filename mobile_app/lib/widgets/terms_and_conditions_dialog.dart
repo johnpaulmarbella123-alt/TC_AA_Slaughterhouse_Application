@@ -1,7 +1,14 @@
 import 'package:flutter/material.dart';
 
 class TermsAndConditionsDialog extends StatelessWidget {
-  const TermsAndConditionsDialog({super.key});
+  final bool isMandatory;
+  final VoidCallback? onAccepted;
+
+  const TermsAndConditionsDialog({
+    super.key,
+    this.isMandatory = false,
+    this.onAccepted,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -64,7 +71,7 @@ class TermsAndConditionsDialog extends StatelessWidget {
                     ),
                   ),
                   IconButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () => Navigator.pop(context, false),
                     icon: const Icon(Icons.close, color: Colors.white),
                     tooltip: 'Close',
                   ),
@@ -206,7 +213,10 @@ class TermsAndConditionsDialog extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      onAccepted?.call();
+                      Navigator.pop(context, true);
+                    },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1E855A),
                       foregroundColor: Colors.white,

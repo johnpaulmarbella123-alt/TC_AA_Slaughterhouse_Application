@@ -74,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final session = Supabase.instance.client.auth.currentSession;
       if (session == null) {
         if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (r) => false);
+          Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (r) => false);
         }
         return;
       }
@@ -88,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           await Supabase.instance.client.auth.signOut();
         } catch (_) {}
         if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/LOGIN', (r) => false);
+          Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (r) => false);
         }
       }
     });

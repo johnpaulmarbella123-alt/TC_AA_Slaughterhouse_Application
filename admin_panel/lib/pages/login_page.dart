@@ -83,7 +83,10 @@ class _LoginPageState extends State<LoginPage> {
 
       if (matchedStaff != null && !matchedStaff.isActive) {
         await _supabase.auth.signOut();
-        _showError('Access denied: Your staff account has been deactivated by the administrator.');
+        _showLoginErrorDialog(
+          title: 'Account Deactivated',
+          message: 'Access denied: Your staff account has been deactivated by the administrator.',
+        );
         return;
       }
 
@@ -91,29 +94,48 @@ class _LoginPageState extends State<LoginPage> {
       if (matchedStaff != null) {
         final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
         if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
-          _showError(
-            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+          _showLoginErrorDialog(
+            title: 'Portal Mismatch',
+            message: 'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
           );
           return;
         }
 
-        final configuredPass = matchedStaff.password?.trim() ?? '';
-        bool passOk = configuredPass.isNotEmpty && password == configuredPass;
-
-        if (!passOk) {
-          // Fallback: check if the user can authenticate directly against Supabase Auth
-          try {
-            final res = await _supabase.auth.signInWithPassword(
-              email: email,
-              password: password,
+        // For Admin portal, strictly require live Supabase Auth verification
+        if (actualRole == 'Admin') {
+          final res = await _supabase.auth.signInWithPassword(
+            email: email,
+            password: password,
+          );
+          if (res.user == null) {
+            _showLoginErrorDialog(
+              title: 'Login Failed',
+              message: 'Incorrect email or password. Please check your credentials and try again.',
             );
-            if (res.user != null) passOk = true;
-          } catch (_) {}
-        }
+            return;
+          }
+        } else {
+          final configuredPass = matchedStaff.password?.trim() ?? '';
+          bool passOk = configuredPass.isNotEmpty && password == configuredPass;
 
-        if (!passOk) {
-          _showError('Invalid email or password.');
-          return;
+          if (!passOk) {
+            // Fallback: check if the user can authenticate directly against Supabase Auth
+            try {
+              final res = await _supabase.auth.signInWithPassword(
+                email: email,
+                password: password,
+              );
+              if (res.user != null) passOk = true;
+            } catch (_) {}
+          }
+
+          if (!passOk) {
+            _showLoginErrorDialog(
+              title: 'Login Failed',
+              message: 'Incorrect email or password. Please check your credentials and try again.',
+            );
+            return;
+          }
         }
 
         final prefs = await SharedPreferences.getInstance();
@@ -122,9 +144,6 @@ class _LoginPageState extends State<LoginPage> {
         if (actualRole == 'Admin') {
           await prefs.setString('admin_auth_email', email);
           await prefs.setString('admin_auth_password', password);
-          try {
-            await _supabase.auth.signInWithPassword(email: email, password: password);
-          } catch (_) {}
         }
 
         await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
@@ -151,7 +170,10 @@ class _LoginPageState extends State<LoginPage> {
             metaRole != 'inspector' &&
             matchedStaff == null) {
           await _supabase.auth.signOut();
-          _showError('Access denied. Staff or Admin privileges required.');
+          _showLoginErrorDialog(
+            title: 'Access Denied',
+            message: 'Staff or Admin privileges required to access this portal.',
+          );
           return;
         }
 
@@ -162,8 +184,9 @@ class _LoginPageState extends State<LoginPage> {
 
         if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
           await _supabase.auth.signOut();
-          _showError(
-            'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
+          _showLoginErrorDialog(
+            title: 'Portal Mismatch',
+            message: 'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
           );
           return;
         }
@@ -210,9 +233,32 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } on AuthException catch (error) {
-      _showError(error.message);
+      final msg = error.message.toLowerCase();
+      if (msg.contains('email not confirmed')) {
+        _showLoginErrorDialog(
+          title: 'Email Verification Required',
+          message: 'Your email address has not been confirmed yet. Please check your email inbox and verify your email address before logging in.',
+        );
+      } else if (msg.contains('invalid login credentials') ||
+          msg.contains('invalid') ||
+          msg.contains('credential') ||
+          msg.contains('password') ||
+          msg.contains('user not found')) {
+        _showLoginErrorDialog(
+          title: 'Login Failed',
+          message: 'Incorrect email or password. Please check your credentials and try again.',
+        );
+      } else {
+        _showLoginErrorDialog(
+          title: 'Login Failed',
+          message: error.message,
+        );
+      }
     } catch (error) {
-      _showError('An unexpected error occurred.');
+      _showLoginErrorDialog(
+        title: 'Login Failed',
+        message: 'Incorrect email or password or an unexpected error occurred. Please try again.',
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -220,10 +266,87 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+  void _showLoginErrorDialog({
+    String title = 'Login Failed',
+    String message = 'Incorrect email or password. Please check your credentials and try again.',
+  }) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 10,
+          backgroundColor: Colors.white,
+          child: Container(
+            width: 400,
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.error_outline_rounded,
+                    color: Color(0xFFDC2626),
+                    size: 42,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E293B),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  message,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.45,
+                    color: Color(0xFF475569),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D6A4F),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  void _showError(String message) {
+    _showLoginErrorDialog(title: 'Login Notice', message: message);
   }
 
   @override

@@ -599,12 +599,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
               ),
             ),
           ),
-          const SizedBox(width: 16),
-          IconButton(
-            onPressed: () => Navigator.maybePop(context),
-            icon: const Icon(Icons.arrow_forward, size: 28),
-            color: const Color(0xFF2D3748),
-          ),
         ],
       ),
     );
