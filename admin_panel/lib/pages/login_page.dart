@@ -224,9 +224,9 @@ class _LoginPageState extends State<LoginPage> {
           try {
             await _supabase.from('profiles').upsert({
               'id': user.id,
-              'full_name': user.userMetadata?['full_name']?.toString() ?? email.split('@').first.toUpperCase(),
+              'display_name': user.userMetadata?['full_name']?.toString() ?? email.split('@').first.toUpperCase(),
+              'email': email,
               'role': 'admin',
-              'updated_at': DateTime.now().toIso8601String(),
             });
           } catch (_) {}
 

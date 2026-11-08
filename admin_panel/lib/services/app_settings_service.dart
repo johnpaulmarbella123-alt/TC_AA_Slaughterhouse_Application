@@ -623,9 +623,9 @@ class AppSettingsService extends ChangeNotifier {
       final client = Supabase.instance.client;
       await client.from('profiles').upsert({
         'id': staff.id,
-        'full_name': staff.fullName,
+        'display_name': staff.fullName,
+        'email': staff.email,
         'role': staff.role.toLowerCase(),
-        'updated_at': DateTime.now().toIso8601String(),
       });
       debugPrint('addStaffAccount: Upserted staff ${staff.fullName} into profiles.');
     } catch (e) {
@@ -655,7 +655,6 @@ class AppSettingsService extends ChangeNotifier {
         final client = Supabase.instance.client;
         await client.from('profiles').update({
           'role': normalizedRole.toLowerCase(),
-          'updated_at': DateTime.now().toIso8601String(),
         }).eq('id', id);
         debugPrint('updateStaffRole: Updated staff $id role to $normalizedRole in profiles.');
       } catch (e) {

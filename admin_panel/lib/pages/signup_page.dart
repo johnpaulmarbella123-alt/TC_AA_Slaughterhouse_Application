@@ -124,11 +124,13 @@ class _SignupPageState extends State<SignupPage> {
         try {
           await _supabase.from('profiles').upsert({
             'id': user.id,
-            'full_name': defaultFullName,
+            'display_name': defaultFullName,
+            'email': email,
             'role': 'admin',
-            'updated_at': DateTime.now().toIso8601String(),
           });
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('profiles upsert notice: $e');
+        }
 
         // 2. Mark admin as permanently provisioned in DB and local prefs
         await prefs.setBool('admin_account_provisioned', true);
@@ -148,10 +150,6 @@ class _SignupPageState extends State<SignupPage> {
         } catch (_) {}
 
         // 3. Sync with AppSettingsService and add to Staff Accounts list
-        AppSettingsService.instance.staffAccounts.removeWhere(
-          (s) => s.email.toLowerCase() == 'admin@tabaco.gov.ph',
-        );
-
         final existsInStaff = AppSettingsService.instance.staffAccounts
             .any((s) => s.email.toLowerCase() == email.toLowerCase());
         if (!existsInStaff) {
@@ -196,9 +194,9 @@ class _SignupPageState extends State<SignupPage> {
             try {
               await _supabase.from('profiles').upsert({
                 'id': user.id,
-                'full_name': defaultFullName,
+                'display_name': defaultFullName,
+                'email': email,
                 'role': 'admin',
-                'updated_at': DateTime.now().toIso8601String(),
               });
               await _supabase.from('system_settings').upsert({
                 'key': 'admin_account_provisioned',
@@ -230,7 +228,8 @@ class _SignupPageState extends State<SignupPage> {
       }
       _showError(error.message);
     } catch (error) {
-      _showError('An unexpected error occurred during registration.');
+      debugPrint('Registration error: $error');
+      _showError('Registration error: $error');
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

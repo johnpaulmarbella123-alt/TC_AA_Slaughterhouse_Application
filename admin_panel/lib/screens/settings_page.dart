@@ -1268,9 +1268,9 @@ class _SettingsPageState extends State<SettingsPage>
                     try {
                       await Supabase.instance.client.from('profiles').upsert({
                         'id': authRes.user!.id,
-                        'full_name': name,
+                        'display_name': name,
+                        'email': email,
                         'role': selectedRole.toLowerCase(),
-                        'updated_at': DateTime.now().toIso8601String(),
                       });
                     } catch (_) {}
                   }
