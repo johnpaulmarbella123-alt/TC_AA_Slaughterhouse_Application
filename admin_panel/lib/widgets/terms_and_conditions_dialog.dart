@@ -141,9 +141,9 @@ class TermsAndConditionsDialog extends StatelessWidget {
                     const SizedBox(height: 16),
 
                     // Section 5
-                    _buildSectionHeader('5. MUNICIPAL FEES, GCASH DIGITAL CHECKOUT, AND REFUNDS'),
+                    _buildSectionHeader('5. MUNICIPAL FEES, DIGITAL ONLINE CHECKOUT, AND REFUNDS'),
                     _buildParagraph('5.1. Fee Schedule: All slaughter fees (including slaughterhouse service dues, ante-mortem and post-mortem inspection fees, corral holding charges, and per-kilogram carcass processing rates) are computed strictly pursuant to the validated Municipal Revenue Code and Slaughterhouse Ordinances of Tabaco City.'),
-                    _buildParagraph('5.2. Payment Channels: Payments may be tendered over-the-counter in cash or digitally through the integrated PayMongo GCash checkout gateway.'),
+                    _buildParagraph('5.2. Payment Channels: Payments may be tendered over-the-counter in cash or digitally through integrated online checkout channels (GCash, Maya, GrabPay, Debit/Credit Cards).'),
                     _buildParagraph('5.3. Finality of Collections: Once animals undergo slaughter floor operations and official municipal receipts (OR / RCP-YYYY-XXX) are issued, payment collections are final, non-refundable, and remitted to the City Treasury of Tabaco.'),
                     const SizedBox(height: 16),
 

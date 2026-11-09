@@ -64,7 +64,6 @@ class MyApp extends StatelessWidget {
           routes: {
             '/': (context) => const HeroSection(),
             '/login': (context) => const LoginPage(),
-            '/signup': (context) => const LoginPage(), // Public registration disabled; route to Login
             '/dashboard': (context) => const AdminShell(),
           },
         );

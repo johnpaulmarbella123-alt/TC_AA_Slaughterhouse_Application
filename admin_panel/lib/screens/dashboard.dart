@@ -485,19 +485,49 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard avg processing time error: $e');
       }
 
-      // Satisfaction Rate
-      double satisfaction = 94.0;
+      // Satisfaction Rate (Blended: 60% Customer Review Ratings + 40% Transaction Completion Rate)
+      double satisfaction = 100.0;
       try {
+        // 1. Transaction completion rate (released / total active requests)
+        final allReqRes = await supabase.from('requests').select('status');
+        int totalRequests = 0;
+        int completedRequests = 0;
+        for (var req in List<Map<String, dynamic>>.from(allReqRes)) {
+          final s = req['status']?.toString().toLowerCase() ?? '';
+          if (s != 'cancelled' && s != 'rejected') {
+            totalRequests++;
+            if (s == 'released' || s == 'completed') {
+              completedRequests++;
+            }
+          }
+        }
+        final double completionRate = totalRequests > 0
+            ? (completedRequests / totalRequests) * 100.0
+            : 100.0;
+
+        // 2. Customer review ratings from mobile app
         final reviewsData = await supabase.from('reviews').select('rating');
         double totalRating = 0;
         int reviewCount = 0;
         for (var r in List<Map<String, dynamic>>.from(reviewsData)) {
           final rating = double.tryParse(r['rating']?.toString() ?? '0') ?? 0;
-          totalRating += rating;
-          reviewCount++;
+          if (rating > 0) {
+            totalRating += rating;
+            reviewCount++;
+          }
         }
-        if (reviewCount > 0) satisfaction = (totalRating / reviewCount / 5.0) * 100;
-      } catch (_) {}
+
+        if (reviewCount > 0) {
+          final double reviewScore = (totalRating / reviewCount / 5.0) * 100.0;
+          satisfaction = (reviewScore * 0.6) + (completionRate * 0.4);
+        } else {
+          // If no reviews yet, use transaction completion rate
+          satisfaction = completionRate;
+        }
+        satisfaction = satisfaction.clamp(0.0, 100.0);
+      } catch (e) {
+        debugPrint('Dashboard satisfaction rate calculation error: $e');
+      }
 
       if (mounted) {
         setState(() {

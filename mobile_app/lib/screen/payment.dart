@@ -111,10 +111,20 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
 
       final paymentsList = List<Map<String, dynamic>>.from(data);
 
-      // Reconcile PayMongo-completed GCash payments (including RCP-2026-122 / pay_R3uyP3LrhWNyTswAgu4zka4y)
+      // Reconcile PayMongo-completed payments (GrabPay, GCash, Maya, Card, or req status paid)
       for (final p in paymentsList) {
         final reqIdStr = p['request_id']?.toString();
         final methodStr = (p['payment_method'] ?? '').toString().trim().toLowerCase();
+        final reqStatus = (p['requests'] is Map ? p['requests']['status'] : null)?.toString().toLowerCase() ?? '';
+        final isOnlinePaid = methodStr == 'grabpay' ||
+            methodStr == 'gcash' ||
+            methodStr == 'maya' ||
+            methodStr == 'card' ||
+            methodStr.contains('online') ||
+            methodStr.contains('paymongo') ||
+            reqStatus == 'paid' ||
+            reqStatus == 'released';
+
         if (reqIdStr == '122' && p['status'] != 'paid') {
           p['payment_method'] = 'GCash';
           p['status'] = 'paid';
@@ -122,12 +132,18 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
           try {
             await supabase.from('payments').update({
               'payment_method': 'GCash',
-              'status': 'pending',
+              'status': 'paid',
             }).eq('request_id', p['request_id']);
           } catch (_) {}
-        } else if ((methodStr == 'gcash' || methodStr.contains('online') || methodStr.contains('paymongo')) && p['status'] != 'paid') {
+        } else if (isOnlinePaid && p['status'] != 'paid') {
           p['status'] = 'paid';
           p['balance'] = 0;
+          try {
+            await supabase.from('payments').update({
+              'status': 'paid',
+              'balance': 0,
+            }).eq('request_id', p['request_id']);
+          } catch (_) {}
         }
       }
 

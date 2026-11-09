@@ -398,16 +398,10 @@ class AppSettingsService extends ChangeNotifier {
     final client = Supabase.instance.client;
     final session = client.auth.currentSession;
     final isExpired = session?.isExpired ?? true;
-    final currentAuthEmail = session?.user.email?.toLowerCase() ?? '';
-    final isStaffOverrideActive = hasActiveStaffSession;
-    final isSignedInAsNonAdminStaff = isStaffOverrideActive &&
-        currentAuthEmail.isNotEmpty &&
-        currentAuthEmail == _activeStaffOverrideEmail!.toLowerCase() &&
-        StaffAccount.normalizeRole(_currentRole) != 'Admin';
 
-    if (session == null || isExpired || isSignedInAsNonAdminStaff) {
-      // 1. If we have an existing session that is simply expired and not a non-admin staff user, try refreshing first
-      if (session != null && isExpired && !isSignedInAsNonAdminStaff) {
+    if (session == null || isExpired) {
+      // 1. If we have an existing session that is simply expired, try refreshing first
+      if (session != null && isExpired) {
         try {
           final refreshed = await client.auth.refreshSession();
           if (refreshed.session != null) {
@@ -417,8 +411,16 @@ class AppSettingsService extends ChangeNotifier {
         } catch (_) {}
       }
 
-      // 2. Collect candidate Admin credentials (from prefs, staff_accounts, system_settings, and primary default)
+      // 2. Collect candidate credentials (active staff override first, then prefs, staff_accounts, and primary default)
       final List<Map<String, String>> candidates = [];
+      if (hasActiveStaffSession && _activeStaffOverrideEmail != null) {
+        for (final s in _staffAccounts) {
+          if (s.email.trim().toLowerCase() == _activeStaffOverrideEmail!.trim().toLowerCase() &&
+              (s.password?.isNotEmpty ?? false)) {
+            candidates.add({'email': s.email.trim(), 'password': s.password!});
+          }
+        }
+      }
       try {
         final prefs = await SharedPreferences.getInstance();
         final savedEmail = prefs.getString('admin_auth_email')?.trim() ?? '';
@@ -437,6 +439,9 @@ class AppSettingsService extends ChangeNotifier {
           candidates.add({'email': s.email.trim(), 'password': s.password!});
         }
       }
+
+      // Guarantee primary admin credentials are always attempted
+      candidates.add({'email': 'tcaaslaughterhouse@gmail.com', 'password': 'admin123'});
 
       for (final cred in candidates) {
         try {
@@ -548,22 +553,31 @@ class AppSettingsService extends ChangeNotifier {
   // 2. Staff Accounts & Roles
   final List<StaffAccount> _staffAccounts = [
     StaffAccount(
-      id: 'staff-2',
-      fullName: 'Elena Santos',
-      email: 'clerk@tabaco.gov.ph',
-      role: 'Clerk',
+      id: '8361ee85-bbb1-43fa-bf73-4b9daa9dcfe6',
+      fullName: 'TCAASLAUGHTERHOUSE',
+      email: 'tcaaslaughterhouse@gmail.com',
+      role: 'Admin',
       isActive: true,
-      createdAt: DateTime(2025, 2, 1),
-      password: 'ClerkPassword123!',
+      createdAt: DateTime(2026, 11, 8),
+      password: 'admin123',
     ),
     StaffAccount(
-      id: 'staff-4',
-      fullName: 'Dr. Maria Clara Reyes',
-      email: 'inspector@tabaco.gov.ph',
+      id: 'staff-1794127875274',
+      fullName: 'Tan Bino',
+      email: 'jonathanbino63@gmail.com',
+      role: 'Clerk',
+      isActive: true,
+      createdAt: DateTime(2026, 11, 8),
+      password: 'clerk123',
+    ),
+    StaffAccount(
+      id: 'staff-1794127966718',
+      fullName: 'Drie Barasona',
+      email: 'andriebarasona46@gmail.com',
       role: 'Inspector',
       isActive: true,
-      createdAt: DateTime(2025, 2, 12),
-      password: 'InspectorPassword123!',
+      createdAt: DateTime(2026, 11, 8),
+      password: 'inspector123',
     ),
   ];
 
@@ -918,6 +932,9 @@ class AppSettingsService extends ChangeNotifier {
         notifyListeners();
         await _saveStaffToPrefs();
       }
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('admin_auth_password', newPassword);
 
       debugPrint('Password updated successfully for: ${user.email}');
       return true;

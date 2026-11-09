@@ -297,11 +297,16 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   }
 
   bool _isPaid(Map<String, dynamic> req) {
-    if (req['status'] == 'released') return true;
+    final reqStatus = req['status']?.toString().toLowerCase();
+    if (reqStatus == 'released' || reqStatus == 'paid') return true;
     final payment = req['payment'] as Map<String, dynamic>?;
     final payStatus = payment?['status']?.toString().toLowerCase();
-    final reqStatus = req['status']?.toString().toLowerCase();
-    return payStatus == 'paid' || reqStatus == 'paid';
+    if (payStatus == 'paid') return true;
+    final payments = req['payments'];
+    if (payments is List && payments.isNotEmpty) {
+      return payments.any((p) => (p is Map) && p['status']?.toString().toLowerCase() == 'paid');
+    }
+    return false;
   }
 
   bool _isImmediateSlaughter(Map<String, dynamic> req) {

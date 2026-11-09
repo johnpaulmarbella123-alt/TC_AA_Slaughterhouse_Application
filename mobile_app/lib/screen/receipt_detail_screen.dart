@@ -145,13 +145,13 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   }
                   if (linkPaid) {
                     methodStr = 'online';
-                    paymentData['payment_method'] = 'Online (PayMongo)';
+                    paymentData['payment_method'] = 'Online Payment';
                     paymentData['status'] = 'paid';
                     paymentData['balance'] = 0;
                     await prefs.remove('paymongo_link_$reqIdStr');
                     try {
                       await supabase.from('payments').update({
-                        'payment_method': 'Online (PayMongo)',
+                        'payment_method': 'Online Payment',
                         'status': 'paid',
                         'balance': 0,
                       }).eq('request_id', requestData['id']);
@@ -163,12 +163,12 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           }
 
           if (reqIdStr == '122' && paymentData['status'] != 'paid') {
-            paymentData['payment_method'] = 'Online (PayMongo)';
+            paymentData['payment_method'] = 'Online Payment';
             paymentData['status'] = 'paid';
             paymentData['balance'] = 0;
             try {
               await supabase.from('payments').update({
-                'payment_method': 'Online (PayMongo)',
+                'payment_method': 'Online Payment',
                 'status': 'paid',
                 'balance': 0,
               }).eq('request_id', requestData['id']);
@@ -482,7 +482,12 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
     final isColdStorageOverdue = hasColdStorageFee && !isPaid;
     final balanceDue = _fees['balance_due'] ?? (isPaid ? 0.0 : total);
     final amountPaid = _fees['amount_paid'] ?? (isPaid ? total : 0.0);
-    final paymentMethodLabel = (_payment?['payment_method'] ?? req['payment_method'] ?? 'Online').toString().toUpperCase();
+    final rawMethodLabel = (_payment?['payment_method'] ?? req['payment_method'] ?? 'Online Payment').toString().toUpperCase();
+    final paymentMethodLabel = rawMethodLabel.contains('PAYMONGO')
+        ? (rawMethodLabel.replaceAll('(PAYMONGO)', '').replaceAll('PAYMONGO', '').trim().isEmpty
+            ? 'ONLINE PAYMENT'
+            : rawMethodLabel.replaceAll('(PAYMONGO)', '').replaceAll('PAYMONGO', '').trim())
+        : (rawMethodLabel == 'ONLINE' ? 'ONLINE PAYMENT' : rawMethodLabel);
     final isWithin1HourOfDue = !isPaid &&
         !isAwaitingVerification &&
         !isOverdue &&
@@ -947,8 +952,16 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         : ((payment['receipt_number']?.toString().isNotEmpty == true)
             ? payment['receipt_number'].toString()
             : _receiptNo());
-    final method = (payment['payment_method']?.toString().toUpperCase() ?? 'CASH');
-    final cashier = payment['cashier_name']?.toString() ?? 'Tabaco City Slaughterhouse Admin';
+    final rawMethod = (payment['payment_method']?.toString().toUpperCase() ?? 'CASH');
+    final method = rawMethod.contains('PAYMONGO')
+        ? (rawMethod.replaceAll('(PAYMONGO)', '').replaceAll('PAYMONGO', '').trim().isEmpty
+            ? 'ONLINE PAYMENT'
+            : rawMethod.replaceAll('(PAYMONGO)', '').replaceAll('PAYMONGO', '').trim())
+        : (rawMethod == 'ONLINE' ? 'ONLINE PAYMENT' : rawMethod);
+    final rawCashier = payment['cashier_name']?.toString() ?? 'Tabaco City Slaughterhouse Admin';
+    final cashier = rawCashier.toLowerCase().contains('paymongo')
+        ? 'Online Payment Gateway'
+        : rawCashier;
     final paidAtStr = payment['paid_at'] ?? payment['updated_at'] ?? payment['created_at'];
     DateTime paidAt = DateTime.now();
     if (paidAtStr != null) {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../screen/requests.dart';
@@ -70,27 +71,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       precacheImage(const AssetImage('assets/images/BG.jpeg'), context);
 
-      // Verify active session against Supabase; if no credentials or user deleted, redirect to Login
-      final session = Supabase.instance.client.auth.currentSession;
-      if (session == null) {
+      final client = Supabase.instance.client;
+      final session = client.auth.currentSession;
+      if (session == null && client.auth.currentUser == null) {
         if (mounted) {
           Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (r) => false);
         }
         return;
       }
-      try {
-        final userRes = await Supabase.instance.client.auth.getUser();
-        if (userRes.user == null) {
-          throw Exception('Account not found in Supabase');
-        }
-      } catch (_) {
+
+      // If token expired, refresh gracefully in background without signing out
+      if (session != null && session.isExpired) {
         try {
-          await Supabase.instance.client.auth.signOut();
-        } catch (_) {}
-        if (mounted) {
-          Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (r) => false);
+          await client.auth.refreshSession();
+        } catch (e) {
+          debugPrint('Background session refresh note: $e');
         }
       }
+
+      // Mark persistent login flag
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('is_customer_logged_in', true);
+      } catch (_) {}
     });
   }
 

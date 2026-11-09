@@ -489,7 +489,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       final paymentStatus = _paymentStatus(r);
 
       bool matchesSearch = q.isEmpty || name.contains(q) || ref.contains(q);
-      bool matchesFilter = _filterStatus == 'All' || paymentStatus == _filterStatus;
+      bool matchesFilter = _filterStatus == 'All' ||
+          (_filterStatus == 'Pending' ? paymentStatus != 'Verified' : paymentStatus == _filterStatus);
 
       return matchesSearch && matchesFilter;
     }).toList();
@@ -497,36 +498,49 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
 
   String _paymentStatus(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
-    if (payment != null && payment['status'] == 'paid') return 'Verified';
-    if (req['status'] == 'paid' || req['status'] == 'released') return 'Verified';
+    final payStatus = payment?['status']?.toString().trim().toLowerCase();
+    final reqStatus = req['status']?.toString().trim().toLowerCase();
+
+    // 1. Authoritatively Verified / Paid
+    if (payStatus == 'paid' || reqStatus == 'paid' || reqStatus == 'released') {
+      return 'Verified';
+    }
+
+    // 2. Has payment method assigned but not yet confirmed as paid
     if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
       final m = payment['payment_method'].toString().trim().toLowerCase();
-      if (m == 'gcash' || m == 'maya' || m == 'card' || m == 'grabpay' || m.contains('online') || m.contains('paymongo')) {
-        return 'Verified';
-      }
       if (!m.contains('gcash') && !m.contains('maya') && !m.contains('card') && !m.contains('grabpay') && !m.contains('online') && !m.contains('paymongo') && m.contains('cash')) {
         return 'Cash on Pick-up';
       }
       return 'Awaiting Verification';
     }
-    if (req['status'] == 'payment_pending') return 'Awaiting Payment';
+
+    // 3. Fallback to request status
+    if (reqStatus == 'payment_pending') return 'Awaiting Payment';
     return 'Pending';
   }
 
   String _paymentMethod(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
-    if (payment != null && payment['payment_method'] != null) {
-      final m = payment['payment_method'].toString();
-      if (m.toLowerCase() == 'gcash' || m.toLowerCase().contains('online') || m.toLowerCase().contains('paymongo')) {
-        return 'Online Payment (PayMongo)';
+    final mRaw = payment?['payment_method'] ?? req['payment_method'];
+    if (mRaw != null && mRaw.toString().trim().isNotEmpty) {
+      final m = mRaw.toString().trim();
+      final lower = m.toLowerCase();
+      if (lower == 'grabpay') return 'GrabPay';
+      if (lower == 'gcash') return 'GCash';
+      if (lower == 'maya') return 'Maya';
+      if (lower == 'card') return 'Debit/Credit Card';
+      if (lower.contains('online') || lower.contains('paymongo')) {
+        return 'Online Payment';
       }
       return m;
     }
-    final reqMethod = req['payment_method']?.toString() ?? '—';
-    if (reqMethod.toLowerCase() == 'gcash' || reqMethod.toLowerCase().contains('online') || reqMethod.toLowerCase().contains('paymongo')) {
-      return 'Online Payment (PayMongo)';
+    // Fallback: If transaction_ref has checkout session
+    final txRef = payment?['transaction_ref']?.toString() ?? '';
+    if (txRef.startsWith('cs_') || txRef.startsWith('link_')) {
+      return 'Online Payment';
     }
-    return reqMethod;
+    return '—';
   }
 
   // ════════════════════════════════════════════
@@ -1218,9 +1232,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
         (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
+    bool isCheckingPayMongo = false;
+    String? payMongoStatusResult;
+    String? payMongoResultMsg;
+    String resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'Online Payment';
+    final isOnlinePayment = resolvedMethod.toLowerCase().contains('online') ||
+        resolvedMethod.toLowerCase().contains('paymongo') ||
+        resolvedMethod.toLowerCase() == 'gcash' ||
+        resolvedMethod.toLowerCase() == 'maya' ||
+        resolvedMethod.toLowerCase() == 'grabpay' ||
+        resolvedMethod.toLowerCase() == 'card';
+
     showDialog(
       context: context,
-      builder: (_) => Dialog(
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Dialog(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1527,16 +1553,182 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFF90CDF4)),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.phone_android, color: Color(0xFF2B6CB0), size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Customer submitted payment via $method. Click "Verify & Confirm $method Payment" below to complete and confirm.',
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF2B6CB0), fontWeight: FontWeight.w600),
-                          ),
+                        Row(
+                          children: [
+                            const Icon(Icons.payment, color: Color(0xFF2B6CB0), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Payment method selected: $resolvedMethod (Awaiting Clerk Verification).',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF2B6CB0), fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            if (isOnlinePayment && status != 'Verified') ...[
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: isCheckingPayMongo
+                                    ? null
+                                    : () async {
+                                        setDialogState(() {
+                                          isCheckingPayMongo = true;
+                                          payMongoResultMsg = null;
+                                        });
+                                        try {
+                                          String linkId = (payment?['transaction_ref'] ??
+                                                  req['payment_transaction_ref'] ??
+                                                  '')
+                                              .toString()
+                                              .trim();
+                                          if (linkId.isEmpty && req['payments'] != null) {
+                                            final pList = req['payments'] is List
+                                                ? req['payments'] as List
+                                                : [req['payments']];
+                                            for (final p in pList) {
+                                              if (p is Map &&
+                                                  p['transaction_ref'] != null &&
+                                                  p['transaction_ref'].toString().trim().isNotEmpty) {
+                                                linkId = p['transaction_ref'].toString().trim();
+                                                break;
+                                              }
+                                            }
+                                          }
+                                          if (linkId.isEmpty) {
+                                            try {
+                                              final payRow = await supabase
+                                                  .from('payments')
+                                                  .select('transaction_ref')
+                                                  .eq('request_id', req['id'])
+                                                  .maybeSingle();
+                                              if (payRow != null && payRow['transaction_ref'] != null) {
+                                                linkId = payRow['transaction_ref'].toString().trim();
+                                              }
+                                            } catch (_) {}
+                                          }
+
+                                          if (linkId.isEmpty) {
+                                            setDialogState(() {
+                                              isCheckingPayMongo = false;
+                                              payMongoStatusResult = 'info';
+                                              payMongoResultMsg =
+                                                  'No PayMongo checkout session found for Ref $refNo. If payment was made via direct transfer/QR, verify funds in your account and click "Verify & Confirm $resolvedMethod Payment" below.';
+                                            });
+                                            return;
+                                          }
+
+                                          final res = await supabase.functions.invoke(
+                                            'create-gcash-payment',
+                                            body: {
+                                              'action': 'check',
+                                              'link_id': linkId,
+                                              'request_id': req['id'],
+                                            },
+                                          );
+                                          final resData = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : null;
+                                          final pmStatus = (resData?['status'] ?? '').toString().toLowerCase();
+                                          if (pmStatus == 'paid') {
+                                            final detMethod = resData?['detected_method']?.toString();
+                                            if (detMethod != null && detMethod.isNotEmpty) {
+                                              resolvedMethod = detMethod;
+                                            }
+                                            setDialogState(() {
+                                              isCheckingPayMongo = false;
+                                              payMongoStatusResult = 'paid';
+                                              payMongoResultMsg =
+                                                  'PayMongo Confirmed: \u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)} received via $resolvedMethod! Ready for Clerk Verification.';
+                                            });
+                                          } else if (pmStatus == 'not_found') {
+                                            setDialogState(() {
+                                              isCheckingPayMongo = false;
+                                              payMongoStatusResult = 'info';
+                                              payMongoResultMsg = resData?['message'] ??
+                                                  'No active PayMongo checkout link recorded for this request. Please confirm payment directly in your merchant portal, then click Verify & Confirm below.';
+                                            });
+                                          } else {
+                                            setDialogState(() {
+                                              isCheckingPayMongo = false;
+                                              payMongoStatusResult = 'unpaid';
+                                              payMongoResultMsg =
+                                                  'PayMongo Status: ${resData?['status'] ?? "Pending / Unpaid"}. Payment has not been confirmed by PayMongo yet.';
+                                            });
+                                          }
+                                        } catch (err) {
+                                          setDialogState(() {
+                                            isCheckingPayMongo = false;
+                                            payMongoStatusResult = 'info';
+                                            payMongoResultMsg =
+                                                'No PayMongo session found for Ref $refNo. You can verify the customer\'s payment directly and click "Verify & Confirm $resolvedMethod Payment" below.';
+                                          });
+                                        }
+                                      },
+                                icon: isCheckingPayMongo
+                                    ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Icon(Icons.sync, size: 14),
+                                label: Text(isCheckingPayMongo ? 'Checking...' : 'Check PayMongo Status', style: const TextStyle(fontSize: 11)),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF2B6CB0),
+                                  side: const BorderSide(color: Color(0xFF90CDF4)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
+                        if (payMongoResultMsg != null) ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: payMongoStatusResult == 'paid'
+                                  ? const Color(0xFFECFDF5)
+                                  : (payMongoStatusResult == 'info'
+                                      ? const Color(0xFFEFF6FF)
+                                      : (payMongoStatusResult == 'unpaid' ? const Color(0xFFFFFBEB) : const Color(0xFFFEF2F2))),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: payMongoStatusResult == 'paid'
+                                    ? const Color(0xFF6EE7B7)
+                                    : (payMongoStatusResult == 'info'
+                                        ? const Color(0xFF93C5FD)
+                                        : (payMongoStatusResult == 'unpaid' ? const Color(0xFFFCD34D) : const Color(0xFFFCA5A5))),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  payMongoStatusResult == 'paid'
+                                      ? Icons.check_circle
+                                      : (payMongoStatusResult == 'info'
+                                          ? Icons.info_outline
+                                          : (payMongoStatusResult == 'unpaid' ? Icons.hourglass_empty : Icons.error_outline)),
+                                  size: 15,
+                                  color: payMongoStatusResult == 'paid'
+                                      ? const Color(0xFF047857)
+                                      : (payMongoStatusResult == 'info'
+                                          ? const Color(0xFF1D4ED8)
+                                          : (payMongoStatusResult == 'unpaid' ? const Color(0xFFB45309) : const Color(0xFFB91C1C))),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    payMongoResultMsg!,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: payMongoStatusResult == 'paid'
+                                          ? const Color(0xFF047857)
+                                          : (payMongoStatusResult == 'info'
+                                              ? const Color(0xFF1D4ED8)
+                                              : (payMongoStatusResult == 'unpaid' ? const Color(0xFFB45309) : const Color(0xFFB91C1C))),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1552,11 +1744,29 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (isImmediateSlaughter) ...[
-                      if (status != 'Verified')
+                    if (status != 'Verified') ...[
+                      if (method != '—' && method.isNotEmpty) ...[
                         ElevatedButton.icon(
                           onPressed: () {
-                            Navigator.pop(context);
+                            Navigator.pop(dialogCtx);
+                            _verifyAndConfirmPayment(req);
+                          },
+                          icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                          label: Text(
+                            'Verify & Confirm $resolvedMethod Payment',
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2D6A4F),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                      ] else if (isImmediateSlaughter) ...[
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pop(dialogCtx);
                             _showNewPaymentDialog(req['id']);
                           },
                           icon: const Icon(Icons.payments_outlined, size: 16, color: Colors.white),
@@ -1567,11 +1777,11 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
-                    ] else ...[
-                      if (status != 'Verified' && req['status'] != 'payment_pending')
+                        const SizedBox(width: 10),
+                      ] else if (req['status'] != 'payment_pending') ...[
                         ElevatedButton.icon(
                           onPressed: () {
-                            Navigator.pop(context);
+                            Navigator.pop(dialogCtx);
                             _sendReceiptForPayment(req);
                           },
                           icon: const Icon(Icons.send, size: 16, color: Colors.white),
@@ -1582,21 +1792,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
-                      if (status != 'Verified' && method != '—' && method.isNotEmpty)
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            _verifyAndConfirmPayment(req);
-                          },
-                          icon: const Icon(Icons.check_circle, size: 16, color: Colors.white),
-                          label: Text('Verify & Confirm $method Payment', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2D6A4F),
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                        )
-                      else if (req['status'] == 'payment_pending' && status != 'Verified')
+                        const SizedBox(width: 10),
+                      ] else ...[
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           decoration: BoxDecoration(
@@ -1613,10 +1810,11 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                             ],
                           ),
                         ),
+                        const SizedBox(width: 10),
+                      ],
                     ],
-                    if (status != 'Verified') const SizedBox(width: 12),
                     OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(context),
+                      onPressed: () => Navigator.pop(dialogCtx),
                       icon: const Icon(Icons.print, size: 16),
                       label: const Text('Print', style: TextStyle(fontSize: 13)),
                       style: OutlinedButton.styleFrom(
@@ -1633,7 +1831,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 
   Widget _feeRow(String label, String amount, {bool bold = false, bool large = false, Color? color}) {
@@ -1703,8 +1902,11 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   bool _isProcessing = false;
   bool _isWaitingOnlinePayment = false;
   bool _paymentCompletedSuccessfully = false;
+  bool _isManualChecking = false;
   Timer? _pollTimer;
+  RealtimeChannel? _realtimeChannel;
   String? _checkoutUrl;
+  String? _onlinePaymentLinkId;
   Map<String, dynamic>? _foundRequest;
   Map<String, dynamic> _fees = {};
   late final String _yearPrefix;
@@ -1847,6 +2049,9 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
       // If already recorded in payments table, use the larger of storedTotal and dynamically calculated total (so penalties incurred after 5:00 PM are included)
       final storedPay = data['payment'] as Map<String, dynamic>?;
+      if (storedPay != null && storedPay['transaction_ref'] != null) {
+        _onlinePaymentLinkId = storedPay['transaction_ref'].toString();
+      }
       if (storedPay != null && storedPay['total_amount'] != null) {
         final storedTotal = double.tryParse(storedPay['total_amount'].toString());
         if (storedTotal != null && storedTotal > total) {
@@ -1892,7 +2097,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         'user_id': userId,
         'receipt_number': receiptNo,
         'payment_method': (_selectedMethod.contains('Online') || _selectedMethod.contains('PayMongo'))
-            ? 'GCash'
+            ? 'Online Payment'
             : _selectedMethod,
         'total_amount': _fees['total'],
         'balance': 0,
@@ -1976,11 +2181,11 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         'request_id': reqId,
         'user_id': userId,
         'receipt_number': receiptNo,
-        'payment_method': 'GCash',
+        'payment_method': 'Online Payment',
         'total_amount': total,
         'balance': total,
         'status': 'pending',
-        'cashier_name': 'PayMongo Online',
+        'cashier_name': 'Online Payment',
         'vet_health_cert_fee': _fees['vet_health_cert'],
         'permit_fee': _fees['permit_to_slaughter'],
         'facility_fee': _fees['facility'],
@@ -1998,6 +2203,9 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
       await widget.supabase.from('requests').update({'status': 'payment_pending'}).eq('id', reqId);
 
+      // Ensure active staff/admin auth session before invoking Edge Function
+      await AppSettingsService.instance.ensureAdminAuthSession();
+
       // Invoke create-gcash-payment edge function
       final res = await widget.supabase.functions.invoke(
         'create-gcash-payment',
@@ -2011,13 +2219,15 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
       final resData = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : null;
       final checkoutUrl = resData?['checkout_url']?.toString();
+      final linkId = resData?['link_id']?.toString();
 
       if (checkoutUrl == null || checkoutUrl.isEmpty) {
-        final err = resData?['error']?.toString() ?? resData?['details']?.toString() ?? 'Failed to generate PayMongo checkout URL';
+        final err = resData?['error']?.toString() ?? resData?['details']?.toString() ?? 'Failed to generate online payment checkout URL';
         throw Exception(err);
       }
 
       _checkoutUrl = checkoutUrl;
+      _onlinePaymentLinkId = linkId;
       final uri = Uri.parse(checkoutUrl);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -2033,7 +2243,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error generating PayMongo checkout: $e'),
+            content: Text('Error generating online payment checkout: $e'),
             backgroundColor: Colors.redAccent,
           ),
         );
@@ -2042,52 +2252,190 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
     }
   }
 
-  void _startOnlinePaymentPolling(dynamic reqId, String receiptNo) {
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 2500), (timer) async {
-      try {
-        final data = await widget.supabase
-            .from('requests')
-            .select('status, payments(*)')
-            .eq('id', reqId)
-            .maybeSingle();
+  void _setupRealtimeSubscription(dynamic reqId, String receiptNo) {
+    try {
+      if (_realtimeChannel != null) {
+        widget.supabase.removeChannel(_realtimeChannel!);
+        _realtimeChannel = null;
+      }
+      final channelName = 'public:payment_wait_${reqId}_${DateTime.now().millisecondsSinceEpoch}';
+      _realtimeChannel = widget.supabase.channel(channelName)
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'payments',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'request_id',
+            value: reqId,
+          ),
+          callback: (payload) {
+            final rec = payload.newRecord;
+            if (rec['status']?.toString().toLowerCase() == 'paid') {
+              _onPaymentConfirmed(receiptNo);
+            }
+          },
+        )
+        ..onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'requests',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: reqId,
+          ),
+          callback: (payload) {
+            final rec = payload.newRecord;
+            if (rec['status']?.toString().toLowerCase() == 'paid') {
+              _onPaymentConfirmed(receiptNo);
+            }
+          },
+        )
+        ..subscribe();
+    } catch (e) {
+      debugPrint('Realtime payment subscription error: $e');
+    }
+  }
 
-        if (data == null) return;
+  Future<void> _checkPaymentStatusNow({bool manual = false}) async {
+    if (_paymentCompletedSuccessfully) return;
+    if (manual) setState(() => _isManualChecking = true);
+
+    try {
+      final reqId = _foundRequest?['id'];
+      if (reqId == null) return;
+      final receiptNo = 'RCP-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+      // 1. Actively query Edge Function which directly queries PayMongo API
+      if (_onlinePaymentLinkId != null && _onlinePaymentLinkId!.isNotEmpty) {
+        final res = await widget.supabase.functions.invoke(
+          'create-gcash-payment',
+          body: {
+            'action': 'check',
+            'link_id': _onlinePaymentLinkId,
+            'request_id': reqId,
+          },
+        );
+
+        final resData = res.data is Map ? Map<String, dynamic>.from(res.data as Map) : null;
+        final status = (resData?['status'] ?? '').toString().toLowerCase();
+
+        if (status == 'paid') {
+          _onPaymentConfirmed(receiptNo);
+          return;
+        }
+      }
+
+      // 2. Also check database row for payments or requests
+      final data = await widget.supabase
+          .from('requests')
+          .select('status, payments(*)')
+          .eq('id', reqId)
+          .maybeSingle();
+
+      if (data != null) {
         final st = (data['status'] ?? '').toString().toLowerCase();
         final pRaw = data['payments'];
         final pMap = pRaw is Map ? pRaw : (pRaw is List && pRaw.isNotEmpty ? pRaw.first as Map : null);
         final pStatus = (pMap?['status'] ?? '').toString().toLowerCase();
 
         if (st == 'paid' || pStatus == 'paid') {
-          timer.cancel();
-          if (mounted) {
-            setState(() {
-              _paymentCompletedSuccessfully = true;
-            });
-            await Future.delayed(const Duration(milliseconds: 1500));
-            if (mounted) {
-              Navigator.pop(context);
-              widget.onDone();
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Row(children: [
-                    const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                    const SizedBox(width: 8),
-                    Text('Online payment confirmed for $receiptNo'),
-                  ]),
-                  backgroundColor: Colors.green.shade600,
-                ),
-              );
-            }
-          }
+          _onPaymentConfirmed(receiptNo);
+          return;
         }
-      } catch (_) {}
+      }
+
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(children: [
+              Icon(Icons.info_outline, color: Colors.white, size: 18),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Payment not yet detected. Once customer confirms checkout, it will verify automatically.'),
+              ),
+            ]),
+            backgroundColor: Color(0xFFD97706),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (manual && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Status check: $e'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } finally {
+      if (mounted && manual) {
+        setState(() => _isManualChecking = false);
+      }
+    }
+  }
+
+  void _onPaymentConfirmed(String receiptNo) async {
+    if (_paymentCompletedSuccessfully) return;
+    _pollTimer?.cancel();
+    if (_realtimeChannel != null) {
+      widget.supabase.removeChannel(_realtimeChannel!);
+      _realtimeChannel = null;
+    }
+
+    if (mounted) {
+      setState(() {
+        _paymentCompletedSuccessfully = true;
+        _isWaitingOnlinePayment = false;
+      });
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (mounted) {
+        Navigator.pop(context);
+        widget.onDone();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text('Online payment confirmed for $receiptNo'),
+            ]),
+            backgroundColor: Colors.green.shade600,
+          ),
+        );
+      }
+    }
+  }
+
+  void _startOnlinePaymentPolling(dynamic reqId, String receiptNo) {
+    _pollTimer?.cancel();
+    _setupRealtimeSubscription(reqId, receiptNo);
+
+    // Initial check after 800ms
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (mounted && _isWaitingOnlinePayment && !_paymentCompletedSuccessfully) {
+        _checkPaymentStatusNow();
+      }
+    });
+
+    // Fast polling every 1.5 seconds
+    _pollTimer = Timer.periodic(const Duration(milliseconds: 1500), (timer) {
+      if (!_isWaitingOnlinePayment || _paymentCompletedSuccessfully) {
+        timer.cancel();
+        return;
+      }
+      _checkPaymentStatusNow();
     });
   }
 
   @override
   void dispose() {
     _pollTimer?.cancel();
+    if (_realtimeChannel != null) {
+      widget.supabase.removeChannel(_realtimeChannel!);
+    }
     _refCtrl.dispose();
     super.dispose();
   }
@@ -2153,7 +2501,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
               const Text('Awaiting Online Payment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
               const SizedBox(height: 6),
               Text(
-                'PayMongo Checkout has opened in a browser tab for ${_customerName.isNotEmpty ? _customerName : "the customer"}.',
+                'Online payment checkout has opened in a browser tab for ${_customerName.isNotEmpty ? _customerName : "the customer"}.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
               ),
@@ -2201,27 +2549,53 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                   TextButton(
                     onPressed: () {
                       _pollTimer?.cancel();
+                      if (_realtimeChannel != null) {
+                        widget.supabase.removeChannel(_realtimeChannel!);
+                        _realtimeChannel = null;
+                      }
                       setState(() => _isWaitingOnlinePayment = false);
                     },
                     child: const Text('Cancel & Return', style: TextStyle(color: Colors.grey)),
                   ),
-                  if (_checkoutUrl != null)
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final uri = Uri.parse(_checkoutUrl!);
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri, mode: LaunchMode.externalApplication);
-                        }
-                      },
-                      icon: const Icon(Icons.open_in_new, size: 16),
-                      label: const Text('Re-open Checkout Tab'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF2563EB),
-                        side: const BorderSide(color: Color(0xFF93C5FD)),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  Row(
+                    children: [
+                      if (_checkoutUrl != null) ...[
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final uri = Uri.parse(_checkoutUrl!);
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }
+                          },
+                          icon: const Icon(Icons.open_in_new, size: 15),
+                          label: const Text('Re-open Tab'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF2563EB),
+                            side: const BorderSide(color: Color(0xFF93C5FD)),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      ElevatedButton.icon(
+                        onPressed: _isManualChecking ? null : () => _checkPaymentStatusNow(manual: true),
+                        icon: _isManualChecking
+                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.refresh_rounded, size: 16, color: Colors.white),
+                        label: Text(
+                          _isManualChecking ? 'Checking...' : 'Verify Payment Now',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          disabledBackgroundColor: Colors.grey.shade400,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
                 ],
               ),
             ],
@@ -2524,12 +2898,12 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                         ),
                       ),
                       DropdownMenuItem(
-                        value: 'Online Payment (PayMongo)',
+                        value: 'Online Payment',
                         child: Row(
                           children: [
                             Icon(Icons.public, size: 18, color: Color(0xFF2563EB)),
                             SizedBox(width: 8),
-                            Text('Online Payment (PayMongo)', style: TextStyle(fontSize: 14)),
+                            Text('Online Payment (GCash, Maya, GrabPay, Card)', style: TextStyle(fontSize: 14)),
                           ],
                         ),
                       ),
@@ -2551,14 +2925,14 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                     child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
                   ),
                   const SizedBox(width: 12),
-                  if (_selectedMethod == 'Online Payment (PayMongo)') ...[
+                  if (_selectedMethod.contains('Online') || _selectedMethod.contains('PayMongo')) ...[
                     ElevatedButton.icon(
                       onPressed: _foundRequest != null && !_isProcessing ? _initiateOnlinePayment : null,
                       icon: _isProcessing
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                           : const Icon(Icons.open_in_new, size: 16, color: Colors.white),
                       label: Text(
-                        _isProcessing ? 'Opening...' : 'Open PayMongo Checkout in Browser',
+                        _isProcessing ? 'Opening...' : 'Proceed to Online Payment',
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                       ),
                       style: ElevatedButton.styleFrom(

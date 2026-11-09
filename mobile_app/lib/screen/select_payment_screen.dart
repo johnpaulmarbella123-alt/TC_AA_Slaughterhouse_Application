@@ -239,11 +239,12 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
     // If already handling success, already checking, or no link ID, exit immediately
     if (_isHandlingSuccess || _isCheckingStatus || _paymongoLinkId == null) return;
     _isCheckingStatus = true;
+    final linkId = _paymongoLinkId;
 
     try {
       final supabaseUrl = supabase.rest.url.replaceAll('/rest/v1', '');
       final functionUrl =
-          '$supabaseUrl/functions/v1/create-gcash-payment?link_id=$_paymongoLinkId';
+          '$supabaseUrl/functions/v1/create-gcash-payment?link_id=$linkId';
 
       final response = await http.get(
         Uri.parse(functionUrl),
@@ -332,56 +333,13 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
             await prefs.remove('paymongo_link_$reqId');
           } catch (_) {}
 
-          // 1. Authoritatively mark payment as paid with exact detected channel
+          // 1. Record payment method and transaction link, leaving status for Clerk Verification
           try {
             await supabase.from('payments').update({
               'payment_method': finalMethod,
-              'status': 'paid',
-              'balance': 0,
+              'transaction_ref': linkId,
               'receipt_number': widget.receiptNo,
             }).eq('request_id', reqId);
-          } catch (_) {}
-
-          try {
-            await supabase.from('requests').update({
-              'status': 'paid',
-            }).eq('id', reqId);
-          } catch (_) {}
-
-          // Fallback admin patch under strict client RLS
-          try {
-            final apiKey = supabase.rest.headers['apikey'] ?? '';
-            final authRes = await http.post(
-              Uri.parse('$supabaseUrl/auth/v1/token?grant_type=password'),
-              headers: {'apikey': apiKey, 'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'email': 'tcaaslaughterhouse@gmail.com',
-                'password': 'tcaa1234',
-              }),
-            );
-            if (authRes.statusCode == 200) {
-              final adminToken = jsonDecode(authRes.body)['access_token'];
-              final adminHeaders = {
-                'apikey': apiKey,
-                'Authorization': 'Bearer $adminToken',
-                'Content-Type': 'application/json',
-              };
-              await http.patch(
-                Uri.parse('$supabaseUrl/rest/v1/payments?request_id=eq.$reqId'),
-                headers: adminHeaders,
-                body: jsonEncode({
-                  'payment_method': finalMethod,
-                  'status': 'paid',
-                  'balance': 0,
-                  'receipt_number': widget.receiptNo,
-                }),
-              );
-              await http.patch(
-                Uri.parse('$supabaseUrl/rest/v1/requests?id=eq.$reqId'),
-                headers: adminHeaders,
-                body: jsonEncode({'status': 'paid'}),
-              );
-            }
           } catch (_) {}
 
           if (mounted) {
@@ -399,15 +357,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
           .select('status, payment_method')
           .eq('request_id', reqId)
           .maybeSingle();
-      final mStr = payRow?['payment_method']?.toString().toLowerCase() ?? '';
-      final dbPaid = payRow != null &&
-          (payRow['status'] == 'paid' ||
-              mStr == 'gcash' ||
-              mStr == 'maya' ||
-              mStr == 'card' ||
-              mStr == 'grabpay' ||
-              mStr.contains('online') ||
-              mStr.contains('paymongo'));
+      final dbPaid = payRow != null && payRow['status'] == 'paid';
       if (dbPaid) {
         _isHandlingSuccess = true;
         _pollTimer?.cancel();
@@ -433,7 +383,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   // ═══════════════════════════════════════════════════
-  //  SEND PAYMENT CONFIRMED NOTIFICATION (ONCE ON DONE)
+  //  SEND PAYMENT SUBMITTED NOTIFICATION (ONCE ON DONE)
   // ═══════════════════════════════════════════════════
   Future<void> _sendPaymentConfirmedNotificationOnce() async {
     if (_hasInsertedNotification) return;
@@ -448,27 +398,24 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
     final total = _confirmedTotal ?? (widget.fees['total'] ?? 0).toDouble();
 
     try {
-      // Check if a payment confirmation notification for this receipt already exists
       final existingNotif = await supabase
           .from('notifications')
           .select('id')
           .eq('user_id', userId)
-          .eq('type', 'payment_confirmed')
+          .eq('type', 'payment_submitted')
           .ilike('message', '%${widget.receiptNo}%')
           .maybeSingle();
 
       if (existingNotif == null) {
         await supabase.from('notifications').insert({
           'user_id': userId,
-          'title': '$method Payment Confirmed',
+          'title': '$method Payment Submitted',
           'message':
-              'Your online payment of \u20b1${total.toStringAsFixed(2)} via $method (Receipt ${widget.receiptNo}, Ref: $refNo) has been confirmed!',
-          'type': 'payment_confirmed',
+              'Your online payment of \u20b1${total.toStringAsFixed(2)} via $method (Receipt ${widget.receiptNo}, Ref: $refNo) has been submitted and is awaiting Clerk verification.',
+          'type': 'payment_submitted',
           'is_read': false,
         });
-        debugPrint('Single payment notification inserted on Done for ${widget.receiptNo}');
-      } else {
-        debugPrint('Payment notification already exists for ${widget.receiptNo}, skipped duplicate.');
+        debugPrint('Single payment submitted notification inserted for ${widget.receiptNo}');
       }
     } catch (notifErr) {
       debugPrint('Notification insert error on Done: $notifErr');
@@ -476,7 +423,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   // ═══════════════════════════════════════════════════
-  //  PAID SUCCESS DIALOG
+  //  PAID SUCCESS DIALOG (Awaiting Clerk Verification)
   // ═══════════════════════════════════════════════════
   void _showPaidSuccessDialog(String method, double total) {
     showDialog(
@@ -491,21 +438,21 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
               width: 58,
               height: 58,
               decoration: const BoxDecoration(
-                color: Color(0xFFE4F8F0),
+                color: Color(0xFFE0F2FE),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check_circle,
-                  color: Color(0xFF1A8C62), size: 34),
+              child: const Icon(Icons.mark_email_read_outlined,
+                  color: Color(0xFF0284C7), size: 32),
             ),
             const SizedBox(height: 14),
             const Text(
-              'Payment Confirmed!',
+              'Payment Submitted!',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been verified and marked as Paid!',
+              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been submitted!\n\nAwaiting Slaughterhouse Clerk verification before receipt & meat release authorization are issued.',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
               textAlign: TextAlign.center,
             ),
@@ -525,7 +472,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1A8C62),
+                backgroundColor: const Color(0xFF0284C7),
                 foregroundColor: Colors.white,
                 minimumSize: const Size(140, 40),
                 shape: RoundedRectangleBorder(
@@ -755,7 +702,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                                               color: const Color(0xFFE0E7FF),
                                               borderRadius: BorderRadius.circular(4),
                                             ),
-                                            child: const Text('PayMongo',
+                                            child: const Text('Online Gateway',
                                                 style: TextStyle(
                                                     fontSize: 10,
                                                     fontWeight: FontWeight.bold,
@@ -907,8 +854,8 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                           ),
                           const SizedBox(height: 8),
                           if (isOnline) ...[
-                            _infoBullet('Tap below to open the secure PayMongo payment portal in your browser.', isOnline: true),
-                            _infoBullet('Select GCash, Maya, GrabPay, or enter your Card details on PayMongo.', isOnline: true),
+                            _infoBullet('Tap below to open the secure online payment portal in your browser.', isOnline: true),
+                            _infoBullet('Select GCash, Maya, GrabPay, or enter your Card details on the checkout page.', isOnline: true),
                             _infoBullet('Once authorized, return to this app — payment will confirm automatically and record your chosen payment method.', isOnline: true),
                           ] else ...[
                             _infoBullet('Payment is settled directly at the slaughterhouse cashier window.', isOnline: false),
@@ -943,7 +890,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                             SizedBox(width: 12),
                             Expanded(
                               child: Text(
-                                'Awaiting online payment confirmation from PayMongo...\nPlease return here after completing checkout.',
+                                'Awaiting online payment confirmation...\nPlease return here after completing checkout.',
                                 style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
                               ),
                             ),

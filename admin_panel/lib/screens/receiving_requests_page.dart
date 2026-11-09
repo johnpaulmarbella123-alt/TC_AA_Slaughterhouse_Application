@@ -808,9 +808,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                                   DataCell(Text(_formatDate(req['preferred_date']))),
                                   DataCell(
                                     OutlinedButton(
-                                      onPressed: () {
-                                        // TODO: Update entry
-                                      },
+                                      onPressed: () => _showUpdateApprovedRequestDialog(req),
                                       style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                         side: BorderSide(color: Colors.grey.shade300),
@@ -833,6 +831,173 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                   },
                 ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showUpdateApprovedRequestDialog(Map<String, dynamic> req) async {
+    final refNo = _buildRefNo(req);
+    final nameCtrl = TextEditingController(text: (req['customer_name'] ?? '').toString());
+    final countCtrl = TextEditingController(text: (req['animal_count'] ?? 1).toString());
+    final markingCtrl = TextEditingController(
+      text: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
+    );
+    final dateCtrl = TextEditingController(
+      text: (req['preferred_date'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString(),
+    );
+    final noteCtrl = TextEditingController(text: (req['special_instruction'] ?? '').toString());
+
+    const livestockOptions = ['Pig/Hog', 'Cattle/Cow', 'Carabao', 'Goat', 'Poultry'];
+    String selectedLivestock = (req['livestock_type'] ?? 'Pig/Hog').toString();
+    if (!livestockOptions.contains(selectedLivestock)) {
+      selectedLivestock = livestockOptions.first;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              const Icon(Icons.edit_note, color: Color(0xFF2D6A4F)),
+              const SizedBox(width: 8),
+              Text(
+                'Update Approved Request ($refNo)',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Customer Name',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedLivestock,
+                    decoration: const InputDecoration(
+                      labelText: 'Livestock Type',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: livestockOptions
+                        .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) setDialogState(() => selectedLivestock = val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: countCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Animal Count (Heads)',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: markingCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Marking Tag',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: dateCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Preferred Date (YYYY-MM-DD)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Special Instructions',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newCount = int.tryParse(countCtrl.text.trim()) ?? 1;
+                final newMarking = markingCtrl.text.trim().toUpperCase();
+                Navigator.pop(ctx);
+                try {
+                  await supabase.from('requests').update({
+                    'customer_name': nameCtrl.text.trim(),
+                    'livestock_type': selectedLivestock,
+                    'animal_count': newCount,
+                    'marking': newMarking,
+                    'preferred_date': dateCtrl.text.trim(),
+                    'special_instruction': noteCtrl.text.trim(),
+                  }).eq('id', req['id']);
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Updated request $refNo successfully.'),
+                        backgroundColor: const Color(0xFF2D6A4F),
+                      ),
+                    );
+                  }
+                  await _loadRequests();
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to update request: $e'),
+                        backgroundColor: Colors.redAccent,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D6A4F),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
       ),
     );
   }

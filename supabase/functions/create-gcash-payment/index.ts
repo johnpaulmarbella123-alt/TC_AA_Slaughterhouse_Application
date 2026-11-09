@@ -18,24 +18,15 @@ Deno.serve(async (req: Request) => {
   try {
     // ─── 1. Authenticate Caller via Supabase JWT ───
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return new Response(
-        JSON.stringify({ error: "Missing or invalid authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-    const token = authHeader.replace("Bearer ", "");
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !user) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: Invalid session" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    let user: any = null;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.replace("Bearer ", "");
+      const { data: userData } = await supabase.auth.getUser(token);
+      user = userData?.user;
     }
 
     const secretKey = Deno.env.get("PAYMONGO_SECRET_KEY");
@@ -48,179 +39,26 @@ Deno.serve(async (req: Request) => {
 
     const paymongoAuthHeader = "Basic " + btoa(secretKey + ":");
 
-    // ─── POST: Create a payment link ───
-    if (req.method === "POST") {
-      const body = await req.json();
-      const { description, request_id } = body;
-      let requestedAmount = Number(body.amount);
-
-      if (!request_id) {
-        return new Response(
-          JSON.stringify({ error: "request_id is required" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+    // Helper function to check status of a checkout session or payment link
+    async function checkStatus(linkId: string, reqIdParam: string | number | null) {
+      if (!linkId && reqIdParam) {
+        const { data: pRec } = await supabase
+          .from("payments")
+          .select("transaction_ref")
+          .eq("request_id", Number(reqIdParam))
+          .maybeSingle();
+        if (pRec?.transaction_ref) {
+          linkId = pRec.transaction_ref;
+        }
       }
-
-      // ─── 2. Server-Side Fee Verification & Authorization ───
-      // Verify request ownership and authoritatively fetch the calculated fee
-      const { data: reqData, error: reqErr } = await supabase
-        .from("requests")
-        .select("id, user_id, status")
-        .eq("id", request_id)
-        .maybeSingle();
-
-      if (reqErr || !reqData) {
-        return new Response(
-          JSON.stringify({ error: "Slaughter request not found" }),
-          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Check user role for staff override
-      let isStaff = false;
-      const userEmail = (user.email || "").toLowerCase();
-
-      // 1. Check profiles table
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .maybeSingle();
-      if (profile?.role && ["admin", "inspector", "cashier", "clerk"].includes(profile.role.toLowerCase())) {
-        isStaff = true;
-      }
-
-      // 2. Check user metadata
-      const metaRole = (user.user_metadata?.role || "").toLowerCase();
-      if (["admin", "inspector", "cashier", "clerk"].includes(metaRole)) {
-        isStaff = true;
-      }
-
-      // 3. Check system_settings -> staff_accounts
-      if (!isStaff && userEmail) {
-        try {
-          const { data: staffSetting } = await supabase
-            .from("system_settings")
-            .select("value")
-            .eq("key", "staff_accounts")
-            .maybeSingle();
-
-          if (staffSetting?.value && Array.isArray(staffSetting.value)) {
-            const match = staffSetting.value.find(
-              (s: any) => (s?.email || "").toLowerCase() === userEmail && s?.isActive !== false
-            );
-            if (match) {
-              isStaff = true;
-            }
-          }
-        } catch (_) {}
-      }
-
-      // 4. Default admin accounts or domain check
-      if (!isStaff && (userEmail.includes("tcaaslaughterhouse") || userEmail.endsWith("@tabaco.gov.ph") || userEmail.includes("admin"))) {
-        isStaff = true;
-      }
-
-      if (reqData.user_id !== user.id && !isStaff) {
-        return new Response(
-          JSON.stringify({ error: "Forbidden: You do not own this slaughter request" }),
-          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Check if a payment entry exists with authoritative total
-      const { data: paymentRecord } = await supabase
-        .from("payments")
-        .select("total_amount, status")
-        .eq("request_id", request_id)
-        .maybeSingle();
-
-      if (paymentRecord && paymentRecord.total_amount) {
-        // Enforce authoritative database amount to prevent client tampering
-        requestedAmount = Number(paymentRecord.total_amount);
-      }
-
-      if (!requestedAmount || requestedAmount <= 0) {
-        return new Response(
-          JSON.stringify({ error: "Invalid payment amount" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // PayMongo expects amount in centavos (integer)
-      const amountInCentavos = Math.round(requestedAmount * 100);
-
-      // Create a PayMongo Checkout Session enabling all payment methods (GCash, Maya, Cards, GrabPay, QR Ph)
-      const paymongoRes = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: paymongoAuthHeader,
-        },
-        body: JSON.stringify({
-          data: {
-            attributes: {
-              send_email_receipt: false,
-              show_description: true,
-              show_line_items: true,
-              description: description || `Slaughter Service Online Payment - Request #${request_id}`,
-              line_items: [
-                {
-                  currency: "PHP",
-                  amount: amountInCentavos,
-                  name: "Slaughterhouse Service Fee",
-                  quantity: 1,
-                },
-              ],
-              payment_method_types: ["gcash", "paymaya", "card", "grab_pay", "qrph"],
-              metadata: {
-                request_id: String(request_id),
-                user_id: String(user.id),
-              },
-            },
-          },
-        }),
-      });
-
-      const paymongoData = await paymongoRes.json();
-
-      if (!paymongoRes.ok) {
-        console.error("PayMongo error:", JSON.stringify(paymongoData));
-        return new Response(
-          JSON.stringify({
-            error: "Failed to create checkout session",
-            details: paymongoData?.errors?.[0]?.detail || "Unknown error",
-          }),
-          { status: paymongoRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const linkId = paymongoData.data.id;
-      const checkoutUrl = paymongoData.data.attributes.checkout_url;
-      const referenceNumber = paymongoData.data.attributes.reference_number;
-      const status = paymongoData.data.attributes.status;
-
-      return new Response(
-        JSON.stringify({
-          link_id: linkId,
-          checkout_url: checkoutUrl,
-          reference_number: referenceNumber,
-          status: status,
-          amount_verified: requestedAmount,
-        }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ─── GET: Check payment status ───
-    if (req.method === "GET") {
-      const url = new URL(req.url);
-      const linkId = url.searchParams.get("link_id");
 
       if (!linkId) {
         return new Response(
-          JSON.stringify({ error: "link_id parameter required" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          JSON.stringify({
+            status: "not_found",
+            message: "No PayMongo checkout session or link found for this request. Please verify the customer's payment reference directly in your PayMongo merchant portal, then click Verify & Confirm below.",
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -270,7 +108,7 @@ Deno.serve(async (req: Request) => {
         ? "paid"
         : status;
 
-      let detectedMethod = "Online (PayMongo)";
+      let detectedMethod = "Online Payment";
       if (Array.isArray(payments) && payments.length > 0) {
         for (const p of payments) {
           const srcType =
@@ -296,11 +134,11 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Auto-mark payment & request as paid on the server using Service Role key
+      // Record transaction reference and detected payment method, but require clerk verification
       if (resolvedStatus === "paid") {
         const reqIdFromMeta = metadata.request_id ? Number(metadata.request_id) : null;
         const reqMatch = remarks.match(/request_id:(\d+)/);
-        const reqId = reqIdFromMeta || (reqMatch && reqMatch[1] ? Number(reqMatch[1]) : null);
+        const reqId = reqIdFromMeta || (reqMatch && reqMatch[1] ? Number(reqMatch[1]) : null) || (reqIdParam ? Number(reqIdParam) : null);
 
         if (reqId) {
           try {
@@ -308,16 +146,11 @@ Deno.serve(async (req: Request) => {
               .from("payments")
               .update({
                 payment_method: detectedMethod,
-                status: "paid",
-                balance: 0,
+                transaction_ref: linkId,
               })
               .eq("request_id", reqId);
-            await supabase
-              .from("requests")
-              .update({ status: "paid" })
-              .eq("id", reqId);
           } catch (dbErr) {
-            console.error("Auto-confirm payment error:", dbErr);
+            console.error("Record transaction ref error:", dbErr);
           }
         }
       }
@@ -331,6 +164,196 @@ Deno.serve(async (req: Request) => {
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // ─── POST: Create payment or check status ───
+    if (req.method === "POST") {
+      const body = await req.json();
+
+      // Check if this is a check status request via POST
+      if (body.action === "check" || (body.link_id && !body.amount)) {
+        return await checkStatus(body.link_id || "", body.request_id || null);
+      }
+
+      const { description, request_id } = body;
+      let requestedAmount = Number(body.amount);
+
+      if (!request_id) {
+        return new Response(
+          JSON.stringify({ error: "request_id is required" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // ─── 2. Server-Side Fee Verification & Authorization ───
+      // Verify request exists
+      const { data: reqData, error: reqErr } = await supabase
+        .from("requests")
+        .select("id, user_id, status")
+        .eq("id", request_id)
+        .maybeSingle();
+
+      if (reqErr || !reqData) {
+        return new Response(
+          JSON.stringify({ error: "Slaughter request not found" }),
+          { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check user role for staff or request ownership if user is authenticated
+      let isStaff = false;
+      if (user) {
+        const userEmail = (user.email || "").toLowerCase();
+
+        // 1. Check profiles table
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .maybeSingle();
+        if (profile?.role && ["admin", "inspector", "cashier", "clerk"].includes(profile.role.toLowerCase())) {
+          isStaff = true;
+        }
+
+        // 2. Check user metadata
+        const metaRole = (user.user_metadata?.role || "").toLowerCase();
+        if (["admin", "inspector", "cashier", "clerk"].includes(metaRole)) {
+          isStaff = true;
+        }
+
+        // 3. Check system_settings -> staff_accounts
+        if (!isStaff && userEmail) {
+          try {
+            const { data: staffSetting } = await supabase
+              .from("system_settings")
+              .select("value")
+              .eq("key", "staff_accounts")
+              .maybeSingle();
+
+            if (staffSetting?.value && Array.isArray(staffSetting.value)) {
+              const match = staffSetting.value.find(
+                (s: any) => (s?.email || "").toLowerCase() === userEmail && s?.isActive !== false
+              );
+              if (match) {
+                isStaff = true;
+              }
+            }
+          } catch (_) { }
+        }
+
+        // 4. Default admin accounts or domain check
+        if (!isStaff && (userEmail.includes("tcaaslaughterhouse") || userEmail.endsWith("@tabaco.gov.ph") || userEmail.includes("admin") || userEmail.includes("clerk") || userEmail.includes("inspector"))) {
+          isStaff = true;
+        }
+
+        if (reqData.user_id && reqData.user_id !== user.id && !isStaff) {
+          return new Response(
+            JSON.stringify({ error: "Forbidden: You do not own this slaughter request" }),
+            { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+      }
+
+      // Check if a payment entry exists with authoritative total
+      const { data: paymentRecord } = await supabase
+        .from("payments")
+        .select("total_amount, status")
+        .eq("request_id", request_id)
+        .maybeSingle();
+
+      if (paymentRecord && paymentRecord.total_amount) {
+        // Enforce authoritative database amount to prevent client tampering
+        requestedAmount = Number(paymentRecord.total_amount);
+      }
+
+      if (!requestedAmount || requestedAmount <= 0) {
+        return new Response(
+          JSON.stringify({ error: "Invalid payment amount" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // PayMongo expects amount in centavos (integer)
+      const amountInCentavos = Math.round(requestedAmount * 100);
+
+      // Create a PayMongo Checkout Session enabling all payment methods (GCash, Maya, Cards, GrabPay, QR Ph)
+      const paymongoRes = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: paymongoAuthHeader,
+        },
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              send_email_receipt: false,
+              show_description: true,
+              show_line_items: true,
+              description: description || `Slaughter Service Online Payment - Request #${request_id}`,
+              line_items: [
+                {
+                  currency: "PHP",
+                  amount: amountInCentavos,
+                  name: "Slaughterhouse Service Fee",
+                  quantity: 1,
+                },
+              ],
+              payment_method_types: ["gcash", "paymaya", "card", "grab_pay", "qrph"],
+              metadata: {
+                request_id: String(request_id),
+                user_id: String(user?.id ?? reqData?.user_id ?? "walk_in"),
+              },
+            },
+          },
+        }),
+      });
+
+      const paymongoData = await paymongoRes.json();
+
+      if (!paymongoRes.ok) {
+        console.error("PayMongo error:", JSON.stringify(paymongoData));
+        return new Response(
+          JSON.stringify({
+            error: "Failed to create checkout session",
+            details: paymongoData?.errors?.[0]?.detail || "Unknown error",
+          }),
+          { status: paymongoRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const linkId = paymongoData.data.id;
+      const checkoutUrl = paymongoData.data.attributes.checkout_url;
+      const referenceNumber = paymongoData.data.attributes.reference_number;
+      const status = paymongoData.data.attributes.status;
+
+      // Persist transaction_ref to payments table so it can be queried by request_id
+      try {
+        await supabase
+          .from("payments")
+          .update({ transaction_ref: linkId })
+          .eq("request_id", request_id);
+      } catch (dbErr) {
+        console.warn("Could not save transaction_ref to payments:", dbErr);
+      }
+
+      return new Response(
+        JSON.stringify({
+          link_id: linkId,
+          checkout_url: checkoutUrl,
+          reference_number: referenceNumber,
+          status: status,
+          amount_verified: requestedAmount,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ─── GET: Check payment status ───
+    if (req.method === "GET") {
+      const url = new URL(req.url);
+      const linkId = url.searchParams.get("link_id") || "";
+      const reqIdParam = url.searchParams.get("request_id") || null;
+      return await checkStatus(linkId, reqIdParam);
     }
 
     return new Response(

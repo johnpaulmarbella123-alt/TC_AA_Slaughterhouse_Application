@@ -340,11 +340,11 @@ class _NotifyPageState extends State<NotifyPage> {
   // =========================
   // FILTER
   // "Unread" tab contains new unread notifications.
-  // "All" tab contains everything that has already been read.
+  // "All" tab contains all notifications (both unread and read).
   // =========================
   List<Map<String, dynamic>> get _filtered => showUnreadOnly
       ? notifications.where((n) => !_asBool(n['is_read'])).toList()
-      : notifications.where((n) => _asBool(n['is_read'])).toList();
+      : notifications;
 
   int get _unreadCount =>
       notifications.where((n) => !_asBool(n['is_read'])).length;
@@ -2064,7 +2064,7 @@ class _NotifyPageState extends State<NotifyPage> {
             Icon(Icons.notifications_off_outlined, size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
             Text(
-              showUnreadOnly ? 'No unread notifications' : 'No read notifications yet',
+              showUnreadOnly ? 'No unread notifications' : 'No notifications yet',
               style: TextStyle(color: Colors.grey.shade400),
             ),
           ],

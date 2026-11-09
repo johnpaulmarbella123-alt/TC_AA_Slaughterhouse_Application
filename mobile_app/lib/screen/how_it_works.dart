@@ -182,7 +182,7 @@ class HowItWorksScreen extends StatelessWidget {
         "step": "6",
         "title": "Digital Payment & Meat Release",
         "description":
-            "Review your itemized invoice (ante/post-mortem fees, slaughter fees, corral fees). Pay conveniently via GCash, PayMongo, or over-the-counter cash, and claim your inspected meat.",
+            "Review your itemized invoice (ante/post-mortem fees, slaughter fees, corral fees). Pay conveniently via Online Payment (GCash, Maya, GrabPay, Card) or over-the-counter cash, and claim your inspected meat.",
         "icon": Icons.receipt_long_rounded,
         "tip": "Download or view your official digital e-receipt anytime in the app."
       },
@@ -419,7 +419,7 @@ class HowItWorksScreen extends StatelessWidget {
       {
         "title": "Online & Cash Payments",
         "desc":
-            "Transparent automatic fee computation with breakdowns for slaughter fees, corrals, and inspections. Pay via GCash, PayMongo, or cash at counter.",
+            "Transparent automatic fee computation with breakdowns for slaughter fees, corrals, and inspections. Pay via Online Payment (GCash, Maya, GrabPay, Card) or cash at counter.",
         "icon": Icons.account_balance_wallet_rounded,
         "color": const Color(0xFF00838F),
       },
@@ -556,7 +556,7 @@ class HowItWorksScreen extends StatelessWidget {
       {
         "q": "What payment methods are supported?",
         "a":
-            "You can pay online via GCash and PayMongo e-wallets, or pay in person via over-the-counter Cash at the Slaughterhouse billing window."
+            "You can pay online via digital channels (GCash, Maya, GrabPay, Card), or pay in person via over-the-counter Cash at the Slaughterhouse billing window."
       },
       {
         "q": "Why is Class 'AA' certification important?",
