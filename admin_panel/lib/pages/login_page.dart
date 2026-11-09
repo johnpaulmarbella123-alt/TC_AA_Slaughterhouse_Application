@@ -18,34 +18,8 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _keepMeLoggedIn = false;
-  bool _isAdminProvisioned = true;
   String _selectedRolePortal = 'Admin'; // 'Admin', 'Clerk', or 'Inspector'
   final _supabase = Supabase.instance.client;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkAdminProvisioned();
-  }
-
-  Future<void> _checkAdminProvisioned() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
-      if (!provisioned) {
-        final res = await _supabase
-            .from('profiles')
-            .select('id, role')
-            .eq('role', 'admin')
-            .limit(1);
-        if ((res as List).isNotEmpty) {
-          provisioned = true;
-          await prefs.setBool('admin_account_provisioned', true);
-        }
-      }
-      if (mounted) setState(() => _isAdminProvisioned = provisioned);
-    } catch (_) {}
-  }
 
   @override
   void dispose() {
@@ -593,26 +567,11 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
             const SizedBox(height: 16),
-            if (_selectedRolePortal == 'Admin' && !_isAdminProvisioned)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('Initial setup? ', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
-                  GestureDetector(
-                    onTap: () => Navigator.pushReplacementNamed(context, '/signup'),
-                    child: const Text(
-                      'Register primary admin here.',
-                      style: TextStyle(color: Colors.white, fontSize: 12.5, decoration: TextDecoration.underline),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Text(
-                '$_selectedRolePortal accounts are managed and provisioned by the Administrator in Settings → Staff & Roles.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white60, fontSize: 11.5),
-              ),
+            Text(
+              '$_selectedRolePortal accounts are managed and provisioned internally in Settings → Staff & Roles.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white60, fontSize: 11.5),
+            ),
             const SizedBox(height: 18),
             Center(
               child: InkWell(

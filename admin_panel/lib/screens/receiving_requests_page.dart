@@ -610,29 +610,34 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   Widget _buildSearchAndActions() {
     return Row(
       children: [
-        // Search
+        // Search (Compact 250px width, 36px height)
         SizedBox(
-          width: 320,
+          width: 250,
+          height: 36,
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
+            style: const TextStyle(fontSize: 13),
+            textAlignVertical: TextAlignVertical.center,
             decoration: InputDecoration(
+              isDense: true,
               hintText: 'Search by reference or customer...',
-              hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 14),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0)),
+              hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: Colors.grey.shade300),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: Colors.grey.shade300),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5),
               ),
             ),

@@ -57,39 +57,24 @@ class HeroSection extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 60),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        SizedBox(
-                          width: 160,
-                          child: ElevatedButton(
-                            onPressed: () => Navigator.pushNamed(context, '/signup'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2D6A4F),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text('Sign Up', style: TextStyle(fontSize: 16, color: Colors.white)),
+                    SizedBox(
+                      width: 220,
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.pushNamed(context, '/login'),
+                        icon: const Icon(Icons.lock_outline, size: 18, color: Colors.white),
+                        label: const Text(
+                          'Staff Portal / Log In',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2D6A4F),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        const SizedBox(width: 24),
-                        SizedBox(
-                          width: 160,
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.pushNamed(context, '/login'),
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Colors.white, width: 1),
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text('Log In', style: TextStyle(color: Colors.white, fontSize: 16)),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ],
                 ),

@@ -178,6 +178,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
   late AnimationController _animController;
   late Animation<double> _widthAnimation;
   late Animation<double> _fadeAnimation;
+  late Animation<double> _rotateAnimation;
   bool _isCollapsed = false;
 
   @override
@@ -189,7 +190,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 260),
+      duration: const Duration(milliseconds: 300),
     );
 
     _widthAnimation = Tween<double>(begin: 285.0, end: 72.0).animate(
@@ -202,7 +203,14 @@ class _AdminSidebarState extends State<_AdminSidebar>
     _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _animController,
-        curve: const Interval(0.0, 0.45, curve: Curves.easeOut),
+        curve: const Interval(0.0, 0.40, curve: Curves.easeOut),
+      ),
+    );
+
+    _rotateAnimation = Tween<double>(begin: 0.0, end: 0.5).animate(
+      CurvedAnimation(
+        parent: _animController,
+        curve: Curves.easeInOutCubic,
       ),
     );
   }
@@ -320,7 +328,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
       animation: _animController,
       builder: (context, child) {
         final currentWidth = _widthAnimation.value;
-        final isNarrow = currentWidth < 140;
 
         return Container(
           width: currentWidth,
@@ -354,15 +361,13 @@ class _AdminSidebarState extends State<_AdminSidebar>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             // ─── LOGO HEADER (Fixed compact height) ───
-                            _buildLogoHeader(isDark, settingsService, isNarrow),
+                            _buildLogoHeader(isDark, settingsService),
 
                             const SizedBox(height: 6),
 
                             // ─── OPERATIONAL MODULES (0 through 6) ───
                             Padding(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: isNarrow ? 10 : 12,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -382,7 +387,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                               ? 'Pending tasks & ante-mortem'
                                               : 'Overview & statistics'),
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   if (settingsService.isModuleAllowed(1)) ...[
                                     const SizedBox(height: 4),
@@ -393,7 +397,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       label: 'Receiving & New Requests',
                                       subtitle: 'Customer details & animal inspection',
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(2)) ...[
@@ -405,7 +408,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       label: 'Document Verification',
                                       subtitle: 'Permits & certificates verification',
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(3)) ...[
@@ -417,7 +419,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       label: 'Slaughter & Inspection',
                                       subtitle: 'Process tagging & post-mortem',
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(4)) ...[
@@ -429,7 +430,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       label: 'Payment & Cashiering',
                                       subtitle: 'Fee calculation & receipts',
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(5)) ...[
@@ -441,7 +441,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       label: 'Meat Releasing',
                                       subtitle: 'Ready for pickup & release',
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(6)) ...[
@@ -454,7 +453,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       subtitle: 'Daily, weekly & monthly analytics',
                                       badgeCount: _illegalReportBadgeCount,
                                       isDark: isDark,
-                                      isNarrow: isNarrow,
                                     ),
                                   ],
                                 ],
@@ -465,8 +463,8 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
                             // ─── 24PX GAP WITH SUBTLE DIVIDER LINE ───
                             Padding(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: isNarrow ? 12 : 16,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
                                 vertical: 10,
                               ),
                               child: Divider(
@@ -480,9 +478,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
                             // ─── SETTINGS / MY PROFILE (Grouped at bottom next to Profile & Logout) ───
                             Padding(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: isNarrow ? 10 : 12,
-                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
                               child: _buildNavItem(
                                 index: 7,
                                 icon: settingsService.isAdmin
@@ -496,14 +492,13 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     ? 'Fees, Staff, Schedule, Profile'
                                     : 'Account profile & password',
                                 isDark: isDark,
-                                isNarrow: isNarrow,
                               ),
                             ),
 
                             const SizedBox(height: 4),
 
                             // ─── ADMIN FOOTER (Admin Avatar & Logout) ───
-                            _buildAdminFooter(context, isDark, settingsService, isNarrow),
+                            _buildAdminFooter(context, isDark, settingsService),
                           ],
                         ),
                       ),
@@ -519,13 +514,9 @@ class _AdminSidebarState extends State<_AdminSidebar>
   }
 
   Widget _buildLogoHeader(
-      bool isDark, AppSettingsService settings, bool isNarrow) {
+      bool isDark, AppSettingsService settings) {
     return Container(
       height: 66,
-      padding: EdgeInsets.symmetric(
-        horizontal: isNarrow ? 8 : 12,
-        vertical: 6,
-      ),
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
@@ -534,23 +525,115 @@ class _AdminSidebarState extends State<_AdminSidebar>
           ),
         ),
       ),
-      child: isNarrow
-          ? ClipRect(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ClipOval(
-                    child: Image.asset(settings.cityLogoPath, width: 26, height: 26, fit: BoxFit.cover),
+      child: AnimatedCrossFade(
+        duration: const Duration(milliseconds: 280),
+        firstCurve: Curves.easeInOutCubic,
+        secondCurve: Curves.easeInOutCubic,
+        sizeCurve: Curves.easeInOutCubic,
+        crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+        firstChild: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.asset(settings.cityLogoPath, fit: BoxFit.cover),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ClipRect(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          settings.headerTitle,
+                          style: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF40916C)
+                                : const Color(0xFF2D6A4F),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          softWrap: false,
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          settings.headerSubtitle,
+                          style: TextStyle(
+                            color: isDark
+                                ? const Color(0xFF94A3B8)
+                                : const Color(0xFF718096),
+                            fontSize: 11,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          softWrap: false,
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 3),
-                  InkWell(
-                    onTap: _toggleCollapse,
-                    borderRadius: BorderRadius.circular(4),
-                    child: Tooltip(
-                      message: 'Expand Sidebar',
-                      child: Padding(
-                        padding: const EdgeInsets.all(2),
+                ),
+              ),
+            ),
+              IconButton(
+                icon: RotationTransition(
+                  turns: _rotateAnimation,
+                  child: Icon(
+                    Icons.menu_open_rounded,
+                    color: isDark ? Colors.white60 : const Color(0xFF718096),
+                    size: 20,
+                  ),
+                ),
+                tooltip: 'Collapse Sidebar',
+                splashRadius: 18,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: _toggleCollapse,
+              ),
+            ],
+          ),
+        ),
+        secondChild: Container(
+          width: 72,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ClipOval(
+                  child: Image.asset(settings.cityLogoPath, width: 26, height: 26, fit: BoxFit.cover),
+                ),
+                const SizedBox(height: 3),
+                InkWell(
+                  onTap: _toggleCollapse,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Tooltip(
+                    message: 'Expand Sidebar',
+                    child: Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: RotationTransition(
+                        turns: _rotateAnimation,
                         child: Icon(
                           Icons.menu_rounded,
                           color: isDark ? Colors.white70 : const Color(0xFF2D6A4F),
@@ -559,82 +642,12 @@ class _AdminSidebarState extends State<_AdminSidebar>
                       ),
                     ),
                   ),
-                ],
-              ),
-            )
-          : Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset(settings.cityLogoPath, fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: ClipRect(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            settings.headerTitle,
-                            style: TextStyle(
-                              color: isDark
-                                  ? const Color(0xFF40916C)
-                                  : const Color(0xFF2D6A4F),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.clip,
-                            softWrap: false,
-                          ),
-                          const SizedBox(height: 1),
-                          Text(
-                            settings.headerSubtitle,
-                            style: TextStyle(
-                              color: isDark
-                                  ? const Color(0xFF94A3B8)
-                                  : const Color(0xFF718096),
-                              fontSize: 11,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.clip,
-                            softWrap: false,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.menu_open_rounded,
-                    color: isDark ? Colors.white60 : const Color(0xFF718096),
-                    size: 20,
-                  ),
-                  tooltip: 'Collapse Sidebar',
-                  splashRadius: 18,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  onPressed: _toggleCollapse,
                 ),
               ],
             ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -645,89 +658,21 @@ class _AdminSidebarState extends State<_AdminSidebar>
     required String label,
     required String subtitle,
     required bool isDark,
-    required bool isNarrow,
     int badgeCount = 0,
   }) {
     final isSelected = widget.selectedIndex == index;
 
-    if (isNarrow) {
-      return Tooltip(
-        message: label,
-        waitDuration: const Duration(milliseconds: 200),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: () => widget.onItemSelected(index),
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              width: 52,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.12)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: isSelected
-                    ? Border.all(
-                        color: const Color(0xFF2D6A4F).withValues(alpha: 0.4),
-                        width: 1,
-                      )
-                    : null,
-              ),
-              child: Center(
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Icon(
-                      isSelected ? activeIcon : icon,
-                      color: isSelected
-                          ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
-                          : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
-                      size: 20,
-                    ),
-                    if (badgeCount > 0)
-                      Positioned(
-                        right: -7,
-                        top: -5,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDC2626),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
-                          child: Text(
-                            '$badgeCount',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Material(
+    final itemWidget = Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: () => widget.onItemSelected(index),
         borderRadius: BorderRadius.circular(10),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          height: 46,
           decoration: BoxDecoration(
             color: isSelected
-                ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.1)
+                ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.12)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: isSelected
@@ -739,19 +684,54 @@ class _AdminSidebarState extends State<_AdminSidebar>
           ),
           child: Row(
             children: [
-              Icon(
-                isSelected ? activeIcon : icon,
-                color: isSelected
-                    ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
-                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
-                size: 20,
+              // ─── ANCHORED ICON SLOT (48px wide: centered in 72px collapsed strip) ───
+              SizedBox(
+                width: 48,
+                child: Center(
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Icon(
+                        isSelected ? activeIcon : icon,
+                        color: isSelected
+                            ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
+                            : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
+                        size: 20,
+                      ),
+                      if (badgeCount > 0)
+                        Positioned(
+                          right: -7,
+                          top: -5,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDC2626),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                            child: Text(
+                              '$badgeCount',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: ClipRect(
-                    child: Column(
+              if (_animController.value < 0.95)
+                Expanded(
+                child: ClipRect(
+                  child: FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Column(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -824,17 +804,150 @@ class _AdminSidebarState extends State<_AdminSidebar>
                   ),
                 ),
               ),
+            ),
             ],
           ),
         ),
       ),
     );
+
+    if (_isCollapsed) {
+      return Tooltip(
+        message: label,
+        waitDuration: const Duration(milliseconds: 200),
+        child: itemWidget,
+      );
+    }
+    return itemWidget;
   }
 
   Widget _buildAdminFooter(
-      BuildContext context, bool isDark, AppSettingsService settings, bool isNarrow) {
-    if (isNarrow) {
-      return Container(
+      BuildContext context, bool isDark, AppSettingsService settings) {
+    return AnimatedCrossFade(
+      duration: const Duration(milliseconds: 280),
+      firstCurve: Curves.easeInOutCubic,
+      secondCurve: Curves.easeInOutCubic,
+      sizeCurve: Curves.easeInOutCubic,
+      crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+      firstChild: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Admin profile row - clickable to open My Profile tab!
+            Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: isDark
+                            ? const Color(0xFF334155)
+                            : Colors.grey.shade200,
+                        backgroundImage: settings.profilePhotoUrl != null
+                            ? NetworkImage(settings.profilePhotoUrl!)
+                            : null,
+                        child: settings.profilePhotoUrl == null
+                            ? Icon(
+                                Icons.person_outline,
+                                color: isDark
+                                    ? Colors.white70
+                                    : const Color(0xFF718096),
+                                size: 18,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: ClipRect(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  settings.profileName,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF2D3748),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.clip,
+                                  softWrap: false,
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  settings.currentRole,
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? const Color(0xFF40916C)
+                                        : const Color(0xFF2D6A4F),
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 10.5,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.clip,
+                                  softWrap: false,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: isDark ? Colors.white38 : Colors.grey.shade400,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            // Logout button
+            SizedBox(
+              width: double.infinity,
+              height: 32,
+              child: OutlinedButton.icon(
+                onPressed: () => _handleLogout(context),
+                icon: const Icon(Icons.logout, size: 15),
+                label: FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: const Text('Logout', style: TextStyle(fontSize: 12)),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor:
+                      isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
+                  side: BorderSide(
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : Colors.grey.shade300,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      secondChild: Container(
+        width: 72,
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -885,124 +998,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
             ),
           ],
         ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Admin profile row - clickable to open My Profile tab!
-          Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            child: InkWell(
-              onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 16,
-                      backgroundColor: isDark
-                          ? const Color(0xFF334155)
-                          : Colors.grey.shade200,
-                      backgroundImage: settings.profilePhotoUrl != null
-                          ? NetworkImage(settings.profilePhotoUrl!)
-                          : null,
-                      child: settings.profilePhotoUrl == null
-                          ? Icon(
-                              Icons.person_outline,
-                              color: isDark
-                                  ? Colors.white70
-                                  : const Color(0xFF718096),
-                              size: 18,
-                            )
-                          : null,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FadeTransition(
-                        opacity: _fadeAnimation,
-                        child: ClipRect(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                settings.profileName,
-                                style: TextStyle(
-                                  color: isDark
-                                      ? Colors.white
-                                      : const Color(0xFF2D3748),
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                softWrap: false,
-                              ),
-                              const SizedBox(height: 1),
-                              Text(
-                                settings.currentRole,
-                                style: TextStyle(
-                                  color: isDark
-                                      ? const Color(0xFF40916C)
-                                      : const Color(0xFF2D6A4F),
-                                  fontWeight: FontWeight.w500,
-                                  fontSize: 10.5,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.clip,
-                                softWrap: false,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    Icon(
-                      Icons.chevron_right,
-                      size: 16,
-                      color: isDark ? Colors.white38 : Colors.grey.shade400,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          // Logout button
-          SizedBox(
-            width: double.infinity,
-            height: 32,
-            child: OutlinedButton.icon(
-              onPressed: () => _handleLogout(context),
-              icon: const Icon(Icons.logout, size: 15),
-              label: FadeTransition(
-                opacity: _fadeAnimation,
-                child: const Text('Logout', style: TextStyle(fontSize: 12)),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor:
-                    isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
-                side: BorderSide(
-                  color: isDark
-                      ? const Color(0xFF334155)
-                      : Colors.grey.shade300,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/hero_section.dart';
 import 'screens/admin_shell.dart';
 import 'pages/login_page.dart';
-import 'pages/signup_page.dart';
 import 'services/app_settings_service.dart';
 import 'theme.dart';
 
@@ -65,7 +64,7 @@ class MyApp extends StatelessWidget {
           routes: {
             '/': (context) => const HeroSection(),
             '/login': (context) => const LoginPage(),
-            '/signup': (context) => const SignupPage(),
+            '/signup': (context) => const LoginPage(), // Public registration disabled; route to Login
             '/dashboard': (context) => const AdminShell(),
           },
         );

@@ -33,7 +33,11 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   // PayMongo state & concurrency guard
   String? _paymongoLinkId;
   bool _isPolling = false;
+  bool _isCheckingStatus = false;
   bool _isHandlingSuccess = false;
+  bool _hasInsertedNotification = false;
+  String? _confirmedPaymentMethod;
+  double? _confirmedTotal;
   Timer? _pollTimer;
 
   @override
@@ -77,6 +81,9 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    if (_isHandlingSuccess && !_hasInsertedNotification) {
+      _sendPaymentConfirmedNotificationOnce();
+    }
     try {
       closeInAppWebView();
     } catch (_) {}
@@ -229,8 +236,9 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   Future<void> _checkPaymentStatus() async {
-    // If already handling success or no link ID, exit immediately
-    if (_isHandlingSuccess || _paymongoLinkId == null) return;
+    // If already handling success, already checking, or no link ID, exit immediately
+    if (_isHandlingSuccess || _isCheckingStatus || _paymongoLinkId == null) return;
+    _isCheckingStatus = true;
 
     try {
       final supabaseUrl = supabase.rest.url.replaceAll('/rest/v1', '');
@@ -309,14 +317,15 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
           }
 
           final reqId = widget.request['id'];
-          final userId = widget.request['user_id'] ?? supabase.auth.currentUser?.id;
           final total = (widget.fees['total'] ?? 0).toDouble();
-          final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
 
           // Resolve the exact payment channel detected from PayMongo
           String finalMethod = detectedFromPayments ??
               (detectedMethodRaw != null && detectedMethodRaw != 'Online (PayMongo)' ? detectedMethodRaw : null) ??
               'GCash';
+
+          _confirmedPaymentMethod = finalMethod;
+          _confirmedTotal = total;
 
           try {
             final prefs = await SharedPreferences.getInstance();
@@ -375,31 +384,6 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
             }
           } catch (_) {}
 
-          // 2. Idempotent Notification: insert strictly once
-          if (userId != null) {
-            try {
-              final existingNotif = await supabase
-                  .from('notifications')
-                  .select('id')
-                  .eq('user_id', userId)
-                  .eq('type', 'payment_confirmed')
-                  .ilike('message', '%${widget.receiptNo}%')
-                  .maybeSingle();
-
-              if (existingNotif == null) {
-                await supabase.from('notifications').insert({
-                  'user_id': userId,
-                  'title': '$finalMethod Payment Confirmed',
-                  'message': 'Your online payment of \u20b1${total.toStringAsFixed(2)} via $finalMethod (Receipt ${widget.receiptNo}, Ref: $refNo) has been confirmed!',
-                  'type': 'payment_confirmed',
-                  'is_read': false,
-                });
-              }
-            } catch (notifErr) {
-              debugPrint('Notification insert error: $notifErr');
-            }
-          }
-
           if (mounted) {
             _showPaidSuccessDialog(finalMethod, total);
           }
@@ -427,19 +411,67 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
       if (dbPaid) {
         _isHandlingSuccess = true;
         _pollTimer?.cancel();
+        final total = (widget.fees['total'] ?? 0).toDouble();
+        final methodLabel = payRow['payment_method']?.toString() ?? 'Online Payment';
+        _confirmedPaymentMethod = methodLabel;
+        _confirmedTotal = total;
+
         if (mounted) {
           setState(() {
             _isPolling = false;
             _isProcessing = false;
             _paymongoLinkId = null;
           });
-          final total = (widget.fees['total'] ?? 0).toDouble();
-          final methodLabel = payRow['payment_method']?.toString() ?? 'Online Payment';
           _showPaidSuccessDialog(methodLabel, total);
         }
       }
     } catch (e) {
       debugPrint('Poll error: $e');
+    } finally {
+      _isCheckingStatus = false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  SEND PAYMENT CONFIRMED NOTIFICATION (ONCE ON DONE)
+  // ═══════════════════════════════════════════════════
+  Future<void> _sendPaymentConfirmedNotificationOnce() async {
+    if (_hasInsertedNotification) return;
+    _hasInsertedNotification = true;
+
+    final userId = widget.request['user_id'] ?? supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    final reqId = widget.request['id'];
+    final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+    final method = _confirmedPaymentMethod ?? 'Online Payment';
+    final total = _confirmedTotal ?? (widget.fees['total'] ?? 0).toDouble();
+
+    try {
+      // Check if a payment confirmation notification for this receipt already exists
+      final existingNotif = await supabase
+          .from('notifications')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('type', 'payment_confirmed')
+          .ilike('message', '%${widget.receiptNo}%')
+          .maybeSingle();
+
+      if (existingNotif == null) {
+        await supabase.from('notifications').insert({
+          'user_id': userId,
+          'title': '$method Payment Confirmed',
+          'message':
+              'Your online payment of \u20b1${total.toStringAsFixed(2)} via $method (Receipt ${widget.receiptNo}, Ref: $refNo) has been confirmed!',
+          'type': 'payment_confirmed',
+          'is_read': false,
+        });
+        debugPrint('Single payment notification inserted on Done for ${widget.receiptNo}');
+      } else {
+        debugPrint('Payment notification already exists for ${widget.receiptNo}, skipped duplicate.');
+      }
+    } catch (notifErr) {
+      debugPrint('Notification insert error on Done: $notifErr');
     }
   }
 
@@ -482,9 +514,15 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
         actions: [
           Center(
             child: ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.pop(context, true); // Return true to land cleanly on Payment History
+              onPressed: () async {
+                // Insert exactly one notification when user taps Done
+                await _sendPaymentConfirmedNotificationOnce();
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                }
+                if (mounted) {
+                  Navigator.pop(context, true); // Return true to land cleanly on Payment History
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1A8C62),
