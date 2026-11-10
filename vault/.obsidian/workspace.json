@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
+                "file": "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Chapter 1 - Introduction"
+              "title": "Chapter 4 - Results and Discussion"
             }
           }
         ]
@@ -99,7 +99,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
+                "file": "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -189,16 +189,16 @@
   },
   "active": "f313bd710e068298",
   "lastOpenFiles": [
+    "07 - Capstone Manuscript/Chapter 5 - Summary, Conclusions, and Recommendations.md",
+    "07 - Capstone Manuscript/References.md",
+    "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
     "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
     "07 - Capstone Manuscript/Chapter 3 - Methodology.md",
     "07 - Capstone Manuscript/00 - Preliminaries.md",
     "07 - Capstone Manuscript/Appendices.md",
-    "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
     "07 - Capstone Manuscript/Chapter 2 - Review of Related Literature and Technical Background.md",
     "07 - Capstone Manuscript/figure7_use_case_diagram.svg",
-    "07 - Capstone Manuscript/Chapter 5 - Summary, Conclusions, and Recommendations.md",
     "README.md",
-    "07 - Capstone Manuscript/References.md",
     "05 - Module Reference/Mobile - Client Request Booking.md",
     "05 - Module Reference/Admin - Document Verification.md",
     "05 - Module Reference/Mobile - Inspection Tracking & Condemnation Slips.md",
