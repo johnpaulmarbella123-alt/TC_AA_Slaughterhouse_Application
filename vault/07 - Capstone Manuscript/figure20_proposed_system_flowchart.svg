@@ -1,0 +1,352 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 2380" width="100%" height="100%" style="background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Arrow marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#475569" />
+    </marker>
+    <!-- Red rejection arrow marker -->
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#DC2626" />
+    </marker>
+    <!-- Green pass arrow marker -->
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#16A34A" />
+    </marker>
+    <!-- Drop Shadow Filter -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.07" flood-color="#0F172A" />
+    </filter>
+  </defs>
+
+  <style>
+    .title { font-size: 20px; font-weight: 700; fill: #0F172A; text-anchor: middle; }
+    .subtitle { font-size: 13px; font-weight: 400; fill: #64748B; text-anchor: middle; }
+    .node-text-title { font-size: 13px; font-weight: 700; text-anchor: middle; }
+    .node-text-body { font-size: 11.5px; font-weight: 400; text-anchor: middle; }
+    .badge-customer { fill: #1D4ED8; font-weight: 700; font-size: 11px; }
+    .badge-clerk { fill: #047857; font-weight: 700; font-size: 11px; }
+    .badge-inspector { fill: #B45309; font-weight: 700; font-size: 11px; }
+    .badge-admin { fill: #6D28D9; font-weight: 700; font-size: 11px; }
+    .badge-system { fill: #475569; font-weight: 700; font-size: 11px; }
+    .edge-label { font-size: 11px; font-weight: 600; fill: #475569; }
+    .edge-label-green { font-size: 11px; font-weight: 700; fill: #16A34A; }
+    .edge-label-red { font-size: 11px; font-weight: 700; fill: #DC2626; }
+    .flow-line { fill: none; stroke: #475569; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+    .flow-line-red { fill: none; stroke: #DC2626; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+    .flow-line-green { fill: none; stroke: #16A34A; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+
+  <!-- Flowchart Header -->
+  <text x="550" y="32" class="title">Figure 20. Proposed System Flowchart</text>
+  <text x="550" y="50" class="subtitle">Tabaco City 'AA' Slaughterhouse Operation Management Application — Role-Segregated Process Pipeline</text>
+
+  <!-- ========================================== -->
+  <!-- 1. START APP LAUNCH -->
+  <!-- ========================================== -->
+  <rect x="460" y="70" width="180" height="42" rx="21" fill="#F1F5F9" stroke="#334155" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="96" class="node-text-title" fill="#0F172A">Start App Launch</text>
+
+  <line x1="550" y1="112" x2="550" y2="148" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 2. AUTH CHECK DECISION -->
+  <!-- ========================================== -->
+  <polygon points="550,150 670,195 550,240 430,195" fill="#F8FAFC" stroke="#64748B" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="188" class="node-text-title" fill="#1E293B">[System]</text>
+  <text x="550" y="205" class="node-text-body" fill="#334155">User Authenticated?</text>
+
+  <!-- Auth: No -> Login -->
+  <line x1="670" y1="195" x2="740" y2="195" class="flow-line" marker-end="url(#arrow)" />
+  <text x="685" y="188" class="edge-label-red">No</text>
+
+  <rect x="740" y="168" width="190" height="54" rx="8" fill="#F8FAFC" stroke="#64748B" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="835" y="190" class="node-text-title" fill="#1E293B">[Customer / Staff]</text>
+  <text x="835" y="208" class="node-text-body" fill="#475569">Login / OTP Verification</text>
+
+  <!-- Login loopback to Auth -->
+  <path d="M 835,168 L 835,130 L 565,130" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- Auth: Yes -> Action Type -->
+  <line x1="550" y1="240" x2="550" y2="280" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="260" class="edge-label-green">Yes</text>
+
+  <!-- ========================================== -->
+  <!-- 3. ACTION TYPE DECISION -->
+  <!-- ========================================== -->
+  <polygon points="550,282 660,325 550,368 440,325" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="318" class="node-text-title" fill="#1E3A8A">[Customer]</text>
+  <text x="550" y="335" class="node-text-body" fill="#1E40AF">Action Type?</text>
+
+  <!-- ─── Branch A: Whistleblower Tip (Left) ─── -->
+  <path d="M 440,325 L 200,325 L 200,398" class="flow-line" marker-end="url(#arrow)" />
+  <text x="280" y="318" class="edge-label" text-anchor="middle">Whistleblower Tip</text>
+
+  <!-- Whistleblower Submit Box -->
+  <rect x="75" y="400" width="250" height="62" rx="8" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="420" class="node-text-title" fill="#1E3A8A">[Customer / Citizen]</text>
+  <text x="200" y="437" class="node-text-body" fill="#1E40AF">Submit Illegal Slaughter Report</text>
+  <text x="200" y="452" class="node-text-body" fill="#64748B">(GPS Geolocation + Photo Evidence)</text>
+
+  <line x1="200" y1="462" x2="200" y2="500" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- Admin Investigation Box -->
+  <rect x="70" y="502" width="260" height="64" rx="8" fill="#FAF5FF" stroke="#8B5CF6" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="522" class="node-text-title" fill="#5B21B6">[Admin]</text>
+  <text x="200" y="539" class="node-text-body" fill="#6D28D9">Admin Investigation &amp; Legal Logging</text>
+  <text x="200" y="554" class="node-text-body" fill="#64748B">(CVO / NMIS / PNP Enforcement)</text>
+
+  <line x1="200" y1="566" x2="200" y2="608" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- Branch A End -->
+  <rect x="150" y="610" width="100" height="34" rx="17" fill="#F1F5F9" stroke="#334155" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="632" class="node-text-title" fill="#0F172A">End</text>
+
+  <!-- ─── Branch B: Slaughter Service (Down) ─── -->
+  <line x1="550" y1="368" x2="550" y2="408" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="390" class="edge-label-green">Slaughter Service</text>
+
+  <!-- Submit Request Box -->
+  <rect x="390" y="410" width="320" height="60" rx="8" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="550" y="430" class="node-text-title" fill="#1E3A8A">[Customer]</text>
+  <text x="550" y="447" class="node-text-body" fill="#1E40AF">Submit Request Schedule</text>
+  <text x="550" y="461" class="node-text-body" fill="#64748B">(Barangay / Market Queue + Upload Permits)</text>
+
+  <line x1="550" y1="470" x2="550" y2="508" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 4. ADMIN INTAKE APPROVED? -->
+  <!-- ========================================== -->
+  <polygon points="550,510 670,555 550,600 430,555" fill="#ECFDF5" stroke="#10B981" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="547" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="550" y="565" class="node-text-body" fill="#047857">Admin Intake Approved?</text>
+
+  <!-- Intake: No -> Dispatch Rejection -->
+  <line x1="670" y1="555" x2="770" y2="555" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <text x="700" y="547" class="edge-label-red">No</text>
+
+  <rect x="772" y="528" width="230" height="54" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="887" y="550" class="node-text-title" fill="#991B1B">[System / Clerk]</text>
+  <text x="887" y="568" class="node-text-body" fill="#B91C1C">Dispatch Rejection Notification</text>
+
+  <!-- Rejection to Rejection End -->
+  <line x1="1002" y1="555" x2="1035" y2="555" class="flow-line-red" />
+  <path d="M 1035,555 L 1035,745 L 880,745" class="flow-line-red" marker-end="url(#arrow-red)" />
+
+  <!-- Intake: Yes -> Document Verification -->
+  <line x1="550" y1="600" x2="550" y2="640" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="622" class="edge-label-green">Yes</text>
+
+  <!-- ========================================== -->
+  <!-- 5. DOCUMENT VERIFICATION PASSED? -->
+  <!-- ========================================== -->
+  <polygon points="550,642 680,688 550,734 420,688" fill="#ECFDF5" stroke="#10B981" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="680" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="550" y="698" class="node-text-body" fill="#047857">Document Verification Passed?</text>
+
+  <!-- DocVerify: No -> Cancel & Notify -->
+  <line x1="680" y1="688" x2="770" y2="688" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <text x="705" y="680" class="edge-label-red">No</text>
+
+  <rect x="772" y="661" width="230" height="54" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="887" y="683" class="node-text-title" fill="#991B1B">[Clerk]</text>
+  <text x="887" y="701" class="node-text-body" fill="#B91C1C">Set Status = Cancelled &amp; Notify</text>
+
+  <!-- Side Rejection End Pill -->
+  <rect x="790" y="730" width="90" height="30" rx="15" fill="#F1F5F9" stroke="#334155" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="835" y="750" class="node-text-title" fill="#0F172A">End</text>
+  <line x1="887" y1="715" x2="887" y2="745" class="flow-line-red" />
+  <line x1="887" y1="745" x2="882" y2="745" class="flow-line-red" marker-end="url(#arrow-red)" />
+
+  <!-- DocVerify: Yes -> Ante-Mortem -->
+  <line x1="550" y1="734" x2="550" y2="774" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="756" class="edge-label-green">Yes</text>
+
+  <!-- ========================================== -->
+  <!-- 6. ANTE-MORTEM INSPECTION PASSED? -->
+  <!-- ========================================== -->
+  <polygon points="550,776 685,824 550,872 415,824" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="816" class="node-text-title" fill="#92400E">[Inspector]</text>
+  <text x="550" y="834" class="node-text-body" fill="#B45309">Ante-Mortem Inspection Passed?</text>
+
+  <!-- Ante-Mortem: No -> Condemn Slip -->
+  <line x1="415" y1="824" x2="330" y2="824" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <text x="350" y="816" class="edge-label-red">No (Condemned)</text>
+
+  <rect x="70" y="792" width="260" height="64" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="812" class="node-text-title" fill="#991B1B">[Inspector]</text>
+  <text x="200" y="828" class="node-text-body" fill="#B91C1C">Set Status = anti_mortem_failed</text>
+  <text x="200" y="843" class="node-text-body" fill="#64748B">Notice (CS-YYYY-XXX) / Quarantine</text>
+
+  <!-- Ante Condemn End -->
+  <path d="M 200,856 L 200,890 L 200,890" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <rect x="155" y="892" width="90" height="30" rx="15" fill="#F1F5F9" stroke="#334155" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="912" class="node-text-title" fill="#0F172A">End</text>
+
+  <!-- Ante-Mortem: Yes -> Slaughter Operations Line -->
+  <line x1="550" y1="872" x2="550" y2="920" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="898" class="edge-label-green">Yes</text>
+
+  <!-- ========================================== -->
+  <!-- 7. SLAUGHTER OPERATIONS LINE -->
+  <!-- ========================================== -->
+  <rect x="380" y="922" width="340" height="62" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="943" class="node-text-title" fill="#92400E">[Inspector / Abattoir Floor Handlers]</text>
+  <text x="550" y="960" class="node-text-title" fill="#78350F">Slaughter Operations Line</text>
+  <text x="550" y="975" class="node-text-body" fill="#64748B">(Stunning, Bleeding, Scalding, Evisceration)</text>
+
+  <line x1="550" y1="984" x2="550" y2="1024" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 8. POST-MORTEM INSPECTION PASSED? -->
+  <!-- ========================================== -->
+  <polygon points="550,1026 685,1074 550,1122 415,1074" fill="#FFFBEB" stroke="#F59E0B" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="1066" class="node-text-title" fill="#92400E">[Inspector]</text>
+  <text x="550" y="1084" class="node-text-body" fill="#B45309">Post-Mortem Inspection Passed?</text>
+
+  <!-- Post-Mortem: No -> Condemn Slip -->
+  <line x1="415" y1="1074" x2="330" y2="1074" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <text x="350" y="1066" class="edge-label-red">No (Condemned)</text>
+
+  <rect x="70" y="1042" width="260" height="64" rx="8" fill="#FEF2F2" stroke="#EF4444" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="1062" class="node-text-title" fill="#991B1B">[Inspector]</text>
+  <text x="200" y="1078" class="node-text-body" fill="#B91C1C">Set Status = post_mortem_failed</text>
+  <text x="200" y="1093" class="node-text-body" fill="#64748B">Log Findings, Slip &amp; Confiscate</text>
+
+  <!-- Post Condemn End -->
+  <path d="M 200,1106 L 200,1140" class="flow-line-red" marker-end="url(#arrow-red)" />
+  <rect x="155" y="1142" width="90" height="30" rx="15" fill="#F1F5F9" stroke="#334155" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="200" y="1162" class="node-text-title" fill="#0F172A">End</text>
+
+  <!-- Post-Mortem: Yes -> Weigh Carcass -->
+  <line x1="550" y1="1122" x2="550" y2="1170" class="flow-line-green" marker-end="url(#arrow-green)" />
+  <text x="558" y="1148" class="edge-label-green">Yes</text>
+
+  <!-- ========================================== -->
+  <!-- 9. RECORD NET CARCASS WEIGHT & MIC -->
+  <!-- ========================================== -->
+  <rect x="380" y="1172" width="340" height="58" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="550" y="1193" class="node-text-title" fill="#92400E">[Inspector]</text>
+  <text x="550" y="1210" class="node-text-body" fill="#78350F">Record Net Carcass Weight (kg)</text>
+  <text x="550" y="1224" class="node-text-body" fill="#64748B">Generate Digital MIC Record</text>
+
+  <line x1="550" y1="1230" x2="550" y2="1268" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 10. COMPUTE MUNICIPAL FEES & INVOICES -->
+  <!-- ========================================== -->
+  <rect x="350" y="1270" width="400" height="62" rx="8" fill="#ECFDF5" stroke="#10B981" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="550" y="1291" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="550" y="1308" class="node-text-body" fill="#047857">Compute Municipal Fees &amp; Invoices</text>
+  <text x="550" y="1323" class="node-text-body" fill="#64748B">(Vet, Permit, Facility, Corral, Weight Rate, Van)</text>
+
+  <line x1="550" y1="1332" x2="550" y2="1370" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 11. PAYMENT METHOD SELECTION -->
+  <!-- ========================================== -->
+  <polygon points="550,1372 680,1418 550,1464 420,1418" fill="#EFF6FF" stroke="#3B82F6" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="1410" class="node-text-title" fill="#1E3A8A">[Customer / Clerk]</text>
+  <text x="550" y="1428" class="node-text-body" fill="#1D4ED8">Payment Method?</text>
+
+  <!-- ─── Branch P1: Online E-Payment (Left) ─── -->
+  <path d="M 420,1418 L 330,1418 L 330,1498" class="flow-line" marker-end="url(#arrow)" />
+  <text x="355" y="1410" class="edge-label" text-anchor="middle">Online E-Payment</text>
+
+  <!-- PayMongo Multi-Option Box -->
+  <rect x="180" y="1500" width="300" height="74" rx="8" fill="#EFF6FF" stroke="#3B82F6" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="330" y="1521" class="node-text-title" fill="#1E3A8A">[Customer]</text>
+  <text x="330" y="1538" class="node-text-title" fill="#1D4ED8">PayMongo Multi-Channel Gateway</text>
+  <text x="330" y="1554" class="node-text-body" fill="#2563EB">(GCash, Maya, GrabPay, Cards, QR Ph)</text>
+  <text x="330" y="1568" class="node-text-body" fill="#64748B">Create Checkout Session ➔ Secure Settlement</text>
+
+  <line x1="330" y1="1574" x2="330" y2="1612" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- Webhook Verification Box -->
+  <rect x="190" y="1614" width="280" height="54" rx="8" fill="#F8FAFC" stroke="#64748B" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="330" y="1635" class="node-text-title" fill="#1E293B">[System]</text>
+  <text x="330" y="1651" class="node-text-body" fill="#475569">Webhook Signature Verification</text>
+  <text x="330" y="1663" class="node-text-body" fill="#64748B">Validate Payment Status == 'paid'</text>
+
+  <!-- ─── Branch P2: Over-the-Counter Cash (Right) ─── -->
+  <path d="M 680,1418 L 770,1418 L 770,1498" class="flow-line" marker-end="url(#arrow)" />
+  <text x="745" y="1410" class="edge-label" text-anchor="middle">Over-the-Counter Cash</text>
+
+  <!-- Cashier Box -->
+  <rect x="620" y="1500" width="300" height="74" rx="8" fill="#ECFDF5" stroke="#10B981" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="770" y="1521" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="770" y="1538" class="node-text-title" fill="#047857">Cashier Receives Physical Cash</text>
+  <text x="770" y="1554" class="node-text-body" fill="#059669">Verify Tendered >= Total ➔ Compute Change</text>
+  <text x="770" y="1568" class="node-text-body" fill="#64748B">Stamp Municipal Invoice as Paid</text>
+
+  <!-- Payment Paths Reconvergence -->
+  <path d="M 330,1668 L 330,1720 L 520,1720" class="flow-line" />
+  <path d="M 770,1574 L 770,1720 L 580,1720" class="flow-line" />
+  <line x1="550" y1="1720" x2="550" y2="1748" class="flow-line-green" marker-end="url(#arrow-green)" />
+
+  <!-- ========================================== -->
+  <!-- 12. SET STATUS = PAID & RECEIPT / GATE PASS -->
+  <!-- ========================================== -->
+  <rect x="360" y="1750" width="380" height="66" rx="8" fill="#ECFDF5" stroke="#10B981" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="1771" class="node-text-title" fill="#065F46">[System / Clerk]</text>
+  <text x="550" y="1788" class="node-text-title" fill="#047857">Set Status = paid</text>
+  <text x="550" y="1803" class="node-text-body" fill="#065F46">Generate Official Receipt (RCP-YYYY-XXX)</text>
+  <text x="550" y="1816" class="node-text-body" fill="#64748B">Generate Scannable Encrypted QR Gate Pass</text>
+
+  <line x1="550" y1="1816" x2="550" y2="1854" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 13. GATE PASS VERIFICATION AT LOADING DOCK -->
+  <!-- ========================================== -->
+  <rect x="360" y="1856" width="380" height="60" rx="8" fill="#ECFDF5" stroke="#10B981" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="550" y="1877" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="550" y="1894" class="node-text-body" fill="#047857">Gate Pass Verification at Dispatch Loading Dock</text>
+  <text x="550" y="1908" class="node-text-body" fill="#64748B">(Scan QR Gate Pass &amp; Verify Plate Number)</text>
+
+  <line x1="550" y1="1916" x2="550" y2="1954" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 14. CONFIRM PICKUP & COMPLETE -->
+  <!-- ========================================== -->
+  <rect x="370" y="1956" width="360" height="60" rx="8" fill="#ECFDF5" stroke="#10B981" stroke-width="1.5" filter="url(#shadow)" />
+  <text x="550" y="1977" class="node-text-title" fill="#065F46">[Clerk]</text>
+  <text x="550" y="1994" class="node-text-body" fill="#047857">Confirm Pickup: Set Status = completed</text>
+  <text x="550" y="2008" class="node-text-body" fill="#64748B">Stamp released_at Timestamp</text>
+
+  <line x1="550" y1="2016" x2="550" y2="2054" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 15. ADMIN COMPILE PRODUCTION PDF & RECORDS -->
+  <!-- ========================================== -->
+  <rect x="330" y="2056" width="440" height="68" rx="8" fill="#FAF5FF" stroke="#8B5CF6" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="2077" class="node-text-title" fill="#5B21B6">[Admin]</text>
+  <text x="550" y="2094" class="node-text-title" fill="#6D28D9">Compile Legal Daily Slaughterhouse Production PDF (8.5x14)</text>
+  <text x="550" y="2109" class="node-text-body" fill="#5B21B6">Generate Municipal Revenue Ledgers &amp; Master Audit Records</text>
+
+  <line x1="550" y1="2124" x2="550" y2="2164" class="flow-line" marker-end="url(#arrow)" />
+
+  <!-- ========================================== -->
+  <!-- 16. END -->
+  <!-- ========================================== -->
+  <rect x="460" y="2166" width="180" height="42" rx="21" fill="#F1F5F9" stroke="#334155" stroke-width="2" filter="url(#shadow)" />
+  <text x="550" y="2192" class="node-text-title" fill="#0F172A">End</text>
+
+  <!-- Legend at Bottom -->
+  <g transform="translate(160, 2240)">
+    <rect x="0" y="0" width="780" height="60" rx="8" fill="#F8FAFC" stroke="#CBD5E1" stroke-width="1" />
+    <text x="20" y="25" font-size="12px" font-weight="700" fill="#334155">Operational Roles Legend:</text>
+    
+    <rect x="20" y="35" width="14" height="14" rx="3" fill="#EFF6FF" stroke="#3B82F6" />
+    <text x="40" y="47" font-size="11.5px" fill="#1E40AF"><tspan font-weight="700">[Customer]</tspan> Mobile Client / Meat Dealer</text>
+
+    <rect x="235" y="35" width="14" height="14" rx="3" fill="#ECFDF5" stroke="#10B981" />
+    <text x="255" y="47" font-size="11.5px" fill="#047857"><tspan font-weight="700">[Clerk]</tspan> Desk / Intake / Cashier / Release</text>
+
+    <rect x="485" y="35" width="14" height="14" rx="3" fill="#FFFBEB" stroke="#F59E0B" />
+    <text x="505" y="47" font-size="11.5px" fill="#92400E"><tspan font-weight="700">[Inspector]</tspan> Abattoir Floor / Health</text>
+
+    <rect x="670" y="35" width="14" height="14" rx="3" fill="#FAF5FF" stroke="#8B5CF6" />
+    <text x="690" y="47" font-size="11.5px" fill="#5B21B6"><tspan font-weight="700">[Admin]</tspan> Reports &amp; Records</text>
+  </g>
+
+</svg>
+

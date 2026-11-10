@@ -105,24 +105,35 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     final isEmailInput = rawInput.contains('@');
 
     if (isEmailInput) {
+      final cleanEmail = rawInput.toLowerCase();
       final emailRegex = RegExp(r'^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$');
-      if (!emailRegex.hasMatch(rawInput)) {
+      if (!emailRegex.hasMatch(cleanEmail)) {
         _showSnackbar('Please enter a valid email address.', isError: true);
         return;
       }
 
-      setState(() {
-        _isLoading = true;
-        _activeIdentifier = rawInput;
-        _enteredPhone = null;
-      });
+      setState(() => _isLoading = true);
 
       try {
-        await _authService.sendPasswordResetOtp(rawInput);
+        final exists = await _authService.isAccountExists(cleanEmail);
+        if (!exists) {
+          if (!mounted) return;
+          _showSnackbar(
+            'No registered account found with email $rawInput. Please sign up or check your email.',
+            isError: true,
+          );
+          return;
+        }
+
+        await _authService.sendPasswordResetOtp(cleanEmail);
         if (!mounted) return;
 
         _startResendTimer();
-        setState(() => _currentStep = 1);
+        setState(() {
+          _activeIdentifier = cleanEmail;
+          _enteredPhone = null;
+          _currentStep = 1;
+        });
 
         _showSnackbar(
           'Recovery code sent! Please check your email inbox.',
@@ -160,33 +171,66 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         // Look up registered email linked to this phone number
         final linkedEmail = await _authService.findEmailForPhone(formattedPhone);
 
-        if (linkedEmail == null || linkedEmail.isEmpty) {
+        if (linkedEmail != null && linkedEmail.isNotEmpty) {
+          // Send 6-digit recovery OTP directly to their linked email
+          await _authService.sendPasswordResetOtp(linkedEmail);
           if (!mounted) return;
+
+          _startResendTimer();
+          setState(() {
+            _activeIdentifier = linkedEmail;
+            _enteredPhone = rawInput;
+            _currentStep = 1;
+          });
+
           _showSnackbar(
-            'No registered account found with mobile number $rawInput. Please enter your email address.',
-            isError: true,
+            'Account found! 6-digit code sent to your linked email (${_maskEmail(linkedEmail)}).',
+            isError: false,
           );
-          return;
+        } else {
+          // Phone-only account (e.g. farmer with no email)
+          final exists = await _authService.isAccountExists(formattedPhone);
+          if (!exists) {
+            if (!mounted) return;
+            _showSnackbar(
+              'No registered account found with mobile number $rawInput. Please check your number or sign up.',
+              isError: true,
+            );
+            return;
+          }
+
+          // Send SMS recovery OTP
+          await _authService.sendPasswordResetOtp(formattedPhone);
+          if (!mounted) return;
+
+          _startResendTimer();
+          setState(() {
+            _activeIdentifier = formattedPhone;
+            _enteredPhone = rawInput;
+            _currentStep = 1;
+          });
+
+          _showSnackbar(
+            'Verification code sent to your mobile number $rawInput.',
+            isError: false,
+          );
         }
-
-        // Send 6-digit recovery OTP directly to their linked email
-        await _authService.sendPasswordResetOtp(linkedEmail);
-        if (!mounted) return;
-
-        _startResendTimer();
-        setState(() {
-          _activeIdentifier = linkedEmail;
-          _enteredPhone = rawInput;
-          _currentStep = 1;
-        });
-
-        _showSnackbar(
-          'Account found! 6-digit code sent to your linked email (${_maskEmail(linkedEmail)}).',
-          isError: false,
-        );
       } catch (e) {
         if (!mounted) return;
-        _showSnackbar('Error sending code: $e', isError: true);
+        String msg = e.toString();
+        if (e is AuthException) {
+          msg = e.message;
+        }
+        if (msg.contains('SocketException') || msg.contains('Failed host lookup')) {
+          msg = 'No internet connection. Please check your network.';
+        } else if (msg.contains('rate limit')) {
+          msg = 'Too many requests. Please wait a moment before trying again.';
+        } else if (msg.toLowerCase().contains('sms') ||
+            msg.toLowerCase().contains('phone provider') ||
+            msg.toLowerCase().contains('unsupported phone provider')) {
+          msg = 'SMS OTP is not configured in Supabase. Please reset your password using your linked email address.';
+        }
+        _showSnackbar(msg, isError: true);
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -321,7 +365,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             child: ElevatedButton(
               onPressed: () {
                 Navigator.pop(ctx); // Close dialog
-                Navigator.pop(context, _enteredPhone ?? _activeIdentifier); // Return to login with identifier
+                Navigator.pop(context, _activeIdentifier.isNotEmpty ? _activeIdentifier : _enteredPhone); // Return to login with identifier
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF218358),
@@ -505,12 +549,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                             Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.email_outlined, size: 14, color: Color(0xFF218358)),
+                                Icon(_isEmail ? Icons.email_outlined : Icons.phone_android, size: 14, color: const Color(0xFF218358)),
                                 const SizedBox(width: 6),
                                 Text(
-                                  _enteredPhone != null
+                                  _isEmail && _enteredPhone != null
                                       ? 'Code sent to: ${_maskEmail(_activeIdentifier)}'
-                                      : _activeIdentifier,
+                                      : (_isEmail ? _activeIdentifier : 'Code sent to: ${_enteredPhone ?? _activeIdentifier}'),
                                   style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -534,6 +578,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       icon: Icons.account_circle_outlined,
                       controller: _identifierController,
                       keyboardType: TextInputType.emailAddress,
+                      textCapitalization: TextCapitalization.none,
+                      autocorrect: false,
                     ),
                     const SizedBox(height: 30),
                     SizedBox(
@@ -740,6 +786,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     TextEditingController? controller,
     VoidCallback? onToggleVisibility,
     TextInputType keyboardType = TextInputType.text,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    bool autocorrect = true,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -752,6 +800,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         controller: controller,
         obscureText: obscureText,
         keyboardType: keyboardType,
+        textCapitalization: textCapitalization,
+        autocorrect: autocorrect,
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),

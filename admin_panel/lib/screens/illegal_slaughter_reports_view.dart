@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
@@ -384,6 +387,48 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
   }
 
   // ═══════════════════════════════════════════════════════════
+  // LOG WALK-IN REPORT DIALOG TRIGGER
+  // ═══════════════════════════════════════════════════════════
+  void _showLogWalkInReportDialog() {
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close Walk-In Report Dialog',
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      transitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (dialogCtx, anim1, anim2) {
+        return Center(
+          child: _WalkInReportDialog(
+            supabase: supabase,
+            onReportSubmitted: () {
+              _loadReports(silent: true);
+              widget.onReportsUpdated?.call();
+            },
+          ),
+        );
+      },
+      transitionBuilder: (dialogCtx, anim1, anim2, child) {
+        final curvedVal = CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic).value;
+        return BackdropFilter(
+          filter: ImageFilter.blur(
+            sigmaX: 5.5 * curvedVal,
+            sigmaY: 5.5 * curvedVal,
+          ),
+          child: FadeTransition(
+            opacity: anim1,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.94, end: 1.0).animate(
+                CurvedAnimation(parent: anim1, curve: Curves.easeOutCubic),
+              ),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // MAIN BUILD
   // ═══════════════════════════════════════════════════════════
   @override
@@ -430,7 +475,7 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
   }
 
   // ═══════════════════════════════════════════════════════════
-  // TOP APP BAR (Icon + Title + Search bar)
+  // TOP APP BAR (Icon + Title + Search bar + Walk-In Button)
   // ═══════════════════════════════════════════════════════════
   Widget _buildTopBar() {
     return Row(
@@ -462,48 +507,71 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
           ],
         ),
 
-        // Search Input (matching top-right search box)
-        Container(
-          width: 280,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: TextField(
-            controller: _searchCtrl,
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
-            decoration: InputDecoration(
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              prefixIcon: const Icon(
-                Icons.search,
-                size: 18,
-                color: Color(0xFF94A3B8),
+        // Right side: Log Walk-In Report Button + Search Input
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ElevatedButton.icon(
+              onPressed: _showLogWalkInReportDialog,
+              icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+              label: const Text(
+                'Log Walk-In Report',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
               ),
-              prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 18),
-              suffixIcon: _searchCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() {});
-                      },
-                    )
-                  : null,
-              hintText: 'Search reports...',
-              hintStyle: const TextStyle(
-                color: Color(0xFF94A3B8),
-                fontSize: 13,
-                fontWeight: FontWeight.w400,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-              border: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              enabledBorder: InputBorder.none,
             ),
-          ),
+            const SizedBox(width: 12),
+            Container(
+              width: 260,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                onChanged: (_) => setState(() {}),
+                style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+                decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    size: 18,
+                    color: Color(0xFF94A3B8),
+                  ),
+                  prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 18),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() {});
+                          },
+                        )
+                      : null,
+                  hintText: 'Search reports...',
+                  hintStyle: const TextStyle(
+                    color: Color(0xFF94A3B8),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  border: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -701,6 +769,9 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
     final isAnon = report['is_anonymous'] == true || report['reporter_name'] == 'Anonymous';
     final reporterName = isAnon ? 'Anonymous' : (report['reporter_name'] ?? 'Citizen');
     final status = normalizeStatus(report['status']);
+    final isWalkIn = report['report_source'] == 'walk_in' ||
+        ref.toString().startsWith('WI-') ||
+        (report['description'] ?? '').toString().contains('[Walk-In');
 
     return InkWell(
       mouseCursor: SystemMouseCursors.click,
@@ -716,13 +787,44 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    ref,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A),
-                    ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        ref,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      if (isWalkIn) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.directions_walk_rounded, size: 10, color: Color(0xFFB45309)),
+                              SizedBox(width: 2),
+                              Text(
+                                'Walk-In',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFB45309),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -1176,6 +1278,9 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
     final reporterName = isAnon ? 'Anonymous Submission' : (_report['reporter_name'] ?? 'Citizen');
     final contactNum = _report['contact_number'];
     final photoUrl = _report['photo_url']?.toString();
+    final isWalkIn = _report['report_source'] == 'walk_in' ||
+        ref.toString().startsWith('WI-') ||
+        (description).toString().contains('[Walk-In');
 
     final screenWidth = MediaQuery.of(context).size.width;
     final dialogWidth = screenWidth < 620 ? screenWidth * 0.94 : 560.0;
@@ -1238,6 +1343,30 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                           ),
                         ),
                         _IllegalSlaughterReportsViewState.buildSeverityBadge(_severityLevel),
+                        if (isWalkIn)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: const Color(0xFFFDE68A)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.directions_walk_rounded, size: 12, color: Color(0xFFB45309)),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Walk-In Intake',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -2496,6 +2625,1006 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(color: const Color(0xFFCBD5E1), width: 2),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LOG WALK-IN REPORT MODAL DIALOG
+// ═══════════════════════════════════════════════════════════════
+class _WalkInReportDialog extends StatefulWidget {
+  final SupabaseClient supabase;
+  final VoidCallback onReportSubmitted;
+
+  const _WalkInReportDialog({
+    required this.supabase,
+    required this.onReportSubmitted,
+  });
+
+  @override
+  State<_WalkInReportDialog> createState() => _WalkInReportDialogState();
+}
+
+class _WalkInReportDialogState extends State<_WalkInReportDialog> {
+  final _formKey = GlobalKey<FormState>();
+
+  static const List<String> _violationCategories = [
+    '"Hot Meat" Operations (Clandestine Slaughter)',
+    'The Dog and Cat Meat Trade',
+    'Slaughter of Prohibited Livestock (Carabao/Horse)',
+    'Severe Animal Cruelty & Torture During Slaughter',
+    'General / Other Illegal Slaughter Violation',
+  ];
+
+  static const List<String> _initialStatuses = [
+    'Acknowledged',
+    'Pending Review',
+    'Investigating',
+  ];
+
+  bool _isRegisteredClient = true;
+  bool _isLoadingClients = true;
+  List<Map<String, dynamic>> _allClients = [];
+  List<Map<String, dynamic>> _filteredClients = [];
+  Map<String, dynamic>? _selectedClient;
+
+  final TextEditingController _clientSearchCtrl = TextEditingController();
+  final TextEditingController _nameCtrl = TextEditingController();
+  final TextEditingController _phoneCtrl = TextEditingController();
+  final TextEditingController _addressCtrl = TextEditingController();
+  final TextEditingController _idTypeCtrl = TextEditingController();
+
+  late String _selectedCategory;
+  late String _selectedStatus;
+  final TextEditingController _locationCtrl = TextEditingController();
+  final TextEditingController _dateCtrl = TextEditingController();
+  final TextEditingController _descriptionCtrl = TextEditingController();
+  final TextEditingController _receivingOfficerCtrl = TextEditingController();
+
+  Uint8List? _evidenceBytes;
+  String? _evidenceFileName;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCategory = _violationCategories.first;
+    _selectedStatus = 'Acknowledged'; // Standard for in-person walk-ins
+    _dateCtrl.text = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    _initOfficerName();
+    _fetchClients();
+  }
+
+  @override
+  void dispose() {
+    _clientSearchCtrl.dispose();
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _idTypeCtrl.dispose();
+    _locationCtrl.dispose();
+    _dateCtrl.dispose();
+    _descriptionCtrl.dispose();
+    _receivingOfficerCtrl.dispose();
+    super.dispose();
+  }
+
+  void _initOfficerName() {
+    final user = widget.supabase.auth.currentUser;
+    final metaName = user?.userMetadata?['full_name'] as String?;
+    if (metaName != null && metaName.trim().isNotEmpty) {
+      _receivingOfficerCtrl.text = metaName.trim();
+    } else {
+      _receivingOfficerCtrl.text = 'Abattoir Intake Officer';
+    }
+  }
+
+  Future<void> _fetchClients() async {
+    try {
+      final res = await widget.supabase
+          .from('profiles')
+          .select('id, display_name, phone_number, address, email, role');
+      final list = <Map<String, dynamic>>[];
+      for (final item in res) {
+        final m = Map<String, dynamic>.from(item);
+        final name = (m['display_name'] ?? m['email'] ?? '').toString().trim();
+        if (name.isNotEmpty) {
+          list.add({
+            'id': m['id'],
+            'name': name,
+            'phone': m['phone_number'] ?? '',
+            'address': m['address'] ?? '',
+            'role': m['role'] ?? 'client',
+            'email': m['email'] ?? '',
+          });
+        }
+      }
+
+      // Also merge registered dealers if available
+      try {
+        final dealers = await widget.supabase
+            .from('regular_dealers')
+            .select('id, dealer_name, contact_number, stall_address, dealer_code');
+        for (final d in dealers) {
+          final dm = Map<String, dynamic>.from(d);
+          final dName = (dm['dealer_name'] ?? '').toString().trim();
+          if (dName.isNotEmpty &&
+              !list.any((c) => c['name'].toLowerCase() == dName.toLowerCase())) {
+            list.add({
+              'id': null,
+              'name': dName,
+              'phone': dm['contact_number'] ?? '',
+              'address': dm['stall_address'] ?? 'Tabaco Public Market',
+              'role': 'Regular Meat Dealer',
+              'email': '',
+            });
+          }
+        }
+      } catch (_) {}
+
+      list.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+
+      if (mounted) {
+        setState(() {
+          _allClients = list;
+          _filteredClients = list;
+          _isLoadingClients = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingClients = false);
+    }
+  }
+
+  void _onSearchClients(String query) {
+    final q = query.trim().toLowerCase();
+    setState(() {
+      if (q.isEmpty) {
+        _filteredClients = _allClients;
+      } else {
+        _filteredClients = _allClients.where((c) {
+          final name = (c['name'] as String).toLowerCase();
+          final phone = (c['phone'] as String).toLowerCase();
+          final addr = (c['address'] as String).toLowerCase();
+          return name.contains(q) || phone.contains(q) || addr.contains(q);
+        }).toList();
+      }
+    });
+  }
+
+  void _selectClient(Map<String, dynamic> client) {
+    setState(() {
+      _selectedClient = client;
+      _nameCtrl.text = client['name'] ?? '';
+      _phoneCtrl.text = client['phone'] ?? '';
+      _addressCtrl.text = client['address'] ?? '';
+      _clientSearchCtrl.clear();
+      _filteredClients = _allClients;
+    });
+  }
+
+  void _clearSelectedClient() {
+    setState(() {
+      _selectedClient = null;
+      _nameCtrl.clear();
+      _phoneCtrl.clear();
+      _addressCtrl.clear();
+    });
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: now,
+      builder: (ctx, child) {
+        return Theme(
+          data: Theme.of(ctx).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFFEF4444),
+              onPrimary: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null) {
+      setState(() {
+        _dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
+      });
+    }
+  }
+
+  Future<void> _pickEvidence() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+        withData: true,
+      );
+      if (result != null && result.files.isNotEmpty) {
+        final f = result.files.first;
+        if (f.bytes != null) {
+          setState(() {
+            _evidenceBytes = f.bytes;
+            _evidenceFileName = f.name;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('File selection error: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _submitReport() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (_isRegisteredClient && _selectedClient == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a registered client/dealer or switch to Manual Walk-In Citizen.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      // 1. Upload photo if present
+      String? photoUrl;
+      if (_evidenceBytes != null && _evidenceFileName != null) {
+        final ext = _evidenceFileName!.split('.').last.toLowerCase();
+        final contentType = ext == 'pdf'
+            ? 'application/pdf'
+            : (ext == 'png' ? 'image/png' : 'image/jpeg');
+        final storagePath = 'walk_in/${DateTime.now().millisecondsSinceEpoch}_$_evidenceFileName';
+
+        try {
+          await widget.supabase.storage.from('report-evidence').uploadBinary(
+                storagePath,
+                _evidenceBytes!,
+                fileOptions: FileOptions(upsert: true, contentType: contentType),
+              );
+          photoUrl = widget.supabase.storage.from('report-evidence').getPublicUrl(storagePath);
+        } catch (_) {
+          try {
+            await widget.supabase.storage.from('request-documents').uploadBinary(
+                  storagePath,
+                  _evidenceBytes!,
+                  fileOptions: FileOptions(upsert: true, contentType: contentType),
+                );
+            photoUrl = widget.supabase.storage.from('request-documents').getPublicUrl(storagePath);
+          } catch (_) {}
+        }
+      }
+
+      // 2. Reference Number
+      final randSuffix = (math.Random().nextInt(9000) + 1000).toString();
+      final refNo = 'WI-RPT-${DateTime.now().year}-$randSuffix';
+
+      final officer = _receivingOfficerCtrl.text.trim();
+      final idInfo = _idTypeCtrl.text.trim();
+      final fullDesc = '[Walk-In Intake | Officer: ${officer.isNotEmpty ? officer : "Desk Staff"}] '
+          '[Category: $_selectedCategory] '
+          '${_descriptionCtrl.text.trim()}'
+          '${idInfo.isNotEmpty ? " | Valid ID: $idInfo" : ""}'
+          '${_addressCtrl.text.trim().isNotEmpty ? " | Reporter Address: ${_addressCtrl.text.trim()}" : ""}';
+
+      // 3. Insert report
+      final inserted = await widget.supabase.from('reports').insert({
+        'user_id': _selectedClient != null ? _selectedClient!['id'] : null,
+        'location': _locationCtrl.text.trim(),
+        'incident_date': _dateCtrl.text.trim(),
+        'description': fullDesc,
+        'photo_url': photoUrl,
+        'is_anonymous': false,
+        'reporter_name': _nameCtrl.text.trim().isNotEmpty ? _nameCtrl.text.trim() : 'Walk-In Citizen',
+        'contact_number': _phoneCtrl.text.trim().isNotEmpty ? _phoneCtrl.text.trim() : null,
+        'status': _selectedStatus,
+        'reference_no': refNo,
+      }).select().single();
+
+      // 4. Notifications
+      try {
+        await widget.supabase.from('notifications').insert({
+          'user_id': null, // broadcast to all staff
+          'title': '🚨 Walk-In Report Logged: $_selectedCategory ($refNo)',
+          'message': 'Walk-in citizen complaint logged at the abattoir counter.\nRef: $refNo\nReporter: ${_nameCtrl.text.trim()}\nLocation: ${_locationCtrl.text.trim()}\nOfficer: $officer',
+          'is_read': false,
+          'type': 'admin_illegal_report',
+          'reference_no': refNo,
+          'data': {
+            'reference_no': refNo,
+            'report_id': inserted['id'],
+            'report_source': 'walk_in',
+            'violation_category': _selectedCategory,
+            'location': _locationCtrl.text.trim(),
+            'incident_date': _dateCtrl.text.trim(),
+            'reporter_name': _nameCtrl.text.trim(),
+            'contact_number': _phoneCtrl.text.trim(),
+            'status': _selectedStatus,
+            'receiving_officer': officer,
+          },
+        });
+
+        if (_selectedClient != null && _selectedClient!['id'] != null) {
+          await widget.supabase.from('notifications').insert({
+            'user_id': _selectedClient!['id'],
+            'title': '✅ Walk-In Report Recorded ($refNo)',
+            'message': 'Your in-person report regarding "$_selectedCategory" filed at Tabaco City Slaughterhouse has been recorded.\nRef: $refNo\nStatus: $_selectedStatus',
+            'is_read': false,
+            'type': 'report_filed',
+            'reference_no': refNo,
+            'data': {
+              'reference_no': refNo,
+              'report_id': inserted['id'],
+              'report_source': 'walk_in',
+              'status': _selectedStatus,
+            },
+          });
+        }
+      } catch (e) {
+        debugPrint('Notification insert error: $e');
+      }
+
+      if (mounted) {
+        Navigator.of(context).pop();
+        widget.onReportSubmitted();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Walk-In Report $refNo logged successfully!'),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit report: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    }
+  }
+
+  InputDecoration _fieldDeco(String hint, {IconData? prefixIcon}) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+      prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 17, color: const Color(0xFF64748B)) : null,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      filled: true,
+      fillColor: const Color(0xFFF8FAFC),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.6),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(String text, IconData icon) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: const Color(0xFFEF4444)),
+        const SizedBox(width: 6),
+        Text(
+          text,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.6,
+            color: Color(0xFF0F172A),
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogWidth = screenWidth < 740 ? screenWidth * 0.95 : 680.0;
+
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        width: dialogWidth,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.90,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 36,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header ──
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              color: const Color(0xFFFFF1F2),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.person_add_alt_1_rounded, size: 20, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Log Walk-In Illegal Slaughter Report',
+                          style: TextStyle(
+                            fontSize: 16.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Document an in-person citizen complaint or hot meat tip filed directly at the abattoir counter.',
+                          style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20, color: Color(0xFF64748B)),
+                    onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, thickness: 1, color: Color(0xFFFECDD3)),
+
+            // ── Scrollable Body ──
+            Flexible(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(22),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // SECTION 1: REPORTER IDENTITY
+                      _sectionTitle('1. REPORTER CREDENTIALS & IDENTITY', Icons.badge_outlined),
+                      const SizedBox(height: 10),
+
+                      // Mode Switcher Tabs
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: InkWell(
+                                onTap: _isSubmitting
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          _isRegisteredClient = true;
+                                        });
+                                      },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: _isRegisteredClient ? Colors.white : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: _isRegisteredClient
+                                        ? [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(alpha: 0.05),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 1),
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.person_search_rounded,
+                                        size: 16,
+                                        color: _isRegisteredClient ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Registered Client / Dealer',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: _isRegisteredClient ? FontWeight.w700 : FontWeight.w500,
+                                          color: _isRegisteredClient ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              child: InkWell(
+                                onTap: _isSubmitting
+                                    ? null
+                                    : () {
+                                        setState(() {
+                                          _isRegisteredClient = false;
+                                          _clearSelectedClient();
+                                        });
+                                      },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: !_isRegisteredClient ? Colors.white : Colors.transparent,
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: !_isRegisteredClient
+                                        ? [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(alpha: 0.05),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 1),
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.edit_note_rounded,
+                                        size: 16,
+                                        color: !_isRegisteredClient ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Manual Walk-In Citizen',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: !_isRegisteredClient ? FontWeight.w700 : FontWeight.w500,
+                                          color: !_isRegisteredClient ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Tab 1: Registered Client Selector
+                      if (_isRegisteredClient) ...[
+                        if (_selectedClient == null) ...[
+                          TextField(
+                            controller: _clientSearchCtrl,
+                            onChanged: _onSearchClients,
+                            decoration: _fieldDeco('Search registered client by name, phone, or barangay...', prefixIcon: Icons.search),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            height: 140,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: _isLoadingClients
+                                ? const Center(child: CircularProgressIndicator(color: Color(0xFFEF4444), strokeWidth: 2))
+                                : _filteredClients.isEmpty
+                                    ? const Center(
+                                        child: Text(
+                                          'No matching registered clients found.\nTry manual walk-in entry instead.',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+                                        ),
+                                      )
+                                    : ListView.separated(
+                                        itemCount: _filteredClients.length,
+                                        separatorBuilder: (context, index) => const Divider(height: 1, thickness: 1, color: Color(0xFFF1F5F9)),
+                                        itemBuilder: (ctx, i) {
+                                          final c = _filteredClients[i];
+                                          return ListTile(
+                                            dense: true,
+                                            visualDensity: VisualDensity.compact,
+                                            leading: CircleAvatar(
+                                              radius: 14,
+                                              backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                              child: Text(
+                                                (c['name'] as String).substring(0, 1).toUpperCase(),
+                                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
+                                              ),
+                                            ),
+                                            title: Text(
+                                              c['name'],
+                                              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                                            ),
+                                            subtitle: Text(
+                                              '${c['phone']} • ${c['address']}',
+                                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            trailing: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFE2E8F0),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                c['role'].toString().toUpperCase(),
+                                                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                                              ),
+                                            ),
+                                            onTap: () => _selectClient(c),
+                                          );
+                                        },
+                                      ),
+                          ),
+                        ] else ...[
+                          // Card showing selected client credentials
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF86EFAC)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF22C55E),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.check, size: 16, color: Colors.white),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(
+                                            _selectedClient!['name'],
+                                            style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFFDCFCE7),
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              _selectedClient!['role'].toString().toUpperCase(),
+                                              style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '📞 ${_selectedClient!['phone']}   📍 ${_selectedClient!['address']}',
+                                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  onPressed: _clearSelectedClient,
+                                  icon: const Icon(Icons.edit, size: 14, color: Color(0xFF15803D)),
+                                  label: const Text('Change', style: TextStyle(fontSize: 11.5, color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ] else ...[
+                        // Tab 2: Manual Walk-In Citizen Form Fields
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextFormField(
+                                controller: _nameCtrl,
+                                decoration: _fieldDeco('Full Legal Name *', prefixIcon: Icons.person_outline),
+                                validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 2,
+                              child: TextFormField(
+                                controller: _phoneCtrl,
+                                decoration: _fieldDeco('Contact Number', prefixIcon: Icons.phone_outlined),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: TextFormField(
+                                controller: _addressCtrl,
+                                decoration: _fieldDeco('Barangay / Address in Tabaco City', prefixIcon: Icons.home_outlined),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              flex: 2,
+                              child: TextFormField(
+                                controller: _idTypeCtrl,
+                                decoration: _fieldDeco('Valid ID Presented (Optional)', prefixIcon: Icons.badge_outlined),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+
+                      // SECTION 2: INCIDENT & VIOLATION DETAILS
+                      _sectionTitle('2. INCIDENT & VIOLATION SPECIFICATIONS', Icons.warning_amber_rounded),
+                      const SizedBox(height: 10),
+
+                      // Violation Category Dropdown
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedCategory,
+                            isExpanded: true,
+                            icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFEF4444)),
+                            style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A), fontWeight: FontWeight.w600),
+                            items: _violationCategories.map((c) {
+                              return DropdownMenuItem(
+                                value: c,
+                                child: Text(c, overflow: TextOverflow.ellipsis),
+                              );
+                            }).toList(),
+                            onChanged: _isSubmitting ? null : (v) {
+                              if (v != null) setState(() => _selectedCategory = v);
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Incident Location & Date
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextFormField(
+                              controller: _locationCtrl,
+                              decoration: _fieldDeco('Incident Location (Barangay / Street / Landmark) *', prefixIcon: Icons.location_on_outlined),
+                              validator: (v) => (v == null || v.trim().isEmpty) ? 'Location is required' : null,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: InkWell(
+                              onTap: _isSubmitting ? null : _pickDate,
+                              child: IgnorePointer(
+                                child: TextFormField(
+                                  controller: _dateCtrl,
+                                  decoration: _fieldDeco('Date of Incident *', prefixIcon: Icons.calendar_today_outlined),
+                                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Detailed Description / Observations
+                      TextFormField(
+                        controller: _descriptionCtrl,
+                        maxLines: 3,
+                        decoration: _fieldDeco('Describe observed illegal slaughter activity, head count, vehicles, or suspects *'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Description is required' : null,
+                      ),
+                      const SizedBox(height: 20),
+
+                      // SECTION 3: ADMINISTRATIVE PROCESSING
+                      _sectionTitle('3. ADMINISTRATIVE PROCESSING & EVIDENCE', Icons.admin_panel_settings_outlined),
+                      const SizedBox(height: 10),
+
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: TextFormField(
+                              controller: _receivingOfficerCtrl,
+                              decoration: _fieldDeco('Receiving Abattoir Officer *', prefixIcon: Icons.shield_outlined),
+                              validator: (v) => (v == null || v.trim().isEmpty) ? 'Officer name is required' : null,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _selectedStatus,
+                                  isExpanded: true,
+                                  icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFEF4444)),
+                                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF0F172A), fontWeight: FontWeight.w600),
+                                  items: _initialStatuses.map((s) {
+                                    return DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s),
+                                    );
+                                  }).toList(),
+                                  onChanged: _isSubmitting ? null : (v) {
+                                    if (v != null) setState(() => _selectedStatus = v);
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Evidence Attachment Button
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.attach_file, size: 18, color: Color(0xFF64748B)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _evidenceFileName != null ? 'Attached: $_evidenceFileName' : 'Attach Photo or Supporting Document (Optional)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: _evidenceFileName != null ? FontWeight.bold : FontWeight.normal,
+                                  color: _evidenceFileName != null ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (_evidenceFileName != null)
+                              IconButton(
+                                icon: const Icon(Icons.close, size: 16, color: Colors.grey),
+                                onPressed: () {
+                                  setState(() {
+                                    _evidenceBytes = null;
+                                    _evidenceFileName = null;
+                                  });
+                                },
+                              )
+                            else
+                              OutlinedButton.icon(
+                                onPressed: _isSubmitting ? null : _pickEvidence,
+                                icon: const Icon(Icons.upload_file, size: 14),
+                                label: const Text('Browse File', style: TextStyle(fontSize: 11)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+
+            // ── Modal Actions Footer ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton(
+                    onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF475569),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 10),
+                  ElevatedButton.icon(
+                    onPressed: _isSubmitting ? null : _submitReport,
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded, size: 16),
+                    label: Text(
+                      _isSubmitting ? 'Submitting...' : 'Log Walk-In Report',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -31,12 +31,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     setState(() => _isLoading = true);
+    final rawInput = _emailController.text.trim();
+    final password = _passwordController.text.trim();
     try {
       // ignore: avoid_print
-      print('Attempting login for: ${_emailController.text.trim()}');
+      print('Attempting login for: $rawInput');
       final response = await _authService.signIn(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
+        rawInput,
+        password,
       );
       // ignore: avoid_print
       print('Login response received: ${response.user?.id}');
@@ -68,40 +70,66 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         } else {
           // Check live status of the account via RPC to determine exact error
-          bool isAccountUnverifiedOrNonExistent = true;
+          bool isPasswordError = false;
+          bool isUnverified = false;
+
           try {
+            String checkIdentifier = rawInput;
+            if (!checkIdentifier.contains('@')) {
+              final linkedEmail = await _authService.findEmailForPhone(checkIdentifier);
+              if (linkedEmail != null && linkedEmail.isNotEmpty) {
+                checkIdentifier = linkedEmail;
+              } else {
+                checkIdentifier = _authService.formatToE164Phone(checkIdentifier);
+              }
+            }
+
             final res = await Supabase.instance.client.rpc(
               'check_account_status',
-              params: {'identifier': _emailController.text.trim()},
+              params: {'identifier': checkIdentifier},
             );
             if (res != null) {
               final Map data = res is Map ? res : jsonDecode(res.toString());
               final bool exists = data['exists'] == true;
               final bool isVerified = data['is_verified'] == true;
               if (exists && isVerified) {
-                isAccountUnverifiedOrNonExistent = false;
+                isPasswordError = true;
+              } else if (exists && !isVerified) {
+                isUnverified = true;
               } else {
-                isAccountUnverifiedOrNonExistent = true;
+                isPasswordError = false;
+                isUnverified = false;
+              }
+            } else {
+              final exists = await _authService.isAccountExists(rawInput);
+              if (exists) {
+                isPasswordError = true;
               }
             }
           } catch (_) {
-            // Fallback: check error text
-            if (lower.contains('email not confirmed') ||
-                lower.contains('not confirmed') ||
-                lower.contains('user not found') ||
-                lower.contains('not registered') ||
-                lower.contains('no user')) {
-              isAccountUnverifiedOrNonExistent = true;
+            // Fallback: check database directly
+            final exists = await _authService.isAccountExists(rawInput);
+            if (exists) {
+              if (lower.contains('email not confirmed') ||
+                  lower.contains('not confirmed') ||
+                  lower.contains('unverified')) {
+                isUnverified = true;
+              } else {
+                isPasswordError = true;
+              }
             } else {
-              isAccountUnverifiedOrNonExistent = false;
+              isPasswordError = false;
+              isUnverified = false;
             }
           }
 
           if (mounted) {
-            if (isAccountUnverifiedOrNonExistent) {
+            if (isUnverified) {
               _showFacebookStyleLoginErrorDialog(isUnverified: true);
-            } else {
+            } else if (isPasswordError) {
               _showFacebookStyleLoginErrorDialog(isPasswordError: true);
+            } else {
+              _showFacebookStyleLoginErrorDialog(isPasswordError: false, isUnverified: false);
             }
           }
         }
@@ -175,12 +203,25 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
               InkWell(
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(ctx);
                   if (isUnverified) {
                     Navigator.pushNamed(context, '/SIGNUP');
                   } else if (isPasswordError) {
-                    Navigator.pushNamed(context, '/FORGOT_PASSWORD');
+                    final identifierFromReset = await Navigator.push<String>(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ForgotPasswordScreen(
+                          initialIdentifier: _emailController.text.trim().isNotEmpty
+                              ? _emailController.text.trim()
+                              : null,
+                        ),
+                      ),
+                    );
+                    if (identifierFromReset != null && identifierFromReset.isNotEmpty) {
+                      _emailController.text = identifierFromReset;
+                    }
+                    _passwordController.clear();
                   } else {
                     Navigator.pushNamed(context, '/SIGNUP');
                   }
@@ -315,6 +356,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       hint: "Enter email or phone Number",
                       icon: Icons.mail_outline,
                       controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      textCapitalization: TextCapitalization.none,
+                      autocorrect: false,
                     ),
                     const SizedBox(height: 20),
                     _buildInputField(
@@ -487,6 +531,9 @@ class _LoginScreenState extends State<LoginScreen> {
     bool obscureText = false,
     TextEditingController? controller,
     VoidCallback? onToggleVisibility,
+    TextInputType keyboardType = TextInputType.text,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    bool autocorrect = true,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -498,6 +545,9 @@ class _LoginScreenState extends State<LoginScreen> {
       child: TextField(
         controller: controller,
         obscureText: obscureText,
+        keyboardType: keyboardType,
+        textCapitalization: textCapitalization,
+        autocorrect: autocorrect,
         decoration: InputDecoration(
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
