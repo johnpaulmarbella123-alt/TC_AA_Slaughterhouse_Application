@@ -10,6 +10,8 @@ import '../services/notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/regular_dealers_service.dart';
+import 'package:flutter/services.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
   const ReceivingRequestsPage({super.key});
@@ -353,6 +355,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                 TextField(
                   controller: markingCtrl,
                   textCapitalization: TextCapitalization.characters,
+                  inputFormatters: const [UpperCaseTextFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Permanent Marking Tag',
                     border: OutlineInputBorder(),
@@ -878,6 +881,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                 children: [
                   TextField(
                     controller: nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Customer Name',
                       border: OutlineInputBorder(),
@@ -918,6 +923,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                         child: TextField(
                           controller: markingCtrl,
                           textCapitalization: TextCapitalization.characters,
+                          inputFormatters: const [UpperCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Marking Tag',
                             border: OutlineInputBorder(),
@@ -940,6 +946,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                   TextField(
                     controller: noteCtrl,
                     maxLines: 2,
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [SentencesCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Special Instructions',
                       border: OutlineInputBorder(),
@@ -2339,6 +2347,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 _markingCtrl,
                 'Enter unique marking (e.g., MK, MK-1)..',
                 readOnly: _isMarkingLocked,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: const [UpperCaseTextFormatter()],
               ),
               const SizedBox(height: 18),
 
@@ -2582,12 +2592,16 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     TextInputType keyboardType = TextInputType.text,
     FocusNode? focusNode,
     bool readOnly = false,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       controller: ctrl,
       focusNode: focusNode,
       readOnly: readOnly,
       keyboardType: keyboardType,
+      textCapitalization: textCapitalization,
+      inputFormatters: inputFormatters,
       style: TextStyle(
         fontSize: 13,
         fontWeight: readOnly ? FontWeight.bold : FontWeight.normal,
@@ -2635,6 +2649,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 return TextField(
                   controller: controller,
                   focusNode: focusNode,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
                   style: const TextStyle(fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Type surname, full name, or marking (e.g. Bondad, 4)...',
@@ -2836,6 +2852,8 @@ class _RejectDialogState extends State<_RejectDialog> {
             TextField(
               controller: _controller,
               maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [SentencesCapitalizationFormatter()],
               decoration: InputDecoration(
                 filled: true,
                 fillColor: const Color(0xFFF7FAFC),

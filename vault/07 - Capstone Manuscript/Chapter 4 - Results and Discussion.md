@@ -205,102 +205,95 @@ Logical design represents an abstract, implementation-independent blueprint of t
 
 #### Proposed System Flowchart
 
-The Proposed System Flowchart depicted in Figure 20 defines the dual-track operational algorithm, role-based dispatcher, decision trees, and cross-functional interactions governing animal intake, clinical triage, payment processing, meat release, and administrative oversight within the Tabaco City Slaughterhouse. Immediately following GoTrue authentication, the system evaluates the active user session via an **Account Type Router**, branching into two synchronized tracks:
+The Proposed System Flowchart depicted in Figure 20 defines the dual-track operational algorithm, role-based dispatcher, decision trees, and cross-functional interactions governing animal intake, clinical triage, payment processing, meat release, and administrative oversight within the Tabaco City Slaughterhouse. Immediately upon launching the system, the **Account Type / Platform Router** branches into two synchronized tracks with their respective authentication protocols:
 
-1. **Track 1: Internal Staff Cascading Role Dispatcher (`Internal User`)**:
+1. **Track 1: Internal Staff Cascading Role Dispatcher (`Internal User — Web Admin Portal`)**:
+   - **Staff Authentication (`Staff Authenticated?`)**: Internal abattoir personnel authenticate strictly via administrator-provisioned **Email & Password** credentials (`signInWithPassword`) without public registration or OTP requirements.
    - **Administrator (`Is Admin? == Yes`)**: Routes to the **Admin Workstation**. While retaining full superuser access across all operational modules (Receiving, Document Verification, Slaughter Inspection, Cashiering, Meat Releasing), the Administrator's primary focus centers on **Reports & Records**—specifically compiling the official Daily Slaughterhouse Production Report (formatted as a legal-sized 8.5" × 14" document complying with National Meat Inspection Service [NMIS] regulatory standards), generating municipal fiscal audit ledgers, and investigating whistleblower incident dossiers for inter-agency enforcement with the City Veterinary Office (CVO) and Philippine National Police (PNP).
    - **Receiving Clerk & Cashier (`Is Clerk? == Yes`)**: Routes to the **Clerk Workstation**, governing front-of-house intake and financial settlement: (a) *Receiving & New Requests* (evaluating daily corral capacity and barangay/market delivery quotas), (b) *Document Verification* (auditing physical livestock ear-tags against uploaded Veterinary Health Certificates and shipping permits), (c) *Payment & Cashiering* (computing municipal tariffs, accepting over-the-counter cash tendered or verifying digital PayMongo webhook settlements, and issuing Official Receipts `RCP-YYYY-XXX`), and (d) *Meat Releasing* (scanning the cryptographically signed QR gate pass at the dispatch loading dock and stamping `released_at = NOW()`).
    - **Veterinary Meat Inspector (`Is Inspector? == Yes`)**: Routes to the **Inspector Workstation**, commanding abattoir floor operations and biological safety checks: (a) *Clinical Ante-Mortem Inspection* at holding pens (quarantining or incinerating unfit livestock under Condemnation Slip `CS-YYYY-XXX`), (b) *Slaughter Operations Line Supervision* across hygienic stations (stunning, bleeding, scalding/dehairing, evisceration, splitting), (c) *Post-Mortem Visceral Pathology* on carcasses and offal, and (d) *Calibrated Carcass Weighing (kg)* and stamping digital Meat Inspection Certificates (MIC).
 
-2. **Track 2: Customer / Client Service Pipeline (`Customer / Client`)**:
+2. **Track 2: Customer / Client Service Pipeline (`Customer / Client — Mobile App`)**:
+   - **Customer Authentication & Mobile Sign-Up OTP (`Customer Authenticated?`)**: Returning customers sign in using their registered Email/Password, while new customers registering on the mobile application must complete **Sign-Up with One-Time Password (OTP) Verification** to validate account ownership.
    - **Action Type Selection**: Allows registered meat dealers, market vendors, or walk-in citizens to choose between filing a *Whistleblower Tip* (attaching GPS geolocation and photographic evidence of clandestine slaughter) or initiating a *Slaughter Service Request*.
    - **End-to-End Service Progression & Cross-Functional Gatekeeping**: The customer's slaughter request progresses sequentially through each physical and digital gate—Intake Approval $\rightarrow$ Document Verification $\rightarrow$ Ante-Mortem Inspection $\rightarrow$ Slaughter Operations Line $\rightarrow$ Post-Mortem Inspection $\rightarrow$ Carcass Weighing & MIC $\rightarrow$ Municipal Fee Computation $\rightarrow$ Multi-Channel Payment Settlement $\rightarrow$ Dispatch Loading Dock Verification $\rightarrow$ Confirmed Pickup. Dotted cross-links explicitly illustrate how the Clerk, Inspector, and Administrator workstations drive each stage of the customer's transaction lifecycle.
    - **Multi-Channel Payment Gateway**: Expanding beyond single-wallet GCash, the payment stage integrates a comprehensive **PayMongo Multi-Channel Online Gateway** supporting **GCash, Maya, GrabPay, Visa/Mastercard credit and debit cards, and national QR Ph standards** with automated serverless webhook signature validation (`Status == 'paid'`), operating alongside traditional municipal over-the-counter cash cashiering.
 
 ```mermaid
 flowchart TD
-    StartApp([Start: App Launch]) --> AuthCheck{"User Authenticated?"}
-    
-    AuthCheck -- "No" --> LoginProc["Login / OTP Verification"] --> AuthCheck
-    
-    AuthCheck -- "Yes" --> AccountType{"Account Type?"}
+    Start([Start]) --> AccountType{"Account Type?"}
 
-    %% ═════════════════════════════════════════════
-    %% TRACK 1: INTERNAL STAFF ROLES (Left Track)
-    %% ═════════════════════════════════════════════
-    AccountType -- "Internal User" --> CheckAdmin{"Is Admin?"}
-    
-    CheckAdmin -- "Yes" --> AdminWorkstation["<b>[Admin Workstation]</b><br/>• Primary Focus: Reports & Records<br/>• Legal NMIS Daily Production PDF (8.5x14)<br/>• Municipal Revenue Ledgers & Audits<br/>• Whistleblower Investigation & Legal Dossier"]
-    
-    CheckAdmin -- "No" --> CheckClerk{"Is Clerk?"}
-    
-    CheckClerk -- "Yes" --> ClerkWorkstation["<b>[Clerk Workstation]</b><br/>• Receiving & New Requests Queue<br/>• Document Verification & Pen Allocation<br/>• Municipal Fee Invoicing & Cashiering<br/>• Dispatch Loading Dock Meat Releasing"]
-    
-    CheckClerk -- "No" --> CheckInspector{"Is Inspector?"}
-    
-    CheckInspector -- "Yes" --> InspectorWorkstation["<b>[Inspector Workstation]</b><br/>• Clinical Ante-Mortem Health Check<br/>• Slaughter Operations Line Supervision<br/>• Post-Mortem Visceral Pathology<br/>• Carcass Weighing & Digital MIC Issuance"]
+    %% ─── AUTHENTICATION & ROLE ROUTING ───
+    AccountType -- "Staff" --> StaffAuth{"Staff Authenticated?"}
+    StaffAuth -- "No" --> StaffLogin["Staff Login"] --> StaffAuth
+    StaffAuth -- "Yes" --> IsAdmin{"Admin?"}
 
-    %% ═════════════════════════════════════════════
-    %% TRACK 2: CUSTOMER / CLIENT (Right Track)
-    %% ═════════════════════════════════════════════
-    AccountType -- "Customer / Client" --> ActionType{"Select Action Type"}
+    IsAdmin -- "No" --> IsClerk{"Clerk?"}
+    IsClerk -- "No" --> IsInspector{"Inspector?"}
 
-    %% Whistleblower Branch
-    ActionType -- "Whistleblower Tip" --> WbSubmit["[Customer / Citizen]<br/>Submit Illegal Slaughter Report<br/>(GPS Geolocation + Photo Evidence)"]
-    WbSubmit --> WbReview["Admin Investigation & Legal Dossier<br/>(Escalate to CVO / NMIS / PNP)"] --> EndApp([End])
+    AccountType -- "Customer" --> CustAuth{"Customer Authenticated?"}
+    CustAuth -- "No" --> CustLogin["Login / Sign-Up (OTP)"] --> CustAuth
 
-    %% Slaughter Service Pipeline
-    ActionType -- "Slaughter Service" --> ReqSubmit["[Customer]<br/>Submit Request Schedule<br/>(Barangay/Market Queue + Upload Permits)"]
+    %% ─── STAGE 1: CUSTOMER REQUEST ───
+    subgraph Stage1 ["Stage 1: Customer Request [Customer]"]
+        CustAuth -- "Yes" --> ActionType{"Action Type?"}
+        ActionType -- "Whistleblower" --> WbSubmit["Submit Illegal Report"]
+        ActionType -- "Slaughter Service" --> SubmitReq["Submit Request"]
+    end
 
-    ReqSubmit --> IntakeApprove{"Admin Intake Approved?<br/>(Check Quota & Pen Capacity)"}
-    IntakeApprove -- "No" --> RejectNotif["Dispatch Rejection Notification"] --> EndApp
-    
-    IntakeApprove -- "Yes" --> DocVerify{"Document Verification Passed?<br/>(Ear-Tags vs VHC Permits)"}
-    DocVerify -- "No" --> CancelBooking["Set Status = 'cancelled' & Notify"] --> EndApp
-    
-    DocVerify -- "Yes" --> AnteExam{"Ante-Mortem Inspection Passed?<br/>(Clinical Corral Health Check)"}
-    AnteExam -- "No (Condemned)" --> AnteFail["Set Status = 'anti_mortem_failed'<br/>Notice (CS-YYYY-XXX) / Quarantine"] --> EndApp
-    
-    AnteExam -- "Yes" --> SlaughterLine["Slaughter Operations Line<br/>(Stunning, Bleeding, Scalding, Evisceration)"]
-    
-    SlaughterLine --> PostExam{"Post-Mortem Inspection Passed?<br/>(Visceral Pathology & Carcass Check)"}
-    PostExam -- "No (Condemned)" --> PostFail["Set Status = 'post_mortem_failed'<br/>Log Findings & Confiscate Carcass"] --> EndApp
-    
-    PostExam -- "Yes" --> WeighCarcass["Record Net Carcass Weight (kg)<br/>Generate Digital MIC Record"]
-    
-    WeighCarcass --> ComputeFees["Compute Municipal Fees & Invoices<br/>(Vet, Permit, Facility, Corral, Weight, Van)"]
-    
-    ComputeFees --> PayMethod{"Select Payment Method"}
-    
-    PayMethod -- "Online E-Payment" --> OnlinePay["PayMongo Multi-Channel Gateway<br/>(GCash, Maya, GrabPay, Cards, QR Ph)<br/>Create Checkout Session ➔ Settle"]
-    OnlinePay --> WebhookVerify["Webhook Signature Verification<br/>(Payment Status == 'paid')"]
-    
-    PayMethod -- "Over-the-Counter Cash" --> CashPay["Cashier Receives Physical Cash<br/>Verify Tendered >= Total ➔ Change"]
-    
-    WebhookVerify --> PaidStamp["Set Status = 'paid'<br/>Generate Official Receipt (RCP-YYYY-XXX)<br/>Generate Scannable QR Gate Pass"]
-    CashPay --> PaidStamp
-    
-    PaidStamp --> GatePassDock["Gate Pass Verification at Dispatch Bay<br/>(Scan Customer QR Code & Log Vehicle Plate)"]
-    
-    GatePassDock --> ConfirmPickup["Confirm Meat Release & Pickup<br/>Set Status = 'completed' (released_at = NOW())"]
-    
-    ConfirmPickup --> AdminReports["Admin Compiles Daily Production PDF (8.5x14)<br/>Generate Revenue Ledgers & Master Audit Records"]
-    
-    AdminReports --> EndApp
+    %% ─── STAGE 2: INTAKE & DOCS ───
+    subgraph Stage2 ["Stage 2: Intake & Verification [Clerk]"]
+        SubmitReq --> IntakeApp{"Intake Approved?"}
+        IntakeApp -- "No" --> RejectNotif["Reject & Notify"]
+        IntakeApp -- "Yes" --> DocsVer{"Docs Verified?"}
+        DocsVer -- "No" --> CancelNotif["Cancel & Notify"]
+    end
 
-    %% ═════════════════════════════════════════════
-    %% INTERACTIVE CROSS-LINKS (Staff to Operations)
-    %% ═════════════════════════════════════════════
-    ClerkWorkstation -. "Performs Intake & Verification" .-> IntakeApprove
-    ClerkWorkstation -. "Performs Cashiering" .-> CashPay
-    ClerkWorkstation -. "Performs Gate Pass Release" .-> GatePassDock
-    
-    InspectorWorkstation -. "Conducts Clinical Exam" .-> AnteExam
-    InspectorWorkstation -. "Supervises Floor" .-> SlaughterLine
-    InspectorWorkstation -. "Conducts Post-Mortem & Weighing" .-> PostExam
-    
-    AdminWorkstation -. "Triages Incident" .-> WbReview
-    AdminWorkstation -. "Generates Master Ledger" .-> AdminReports
+    %% ─── STAGE 3: SLAUGHTER & INSPECTION ───
+    subgraph Stage3 ["Stage 3: Slaughter & Inspection [Inspector]"]
+        DocsVer -- "Yes" --> AnteExam{"Ante-Mortem Passed?"}
+        AnteExam -- "No" --> CondemnAnte["Condemn & Notify"]
+        AnteExam -- "Yes" --> SlaughterLine["Slaughter Line"]
+        SlaughterLine --> PostExam{"Post-Mortem Passed?"}
+        PostExam -- "No" --> CondemnPost["Condemn & Confiscate"]
+        PostExam -- "Yes" --> WeighMIC["Weigh Carcass & MIC"]
+    end
+
+    %% ─── STAGE 4: PAYMENT & MEAT RELEASE ───
+    subgraph Stage4 ["Stage 4: Payment & Release [Clerk / Customer]"]
+        WeighMIC --> ComputeFees["Compute Fees"]
+        ComputeFees --> PayMethod{"Payment Method?"}
+        PayMethod -- "Online" --> OnlinePay["Online (GCash/Maya/Card/QR)"]
+        PayMethod -- "Cash" --> CashPay["Cash Payment"]
+        OnlinePay --> PayVerified{"Payment Verified?"}
+        CashPay --> PayVerified
+        PayVerified -- "No" --> PayMethod
+        PayVerified -- "Yes" --> ReceiptPass["Issue Receipt & QR Pass"]
+        ReceiptPass --> QRValid{"QR Gate Pass Valid?"}
+        QRValid -- "No" --> QRValid
+        QRValid -- "Yes" --> ConfirmPickup["Confirm Pickup"]
+    end
+
+    %% ─── STAGE 5: REPORTS & RECORDS ───
+    subgraph Stage5 ["Stage 5: Reports & Records [Admin]"]
+        WbSubmit --> WbReview["Investigate Report"]
+        ConfirmPickup --> CompilePDF["Compile NMIS Report"]
+        WbReview --> UpdateAudit["Update Audit Records"]
+        CompilePDF --> UpdateAudit
+    end
+
+    %% ─── LOGICAL ROLE HAND-OFFS ───
+    IsClerk -- "Yes" --> IntakeApp
+    IsClerk -- "Yes" --> ComputeFees
+    IsInspector -- "Yes" --> AnteExam
+    IsAdmin -- "Yes" --> WbReview
+    IsAdmin -- "Yes" --> CompilePDF
+
+    RejectNotif --> EndNode([End])
+    CancelNotif --> EndNode
+    CondemnAnte --> EndNode
+    CondemnPost --> EndNode
+    UpdateAudit --> EndNode
 ```
 
 Figure 20. Proposed System Flowchart

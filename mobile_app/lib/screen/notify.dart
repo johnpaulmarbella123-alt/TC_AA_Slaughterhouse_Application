@@ -8,6 +8,7 @@ import 'notification_options_dialog.dart';
 import 'receipt_detail_screen.dart';
 import 'view_status_update_screen.dart';
 import '../services/walk_in_claim_helper.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class NotifyPage extends StatefulWidget {
   /// Callback to switch bottom-nav tab (e.g. index 1 = Requests).
@@ -2876,6 +2877,8 @@ class _RescheduleDialogState extends State<_RescheduleDialog> {
               TextField(
                 controller: _notesController,
                 maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 style: const TextStyle(fontSize: 12),
                 decoration: InputDecoration(
                   hintText: 'e.g., Will bring animals early in the morning',

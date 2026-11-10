@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class WalkInClaimHelper {
   /// Shows the dialog to claim/link an active walk-in slip or permanent dealer marking tag.
@@ -42,6 +43,7 @@ class WalkInClaimHelper {
                 TextField(
                   controller: codeCtrl,
                   textCapitalization: TextCapitalization.characters,
+                  inputFormatters: const [UpperCaseTextFormatter()],
                   decoration: InputDecoration(
                     labelText: 'Reference No. or Marking Tag',
                     hintText: 'e.g. MI-2026-114 or 99',

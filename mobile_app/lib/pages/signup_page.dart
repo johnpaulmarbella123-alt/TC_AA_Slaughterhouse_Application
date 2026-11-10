@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
 import '../screen/how_it_works.dart';
+import '../utils/text_capitalization_formatters.dart';
 import '../widgets/terms_and_conditions_dialog.dart';
 
 class SignupPages extends StatefulWidget {
@@ -308,6 +310,8 @@ class _SignupScreenState
                       hint: "Enter full name",
                       icon: Icons.person_outline,
                       controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
                     ),
 
                     const SizedBox(height: 20),
@@ -336,6 +340,8 @@ class _SignupScreenState
 
                       controller:
                           _addressController,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
                     ),
 
                     const SizedBox(height: 20),
@@ -582,6 +588,7 @@ class _SignupScreenState
     VoidCallback? onToggleVisibility,
     TextInputType keyboardType = TextInputType.text,
     TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
     bool autocorrect = true,
   }) {
 
@@ -611,6 +618,7 @@ class _SignupScreenState
         obscureText: obscureText,
         keyboardType: keyboardType,
         textCapitalization: textCapitalization,
+        inputFormatters: inputFormatters,
         autocorrect: autocorrect,
 
         decoration: InputDecoration(

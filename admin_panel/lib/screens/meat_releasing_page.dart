@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class MeatReleasingPage extends StatefulWidget {
   const MeatReleasingPage({super.key});
@@ -1481,6 +1482,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               const SizedBox(height: 4),
               TextField(
                 controller: driverNameCtrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [WordsCapitalizationFormatter()],
                 decoration: InputDecoration(
                   hintText: 'e.g. Juan Perez',
                   filled: true,
@@ -1494,6 +1497,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               const SizedBox(height: 4),
               TextField(
                 controller: plateCtrl,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: const [UpperCaseTextFormatter()],
                 decoration: InputDecoration(
                   hintText: 'e.g. ABC-1234',
                   filled: true,
@@ -1508,6 +1513,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               TextField(
                 controller: notesCtrl,
                 maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Any special instructions...',
                   filled: true,
@@ -1796,6 +1803,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               const SizedBox(height: 4),
               TextField(
                 controller: dispatcherCtrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [WordsCapitalizationFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Enter verifying staff name...',
                   filled: true,
@@ -2275,6 +2284,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         const SizedBox(height: 4),
                         TextField(
                           controller: claimantNameCtrl,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [WordsCapitalizationFormatter()],
                           decoration: InputDecoration(
                             hintText: 'Name of person physically claiming carcass...',
                             hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
@@ -2295,6 +2306,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                           const SizedBox(height: 4),
                           TextField(
                             controller: claimantIdRefCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            inputFormatters: const [WordsCapitalizationFormatter()],
                             decoration: InputDecoration(
                               hintText: 'e.g. National ID: 1234-5678-9012 (Must inspect physical ID)',
                               hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
@@ -2315,6 +2328,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         const SizedBox(height: 4),
                         TextField(
                           controller: driverNameCtrl,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [WordsCapitalizationFormatter()],
                           decoration: InputDecoration(
                             hintText: 'Driver name and delivery van plate...',
                             hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
@@ -2340,6 +2355,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                                 const SizedBox(height: 4),
                                 TextField(
                                   controller: releaseByCtrl,
+                                  textCapitalization: TextCapitalization.words,
+                                  inputFormatters: const [WordsCapitalizationFormatter()],
                                   decoration: InputDecoration(
                                     hintText: 'Enter verifying staff name...',
                                     hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
@@ -2363,6 +2380,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                                 const SizedBox(height: 4),
                                 TextField(
                                   controller: dispatcherStaffIdCtrl,
+                                  textCapitalization: TextCapitalization.characters,
+                                  inputFormatters: const [UpperCaseTextFormatter()],
                                   decoration: InputDecoration(
                                     hintText: 'e.g. EMP-01',
                                     hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
@@ -2386,6 +2405,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                       TextField(
                         controller: notesCtrl,
                         maxLines: 2,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                         decoration: InputDecoration(
                           hintText: 'Any carcass condition notes, receipt references, etc...',
                           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),

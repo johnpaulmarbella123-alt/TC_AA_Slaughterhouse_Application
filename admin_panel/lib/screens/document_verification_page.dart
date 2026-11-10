@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
   const DocumentVerificationPage({super.key});
@@ -672,6 +673,8 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
           const SizedBox(height: 8),
           TextField(
             controller: _notesCtrl, maxLines: 3, style: const TextStyle(fontSize: 13),
+            textCapitalization: TextCapitalization.sentences,
+            inputFormatters: const [SentencesCapitalizationFormatter()],
             decoration: InputDecoration(
               hintText: 'Add any notes about the documents...', hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
               filled: true, fillColor: const Color(0xFFF7FAFC), contentPadding: const EdgeInsets.all(12),
@@ -953,6 +956,8 @@ class _DocRejectDialogState extends State<_DocRejectDialog> {
         const SizedBox(height: 8),
         TextField(
           controller: _ctrl, maxLines: 3, style: const TextStyle(fontSize: 13),
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: const [SentencesCapitalizationFormatter()],
           decoration: InputDecoration(
             filled: true, fillColor: const Color(0xFFF7FAFC),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),

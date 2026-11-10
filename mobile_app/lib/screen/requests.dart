@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'report_illegal_slaughter_screen.dart';
 import '../services/document_verifier.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class RequestsContent extends StatefulWidget {
   const RequestsContent({super.key});
@@ -1310,6 +1311,8 @@ class _RequestsContentState extends State<RequestsContent> {
                         _customerName.isNotEmpty ? _customerName : "Enter customer name",
                         controller: _customerNameController,
                         readOnly: _isCustomerNameLocked || _customerNameController.text.isNotEmpty,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [WordsCapitalizationFormatter()],
                         prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF1E855A)),
                         suffixIcon: _customerNameController.text.isNotEmpty
                             ? Padding(
@@ -1461,6 +1464,8 @@ class _RequestsContentState extends State<RequestsContent> {
                         "Complete Address",
                         "House No. / Street",
                         controller: _addressController,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [WordsCapitalizationFormatter()],
                       ),
 
                       const SizedBox(height: 32),
@@ -1484,6 +1489,8 @@ class _RequestsContentState extends State<RequestsContent> {
                         "Any specific requests or requirements...",
                         maxLines: 3,
                         controller: _specialInstructionsController,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                       ),
                       const SizedBox(height: 16),
                       _buildTextField(
@@ -1499,6 +1506,7 @@ class _RequestsContentState extends State<RequestsContent> {
                             : [
                                 FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
                                 LengthLimitingTextInputFormatter(5),
+                                const UpperCaseTextFormatter(),
                               ],
                         prefixIcon: _isMarkingLocked
                             ? const Icon(Icons.lock, color: Color(0xFF2D6A4F), size: 18)

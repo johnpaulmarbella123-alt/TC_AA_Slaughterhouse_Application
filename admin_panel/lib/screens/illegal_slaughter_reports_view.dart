@@ -9,6 +9,7 @@ import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/illegal_slaughter_pdf_generator.dart';
 import '../services/notification_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class IllegalSlaughterReportsView extends StatefulWidget {
   final VoidCallback? onReportsUpdated;
@@ -2245,6 +2246,8 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                           TextField(
                             controller: _findingsCtrl,
                             maxLines: 4,
+                            textCapitalization: TextCapitalization.sentences,
+                            inputFormatters: const [SentencesCapitalizationFormatter()],
                             style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
                             decoration: InputDecoration(
                               hintText: 'Enter details from the on-site visit...',
@@ -2515,6 +2518,8 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
                             TextField(
                               controller: _findingsCtrl,
                               maxLines: 4,
+                              textCapitalization: TextCapitalization.sentences,
+                              inputFormatters: const [SentencesCapitalizationFormatter()],
                               style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
                               decoration: InputDecoration(
                                 hintText: 'Update findings from the case...',
@@ -3374,6 +3379,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                               flex: 3,
                               child: TextFormField(
                                 controller: _nameCtrl,
+                                textCapitalization: TextCapitalization.words,
+                                inputFormatters: const [WordsCapitalizationFormatter()],
                                 decoration: _fieldDeco('Full Legal Name *', prefixIcon: Icons.person_outline),
                                 validator: (v) => (v == null || v.trim().isEmpty) ? 'Name is required' : null,
                               ),
@@ -3395,6 +3402,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                               flex: 3,
                               child: TextFormField(
                                 controller: _addressCtrl,
+                                textCapitalization: TextCapitalization.words,
+                                inputFormatters: const [WordsCapitalizationFormatter()],
                                 decoration: _fieldDeco('Barangay / Address in Tabaco City', prefixIcon: Icons.home_outlined),
                               ),
                             ),
@@ -3403,6 +3412,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                               flex: 2,
                               child: TextFormField(
                                 controller: _idTypeCtrl,
+                                textCapitalization: TextCapitalization.words,
+                                inputFormatters: const [WordsCapitalizationFormatter()],
                                 decoration: _fieldDeco('Valid ID Presented (Optional)', prefixIcon: Icons.badge_outlined),
                               ),
                             ),
@@ -3450,6 +3461,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                             flex: 3,
                             child: TextFormField(
                               controller: _locationCtrl,
+                              textCapitalization: TextCapitalization.words,
+                              inputFormatters: const [WordsCapitalizationFormatter()],
                               decoration: _fieldDeco('Incident Location (Barangay / Street / Landmark) *', prefixIcon: Icons.location_on_outlined),
                               validator: (v) => (v == null || v.trim().isEmpty) ? 'Location is required' : null,
                             ),
@@ -3476,6 +3489,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                       TextFormField(
                         controller: _descriptionCtrl,
                         maxLines: 3,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                         decoration: _fieldDeco('Describe observed illegal slaughter activity, head count, vehicles, or suspects *'),
                         validator: (v) => (v == null || v.trim().isEmpty) ? 'Description is required' : null,
                       ),
@@ -3491,6 +3506,8 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                             flex: 3,
                             child: TextFormField(
                               controller: _receivingOfficerCtrl,
+                              textCapitalization: TextCapitalization.words,
+                              inputFormatters: const [WordsCapitalizationFormatter()],
                               decoration: _fieldDeco('Receiving Abattoir Officer *', prefixIcon: Icons.shield_outlined),
                               validator: (v) => (v == null || v.trim().isEmpty) ? 'Officer name is required' : null,
                             ),

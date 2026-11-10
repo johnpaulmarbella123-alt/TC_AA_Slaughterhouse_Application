@@ -11,14 +11,12 @@
             "id": "f313bd710e068298",
             "type": "leaf",
             "state": {
-              "type": "markdown",
+              "type": "image",
               "state": {
-                "file": "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
-                "mode": "preview",
-                "source": false
+                "file": "07 - Capstone Manuscript/figure20_proposed_system_flowchart.svg"
               },
-              "icon": "lucide-file",
-              "title": "Chapter 4 - Results and Discussion"
+              "icon": "lucide-image",
+              "title": "figure20_proposed_system_flowchart"
             }
           }
         ]
@@ -83,7 +81,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 379.25743103027344
   },
   "right": {
     "id": "9e3ee84ac2abf2bb",
@@ -99,7 +97,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
+                "file": "07 - Capstone Manuscript/figure20_proposed_system_flowchart.svg",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -174,7 +172,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 200,
+    "collapsed": true
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -189,10 +188,13 @@
   },
   "active": "f313bd710e068298",
   "lastOpenFiles": [
-    "07 - Capstone Manuscript/00 - Preliminaries.md",
+    "07 - Capstone Manuscript/figure20_proposed_system_flowchart 1.svg",
+    "07 - Capstone Manuscript/figure20_proposed_system_flowchart 2.svg",
     "07 - Capstone Manuscript/figure20_proposed_system_flowchart.svg",
-    "07 - Capstone Manuscript/Appendices.md",
     "07 - Capstone Manuscript/Chapter 4 - Results and Discussion.md",
+    "00 - Index/00 - System Map of Content (MOC).md",
+    "07 - Capstone Manuscript/00 - Preliminaries.md",
+    "07 - Capstone Manuscript/Appendices.md",
     "07 - Capstone Manuscript/Chapter 5 - Summary, Conclusions, and Recommendations.md",
     "07 - Capstone Manuscript/References.md",
     "07 - Capstone Manuscript/Chapter 1 - Introduction.md",
@@ -207,7 +209,6 @@
     "05 - Module Reference/Admin - Illegal Slaughter Oversight.md",
     "01 - Architecture & System Maps/Flutter Admin Panel Architecture.md",
     "01 - Architecture & System Maps/End-to-End Workflow State Machine.md",
-    "00 - Index/00 - System Map of Content (MOC).md",
     "07 - Capstone Manuscript",
     "fix_headers.js",
     "06 - Templates/Template - Component Reference.md",

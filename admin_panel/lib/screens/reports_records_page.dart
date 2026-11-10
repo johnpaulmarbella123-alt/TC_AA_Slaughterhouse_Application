@@ -12,6 +12,7 @@ import 'illegal_slaughter_reports_view.dart';
 import '../services/report_pdf_generator.dart';
 import '../services/regular_dealers_service.dart';
 import '../services/nmic_report_pdf_generator.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class ReportsRecordsPage extends StatefulWidget {
   final String? initialTab;
@@ -3028,6 +3029,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: subjectCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Transmittal Subject',
                     border: OutlineInputBorder(),
@@ -3038,6 +3041,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 TextField(
                   controller: bodyCtrl,
                   maxLines: 7,
+                  textCapitalization: TextCapitalization.sentences,
+                  inputFormatters: const [SentencesCapitalizationFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Transmittal Letter Message',
                     border: OutlineInputBorder(),
@@ -3276,6 +3281,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               const SizedBox(height: 12),
               TextField(
                 controller: officerCtrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [WordsCapitalizationFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'NMIC POSMS Head / Officer Name',
                   hintText: 'DR. BEJAEE C. DE DIOS',
@@ -3354,6 +3361,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   const SizedBox(height: 4),
                   TextField(
                     controller: nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     onChanged: (val) {
                       if (!isEditing && val.trim().isNotEmpty && markingCtrl.text.isEmpty) {
                         markingCtrl.text = dealersService.suggestMarkingForName(val);
@@ -3414,6 +3423,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   TextField(
                     controller: markingCtrl,
                     textCapitalization: TextCapitalization.characters,
+                    inputFormatters: const [UpperCaseTextFormatter()],
                     decoration: const InputDecoration(
                       hintText: 'e.g. JB, VM, JDC-2 (Permanent on carcass)',
                       border: OutlineInputBorder(),
