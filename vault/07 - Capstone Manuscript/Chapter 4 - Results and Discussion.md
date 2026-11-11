@@ -919,14 +919,14 @@ The selection of a forty-six-participant cohort satisfies established empirical 
 
 #### Table 7. Demographic Breakdown of Evaluation Participants ($N = 46$)
 
-| Stakeholder Stratum | Role / Operational Designation | Count ($n$) | Percentage (%) |
-| :--- | :--- | :---: | :---: |
-| **Enterprise Management** | Slaughterhouse Administrator & City Veterinarian | 2 | 4.35% |
-| **Veterinary Inspection** | NMIS Accredited Meat Inspection Officers | 4 | 8.70% |
-| **Operations Staff & Cashiers** | Receiving Intake Clerks & Revenue Cashiers | 4 | 8.70% |
-| **Floor Operations & Butchering**| Abattoir Butchers & Overhead Scale Handlers | 6 | 13.04% |
-| **Commercial Client & Consumer** | Public Market Meat Stallholders & Backyard Farmers | 30 | 65.21% |
-| **Total Cohort** | — | **46** | **100.00%** |
+| Stakeholder Stratum               | Role / Operational Designation                     | Count ($n$) | Percentage (%) |
+| :-------------------------------- | :------------------------------------------------- | :---------: | :------------: |
+| **Enterprise Management**         | Slaughterhouse Administrator & City Veterinarian   |      2      |     4.35%      |
+| **Veterinary Inspection**         | NMIS Accredited Meat Inspection Officers           |      4      |     8.70%      |
+| **Operations Staff & Cashiers**   | Receiving Intake Clerks & Revenue Cashiers         |      4      |     8.70%      |
+| **Floor Operations & Butchering** | Abattoir Butchers & Overhead Scale Handlers        |      6      |     13.04%     |
+| **Commercial Client & Consumer**  | Public Market Meat Stallholders & Backyard Farmers |     30      |     65.21%     |
+| **Total Cohort**                  | —                                                  |   **46**    |  **100.00%**   |
 
 ---
 
@@ -977,12 +977,12 @@ Cross-stratum analysis of the empirical evaluation demonstrates remarkable consi
 
 #### Table 10. SUS Score Distribution by Stakeholder Group
 
-| Stakeholder Stratum | Sample ($n$) | Mean SUS Score | Letter Grade | Adjective Rating | Acceptability |
-| :--- | :---: | :---: | :---: | :--- | :--- |
-| **Enterprise Management** | 2 | 88.75 | Grade A+ | Best Imaginable | Acceptable |
-| **Veterinary Meat Inspectors** | 4 | 87.50 | Grade A+ | Excellent | Acceptable |
-| **Operations Staff & Cashiers** | 4 | 86.25 | Grade A+ | Excellent | Acceptable |
-| **Abattoir Butchers & Handlers**| 6 | 83.33 | Grade A | Excellent | Acceptable |
-| **Commercial Meat Dealers** | 15 | 86.83 | Grade A+ | Excellent | Acceptable |
-| **Backyard Livestock Raisers** | 15 | 86.50 | Grade A+ | Excellent | Acceptable |
-| **Overall Combined Evaluation** | **46** | **86.60** | **Grade A+** | **Excellent** | **Acceptable** |
+| Stakeholder Stratum              | Sample ($n$) | Mean SUS Score | Letter Grade | Adjective Rating | Acceptability  |
+| :------------------------------- | :----------: | :------------: | :----------: | :--------------- | :------------- |
+| **Enterprise Management**        |      2       |     88.75      |   Grade A+   | Best Imaginable  | Acceptable     |
+| **Veterinary Meat Inspectors**   |      4       |     87.50      |   Grade A+   | Excellent        | Acceptable     |
+| **Operations Staff & Cashiers**  |      4       |     86.25      |   Grade A+   | Excellent        | Acceptable     |
+| **Abattoir Butchers & Handlers** |      6       |     83.33      |   Grade A    | Excellent        | Acceptable     |
+| **Commercial Meat Dealers**      |      15      |     86.83      |   Grade A+   | Excellent        | Acceptable     |
+| **Backyard Livestock Raisers**   |      15      |     86.50      |   Grade A+   | Excellent        | Acceptable     |
+| **Overall Combined Evaluation**  |    **46**    |   **86.60**    | **Grade A+** | **Excellent**    | **Acceptable** |
