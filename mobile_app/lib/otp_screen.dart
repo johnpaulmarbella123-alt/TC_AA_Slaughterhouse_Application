@@ -62,6 +62,7 @@ class _OtpScreenState extends State<OtpScreen> {
             data: {
               'display_name': widget.username,
               'address': widget.address,
+              'role_confirmed': false,
             },
           ),
         );
