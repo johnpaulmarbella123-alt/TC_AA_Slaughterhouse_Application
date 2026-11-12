@@ -1,12 +1,21 @@
 -- ==============================================================================
 -- Staff Notification Bell (Admin / Clerk / Inspector dashboards)
 -- Date: 2026-11-12
---  * New request submitted (status = 'pending')       -> target_role 'Clerk'
---  * Clerk verified documents (status = 'doc_verified') -> target_role 'Inspector'
---  * Admin dashboards read both roles.
--- Read state is tracked per staff email in read_by[] (staff share one auth session).
 -- ==============================================================================
 
+-- 1. Ensure helper function is_staff() exists
+CREATE OR REPLACE FUNCTION public.is_staff()
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.profiles
+        WHERE id = auth.uid()
+          AND LOWER(COALESCE(role, '')) IN ('admin', 'inspector', 'cashier', 'clerk', 'staff')
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+-- 2. Create staff_notifications table
 CREATE TABLE IF NOT EXISTS public.staff_notifications (
   id           BIGSERIAL PRIMARY KEY,
   target_role  TEXT NOT NULL CHECK (target_role IN ('Clerk', 'Inspector')),
@@ -37,10 +46,7 @@ CREATE POLICY "Staff update staff_notifications"
   USING (public.is_staff())
   WITH CHECK (public.is_staff());
 
--- ------------------------------------------------------------------------------
--- Trigger: create staff notifications from request lifecycle changes
--- SECURITY DEFINER so inserts made by mobile clients can still create staff rows.
--- ------------------------------------------------------------------------------
+-- 3. Trigger: create staff notifications from request lifecycle changes
 CREATE OR REPLACE FUNCTION public.fn_requests_staff_notify()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -62,7 +68,6 @@ BEGIN
   END IF;
   RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
-  -- Never block the request write because of a notification failure
   RAISE WARNING 'fn_requests_staff_notify failed: %', SQLERRM;
   RETURN NEW;
 END;
@@ -73,9 +78,7 @@ CREATE TRIGGER trg_requests_staff_notify
   AFTER INSERT OR UPDATE OF status ON public.requests
   FOR EACH ROW EXECUTE FUNCTION public.fn_requests_staff_notify();
 
--- ------------------------------------------------------------------------------
--- Atomic "mark as read" helper (avoids read-modify-write races between staff)
--- ------------------------------------------------------------------------------
+-- 4. Atomic "mark as read" helper
 CREATE OR REPLACE FUNCTION public.mark_staff_notifications_read(p_ids BIGINT[], p_email TEXT)
 RETURNS VOID AS $$
   UPDATE public.staff_notifications
@@ -86,13 +89,10 @@ $$ LANGUAGE sql SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION public.mark_staff_notifications_read(BIGINT[], TEXT) TO authenticated;
 
--- ------------------------------------------------------------------------------
--- Realtime
--- ------------------------------------------------------------------------------
+-- 5. Realtime publication
 DO $$
 BEGIN
   ALTER PUBLICATION supabase_realtime ADD TABLE public.staff_notifications;
 EXCEPTION WHEN duplicate_object THEN NULL;
           WHEN undefined_object THEN NULL;
 END $$;
-
