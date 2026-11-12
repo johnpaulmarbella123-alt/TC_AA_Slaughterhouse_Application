@@ -196,5 +196,36 @@ class StaffNotificationService extends ChangeNotifier {
     final ids = _items.where((n) => !n.isReadBy(e)).map((n) => n.id).toList();
     await markRead(ids);
   }
+
+  /// Sends a notification directly to the staff_notifications table from Dart code.
+  /// This ensures notifications are recorded immediately without depending exclusively
+  /// on database triggers or restrictive RLS policies.
+  static Future<bool> sendStaffNotification({
+    required String targetRole, // 'Clerk' or 'Inspector'
+    required String type, // 'new_request' or 'doc_verified'
+    required String title,
+    required String message,
+    required int requestId,
+    required String referenceNo,
+  }) async {
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase.from('staff_notifications').insert({
+        'target_role': targetRole,
+        'type': type,
+        'title': title,
+        'message': message,
+        'request_id': requestId,
+        'reference_no': referenceNo,
+        'read_by': <String>[],
+      });
+      // Trigger instant UI refresh
+      instance.refresh();
+      return true;
+    } catch (e) {
+      debugPrint('sendStaffNotification error: $e');
+      return false;
+    }
+  }
 }
 

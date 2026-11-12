@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 
@@ -622,6 +623,18 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
           if (notes.isNotEmpty) 'verification_notes': notes,
         },
       );
+
+      // Notify Inspector directly that documents are verified and ready for Ante-Mortem inspection
+      final custName = req['customer_name']?.toString() ?? 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Inspector',
+        type: 'doc_verified',
+        title: 'Ready for Ante-Mortem',
+        message: '$refNo ($custName) documents verified by clerk — ready for inspection.',
+        requestId: (req['id'] as num).toInt(),
+        referenceNo: refNo,
+      );
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
