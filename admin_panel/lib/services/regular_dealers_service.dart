@@ -70,7 +70,9 @@ class RegularDealer {
     String? markings,
     String? category,
     String? phone,
+    bool clearPhone = false,
     String? userId,
+    bool clearUserId = false,
     bool? isActive,
   }) {
     return RegularDealer(
@@ -79,8 +81,8 @@ class RegularDealer {
       name: name ?? this.name,
       markings: markings ?? this.markings,
       category: category ?? this.category,
-      phone: phone ?? this.phone,
-      userId: userId ?? this.userId,
+      phone: clearPhone ? null : (phone ?? this.phone),
+      userId: clearUserId ? null : (userId ?? this.userId),
       isActive: isActive ?? this.isActive,
       createdAt: createdAt,
     );

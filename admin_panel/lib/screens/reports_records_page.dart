@@ -3480,6 +3480,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                     markings: marking.toUpperCase(),
                     category: category,
                     phone: phone.isNotEmpty ? phone : null,
+                    clearPhone: phone.isEmpty,
                   );
                   await dealersService.updateDealer(updated);
                 } else {

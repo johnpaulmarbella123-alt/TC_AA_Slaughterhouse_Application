@@ -11,6 +11,7 @@ import 'meat_releasing_page.dart';
 import 'reports_records_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
+import '../services/staff_notification_service.dart';
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -75,6 +76,9 @@ class _AdminShellState extends State<AdminShell> {
           }
         }
       }
+
+      // Start staff bell notifications (admin/clerk/inspector) once session is verified
+      if (mounted) StaffNotificationService.instance.start();
     });
   }
 
@@ -461,39 +465,35 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
                             const Spacer(),
 
-                            // ─── 24PX GAP WITH SUBTLE DIVIDER LINE ───
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 10,
+                            if (settingsService.isAdmin) ...[
+                              // ─── 24PX GAP WITH SUBTLE DIVIDER LINE ───
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                child: Divider(
+                                  height: 1,
+                                  thickness: 1,
+                                  color: isDark
+                                      ? const Color(0xFF334155)
+                                      : Colors.grey.shade200,
+                                ),
                               ),
-                              child: Divider(
-                                height: 1,
-                                thickness: 1,
-                                color: isDark
-                                    ? const Color(0xFF334155)
-                                    : Colors.grey.shade200,
-                              ),
-                            ),
 
-                            // ─── SETTINGS / MY PROFILE (Grouped at bottom next to Profile & Logout) ───
-                            Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: _buildNavItem(
-                                index: 7,
-                                icon: settingsService.isAdmin
-                                    ? Icons.settings_outlined
-                                    : Icons.person_outline,
-                                activeIcon: settingsService.isAdmin
-                                    ? Icons.settings
-                                    : Icons.person,
-                                label: settingsService.isAdmin ? 'Settings' : 'My Profile',
-                                subtitle: settingsService.isAdmin
-                                    ? 'Fees, Staff, Schedule, Profile'
-                                    : 'Account profile & password',
-                                isDark: isDark,
+                              // ─── SETTINGS (Admin Only) ───
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                child: _buildNavItem(
+                                  index: 7,
+                                  icon: Icons.settings_outlined,
+                                  activeIcon: Icons.settings,
+                                  label: 'Settings',
+                                  subtitle: 'Fees, Staff, Schedule, Profile',
+                                  isDark: isDark,
+                                ),
                               ),
-                            ),
+                            ],
 
                             const SizedBox(height: 4),
 
@@ -1003,6 +1003,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
   }
 
   Future<void> _handleLogout(BuildContext context) async {
+    StaffNotificationService.instance.stop();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('keepMeLoggedIn', false);
     await AppSettingsService.instance.setActiveStaffSession(null);
