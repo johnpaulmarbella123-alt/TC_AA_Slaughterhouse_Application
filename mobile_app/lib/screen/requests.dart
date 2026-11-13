@@ -146,7 +146,7 @@ class _RequestsContentState extends State<RequestsContent> {
       try {
         final res = await supabase
             .from('profiles')
-            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category')
+            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category, role_confirmed, barangay, market_name, stall_number, role_document_url')
             .eq('id', user.id)
             .maybeSingle();
         if (res != null) profile = Map<String, dynamic>.from(res);
@@ -154,7 +154,7 @@ class _RequestsContentState extends State<RequestsContent> {
         try {
           final res = await supabase
               .from('profiles')
-              .select('display_name, address, assigned_marking, marking_locked, dealer_category')
+              .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category')
               .eq('id', user.id)
               .maybeSingle();
           if (res != null) profile = Map<String, dynamic>.from(res);
@@ -187,6 +187,9 @@ class _RequestsContentState extends State<RequestsContent> {
           isRegular = true;
           isCustNameLocked = true;
         }
+        if (profile['role_confirmed'] == true || profile['role_confirmed'].toString() == 'true') {
+          hasAuthoritativeRoleLock = true;
+        }
         final profCategory = profile['dealer_category']?.toString().trim().toLowerCase();
         // NOTE: `profiles.dealer_category` has a DB column default of 'barangay' on sign-up,
         // so only trust `profCategory` if the user already has a locked marking or confirmed their role.
@@ -194,6 +197,26 @@ class _RequestsContentState extends State<RequestsContent> {
             (profCategory == 'barangay' || profCategory == 'market')) {
           resolvedRole ??= profCategory;
           hasAuthoritativeRoleLock = true;
+        }
+        final profBrgy = profile['barangay']?.toString().trim();
+        if (profBrgy != null && profBrgy.isNotEmpty) {
+          selectedBarangay ??= profBrgy;
+        }
+        final profMarket = profile['market_name']?.toString().trim();
+        if (profMarket != null && profMarket.isNotEmpty && _marketNameController.text.isEmpty) {
+          _marketNameController.text = profMarket;
+        }
+        final profStall = profile['stall_number']?.toString().trim();
+        if (profStall != null && profStall.isNotEmpty && _marketStallController.text.isEmpty) {
+          _marketStallController.text = profStall;
+        }
+        final profDocUrl = profile['role_document_url']?.toString().trim();
+        if (profDocUrl != null && profDocUrl.isNotEmpty) {
+          if (profCategory == 'market') {
+            businessPermitUrl ??= profDocUrl;
+          } else if (profCategory == 'barangay') {
+            barangayCertificateUrl ??= profDocUrl;
+          }
         }
       }
 
@@ -1357,6 +1380,10 @@ class _RequestsContentState extends State<RequestsContent> {
         await supabase.from('profiles').update({
           'dealer_category': chosenRole,
           'role_confirmed': true,
+          'barangay': isChoosingBarangay ? selectedBarangay : null,
+          'market_name': !isChoosingBarangay ? _marketNameController.text.trim() : null,
+          'stall_number': !isChoosingBarangay ? _marketStallController.text.trim() : null,
+          'role_document_url': isChoosingBarangay ? barangayCertificateUrl : businessPermitUrl,
         }).eq('id', user.id);
       } catch (_) {}
     }
@@ -1458,6 +1485,140 @@ class _RequestsContentState extends State<RequestsContent> {
                 ),
                 const SizedBox(height: 18),
 
+                // Required Role Verification Fields & Document Upload
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isChoosingBarangay
+                            ? "Barangay Role Requirements"
+                            : "Market Role Requirements",
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1E293B),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isChoosingBarangay
+                            ? "Select your barangay and upload a valid Barangay Certificate to unlock this role."
+                            : "Enter your market name, stall number, and upload a valid Business Permit to unlock this role.",
+                        style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 12),
+                      if (isChoosingBarangay) ...[
+                        DropdownButtonFormField<String>(
+                          value: tabacoBarangays.contains(selectedBarangay) ? selectedBarangay : null,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: "Barangay Name *",
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          hint: const Text("Select Barangay"),
+                          items: tabacoBarangays
+                              .map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis)))
+                              .toList(),
+                          onChanged: (val) => setState(() => selectedBarangay = val),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _pickDocument("Barangay Certificate"),
+                            icon: Icon(
+                              barangayCertificateUrl != null ? Icons.verified_outlined : Icons.upload_file,
+                              color: barangayCertificateUrl != null ? const Color(0xFF1E855A) : Colors.black87,
+                            ),
+                            label: Text(
+                              barangayCertificateUrl != null
+                                  ? "Barangay Certificate Verified & Uploaded"
+                                  : "Upload Barangay Certificate *",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: barangayCertificateUrl != null ? const Color(0xFF1E855A) : Colors.black87,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: barangayCertificateUrl != null ? const Color(0xFFF0FDF4) : Colors.white,
+                              side: BorderSide(
+                                color: barangayCertificateUrl != null ? const Color(0xFF1E855A) : Colors.grey.shade400,
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ),
+                      ] else ...[
+                        TextField(
+                          controller: _marketNameController,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: "Market Name *",
+                            hintText: "e.g., Tabaco City Public Market",
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: _marketStallController,
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: "Stall Number *",
+                            hintText: "e.g., Stall #14",
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _pickDocument("Business Permit"),
+                            icon: Icon(
+                              businessPermitUrl != null ? Icons.verified_outlined : Icons.upload_file,
+                              color: businessPermitUrl != null ? const Color(0xFF1E855A) : Colors.black87,
+                            ),
+                            label: Text(
+                              businessPermitUrl != null
+                                  ? "Business Permit Verified & Uploaded"
+                                  : "Upload Business Permit *",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: businessPermitUrl != null ? const Color(0xFF1E855A) : Colors.black87,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: businessPermitUrl != null ? const Color(0xFFF0FDF4) : Colors.white,
+                              side: BorderSide(
+                                color: businessPermitUrl != null ? const Color(0xFF1E855A) : Colors.grey.shade400,
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+
                 // Permanent Role Reminder Banner
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -1512,23 +1673,47 @@ class _RequestsContentState extends State<RequestsContent> {
                 ),
                 const SizedBox(height: 10),
 
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _showRoleConfirmationDialog,
-                    icon: const Icon(Icons.arrow_forward_rounded, size: 18),
-                    label: Text(
-                      "Continue as ${isChoosingBarangay ? 'Barangay' : 'Market'} Dealer",
-                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E855A),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
-                    ),
-                  ),
+                Builder(
+                  builder: (context) {
+                    final bool hasBarangayReqs = (selectedBarangay != null && selectedBarangay!.trim().isNotEmpty) &&
+                        barangayCertificateUrl != null;
+                    final bool hasMarketReqs = _marketNameController.text.trim().isNotEmpty &&
+                        _marketStallController.text.trim().isNotEmpty &&
+                        businessPermitUrl != null;
+                    final bool canContinue = isChoosingBarangay ? hasBarangayReqs : hasMarketReqs;
+
+                    return SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: canContinue
+                            ? _showRoleConfirmationDialog
+                            : () {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      isChoosingBarangay
+                                          ? "Please select your Barangay and upload a valid Barangay Certificate first."
+                                          : "Please enter Market Name, Stall Number, and upload a valid Business Permit first.",
+                                    ),
+                                    backgroundColor: Colors.red.shade700,
+                                  ),
+                                );
+                              },
+                        icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                        label: Text(
+                          "Continue as ${isChoosingBarangay ? 'Barangay' : 'Market'} Dealer",
+                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: canContinue ? const Color(0xFF1E855A) : Colors.grey.shade400,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
             ),

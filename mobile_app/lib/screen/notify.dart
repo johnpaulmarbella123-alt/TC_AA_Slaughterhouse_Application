@@ -999,12 +999,14 @@ class _NotifyPageState extends State<NotifyPage> {
                                         color: isCompiled ? const Color(0xFF16A34A) : const Color(0xFF475569),
                                       ),
                                       const SizedBox(width: 6),
-                                      Text(
-                                        isCompiled ? 'Official Outcome & Actions Taken:' : 'Investigation Findings:',
-                                        style: TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: isCompiled ? const Color(0xFF15803D) : const Color(0xFF1E293B),
+                                      Expanded(
+                                        child: Text(
+                                          isCompiled ? 'Official Outcome & Actions Taken:' : 'Investigation Findings:',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w800,
+                                            color: isCompiled ? const Color(0xFF15803D) : const Color(0xFF1E293B),
+                                          ),
                                         ),
                                       ),
                                     ],
@@ -2961,7 +2963,15 @@ class _RescheduleDialogState extends State<_RescheduleDialog> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-          Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1A202C))),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1A202C)),
+            ),
+          ),
         ],
       ),
     );

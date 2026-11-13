@@ -68,6 +68,25 @@ class _LoginScreenState extends State<LoginScreen> {
               behavior: SnackBarBehavior.floating,
             ),
           );
+        } else if (lower.contains('account deactivated')) {
+          _showFacebookStyleLoginErrorDialog(
+            customTitle: 'Account Deactivated',
+            customMessage: msg,
+          );
+        } else if (lower.contains('has been deleted')) {
+          _showFacebookStyleLoginErrorDialog(
+            isPasswordError: false,
+            isUnverified: false,
+          );
+        } else if (e is AuthException &&
+            !e.message.toLowerCase().contains('invalid login credentials') &&
+            !e.message.toLowerCase().contains('invalid_credentials') &&
+            !e.message.toLowerCase().contains('email not confirmed') &&
+            !e.message.toLowerCase().contains('phone not confirmed')) {
+          _showFacebookStyleLoginErrorDialog(
+            customTitle: 'Login Failed',
+            customMessage: e.message,
+          );
         } else {
           // Check live status of the account via RPC to determine exact error
           bool isPasswordError = false;

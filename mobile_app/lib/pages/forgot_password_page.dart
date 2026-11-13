@@ -551,14 +551,17 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                               children: [
                                 Icon(_isEmail ? Icons.email_outlined : Icons.phone_android, size: 14, color: const Color(0xFF218358)),
                                 const SizedBox(width: 6),
-                                Text(
-                                  _isEmail && _enteredPhone != null
-                                      ? 'Code sent to: ${_maskEmail(_activeIdentifier)}'
-                                      : (_isEmail ? _activeIdentifier : 'Code sent to: ${_enteredPhone ?? _activeIdentifier}'),
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Color(0xFF218358),
+                                Flexible(
+                                  child: Text(
+                                    _isEmail && _enteredPhone != null
+                                        ? 'Code sent to: ${_maskEmail(_activeIdentifier)}'
+                                        : (_isEmail ? _activeIdentifier : 'Code sent to: ${_enteredPhone ?? _activeIdentifier}'),
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF218358),
+                                    ),
                                   ),
                                 ),
                               ],

@@ -392,8 +392,11 @@ class _ReceiptCard extends StatelessWidget {
                   color: Colors.grey.shade500,
                 ),
                 const SizedBox(width: 4),
-                Text('Paid via $method',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                Expanded(
+                  child: Text('Paid via $method',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                ),
               ],
             ),
           ],

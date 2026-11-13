@@ -2788,9 +2788,9 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   String _resolveDealerLocation(Map<String, dynamic> c) {
-    final market = (c['_req_market'] ?? '').toString().trim();
-    final stall = (c['_req_stall'] ?? '').toString().trim();
-    final brgy = (c['_req_barangay'] ?? '').toString().trim();
+    final market = (c['market_name'] ?? c['_req_market'] ?? '').toString().trim();
+    final stall = (c['stall_number'] ?? c['_req_stall'] ?? '').toString().trim();
+    final brgy = (c['barangay'] ?? c['_req_barangay'] ?? '').toString().trim();
     final addr = (c['address'] ?? '').toString().trim();
     if (market.isNotEmpty) {
       return stall.isNotEmpty ? '$market (Stall $stall)' : market;
@@ -3140,7 +3140,42 @@ class _SettingsPageState extends State<SettingsPage>
                       const SizedBox(width: 12),
                       Wrap(
                         spacing: 8,
+                        runSpacing: 8,
                         children: [
+                          if ((c['role_document_url'] ?? '').toString().trim().isNotEmpty)
+                            OutlinedButton.icon(
+                              onPressed: () {
+                                final docUrl = c['role_document_url'].toString().trim();
+                                showDialog(
+                                  context: context,
+                                  builder: (ctx) => AlertDialog(
+                                    title: Text('$name — $roleLabel Document'),
+                                    content: SizedBox(
+                                      width: 480,
+                                      child: SingleChildScrollView(
+                                        child: Image.network(
+                                          docUrl,
+                                          fit: BoxFit.contain,
+                                          errorBuilder: (_, _, _) => SelectableText('Document URL:\n$docUrl'),
+                                        ),
+                                      ),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(ctx),
+                                        child: const Text('Close'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.description_outlined, size: 16),
+                              label: const Text('View Document'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFF0284C7),
+                                side: const BorderSide(color: Color(0xFF0284C7)),
+                              ),
+                            ),
                           OutlinedButton.icon(
                             onPressed: () => _toggleCustomerActive(c),
                             icon: Icon(isActive ? Icons.pause_circle_outline : Icons.check_circle_outline, size: 16),

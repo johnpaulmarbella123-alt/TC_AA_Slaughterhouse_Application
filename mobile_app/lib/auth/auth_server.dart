@@ -282,29 +282,47 @@ Future<AuthResponse> signUp(
     required String newPassword,
   }) async {
     final identifier = emailOrPhone.trim();
-    if (identifier.contains('@')) {
-      // 1. Verify recovery OTP token for email
-      await _supabase.auth.verifyOTP(
-        email: identifier.toLowerCase(),
-        token: token.trim(),
-        type: OtpType.recovery,
-      );
-    } else {
-      final phone = formatToE164Phone(identifier);
-      // 1. Verify SMS OTP token for phone
-      await _supabase.auth.verifyOTP(
-        phone: phone,
-        token: token.trim(),
-        type: OtpType.sms,
-      );
+    final cleanPassword = newPassword.trim();
+    final isEmail = identifier.contains('@');
+    final formattedPhone = isEmail ? '' : formatToE164Phone(identifier);
+
+    final AuthResponse verifyRes = isEmail
+        ? await _supabase.auth.verifyOTP(
+            email: identifier.toLowerCase(),
+            token: token.trim(),
+            type: OtpType.recovery,
+          )
+        : await _supabase.auth.verifyOTP(
+            phone: formattedPhone,
+            token: token.trim(),
+            type: OtpType.sms,
+          );
+
+    if (verifyRes.session == null || verifyRes.user == null) {
+      throw 'Verification session could not be established. Please request a new code.';
     }
 
     // 2. Update user's password
-    await _supabase.auth.updateUser(
-      UserAttributes(password: newPassword.trim()),
+    final updateRes = await _supabase.auth.updateUser(
+      UserAttributes(password: cleanPassword),
     );
+    if (updateRes.user == null) {
+      throw 'Failed to update password. Please try again.';
+    }
 
-    // 3. Sign out of the temporary session so user can log in with new password
+    // 3. Sign out and verify the new password actually works for login
+    await _supabase.auth.signOut();
+    if (isEmail) {
+      await _supabase.auth.signInWithPassword(
+        email: identifier.toLowerCase(),
+        password: cleanPassword,
+      );
+    } else {
+      await _supabase.auth.signInWithPassword(
+        phone: formattedPhone,
+        password: cleanPassword,
+      );
+    }
     await _supabase.auth.signOut();
   }
 

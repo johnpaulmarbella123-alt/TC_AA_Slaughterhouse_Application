@@ -752,11 +752,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _teamCard('assets/images/image 99.png', const Color.fromARGB(255, 7, 7, 205), "5 Veterinarians"),
-                  _teamCard('assets/images/image 100.png', const Color(0xFF1E855A), "12 Butchers"),
-                  _teamCard('assets/images/image 101.png', const Color(0xFFD4A017), "5 Staffs"),
+                  Expanded(child: _teamCard('assets/images/image 99.png', const Color.fromARGB(255, 7, 7, 205), "5 Veterinarians")),
+                  const SizedBox(width: 8),
+                  Expanded(child: _teamCard('assets/images/image 100.png', const Color(0xFF1E855A), "12 Butchers")),
+                  const SizedBox(width: 8),
+                  Expanded(child: _teamCard('assets/images/image 101.png', const Color(0xFFD4A017), "5 Staffs")),
                 ],
               ),
             ),
@@ -1427,7 +1428,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _teamCard(String imagePath, Color color, String label) {
     return Container(
-      width: 105,
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1519,7 +1519,7 @@ class _CertItem extends StatelessWidget {
         children: [
           const Icon(Icons.check, color: Color(0xFF008000), size: 16),
           const SizedBox(width: 8),
-          Text(text, style: const TextStyle(fontSize: 12)),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 12))),
         ],
       ),
     );

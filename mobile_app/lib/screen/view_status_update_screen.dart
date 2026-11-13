@@ -505,17 +505,21 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      refNo,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
+                    Expanded(
+                      child: Text(
+                        refNo,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
                       ),
                     ),
                     if ((_inspection?['anti_mortem'] ?? '') == 'Separate Facility' ||
                         (_inspection?['process_stage'] ?? '').toString().contains('Separate Facility') ||
-                        (_inspection?['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))
+                        (_inspection?['process_notes'] ?? '').toString().contains('SEPARATE FACILITY')) ...[
+                      const SizedBox(width: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
@@ -539,6 +543,7 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
                           ],
                         ),
                       ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -922,9 +927,11 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
               child: const Icon(Icons.receipt_long, color: Color(0xFF1E855A), size: 20),
             ),
             const SizedBox(width: 10),
-            const Text(
-              'Slaughter Fee Breakdown',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            const Expanded(
+              child: Text(
+                'Slaughter Fee Breakdown',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),

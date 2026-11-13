@@ -730,8 +730,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text("AMOUNT PAID ($paymentMethodLabel):",
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        Expanded(
+                          child: Text("AMOUNT PAID ($paymentMethodLabel):",
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
+                        ),
+                        const SizedBox(width: 8),
                         Text("\u20b1${amountPaid.toStringAsFixed(2)}",
                             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF15803D))),
                       ],

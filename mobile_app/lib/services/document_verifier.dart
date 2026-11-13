@@ -99,6 +99,8 @@ class DocumentVerifier {
           "BARANGAY",
           "PUNONG BARANGAY",
           "CHAIRMAN",
+          "CAPTAIN",
+          "KAGAWAD",
           "RESIDENT",
           "RESIDENCY",
           "BONAFIDE",
@@ -115,8 +117,12 @@ class DocumentVerifier {
           "LICENSE",
           "COMMERCIAL",
           "OPERATING",
+          "PERMIT TO OPERATE",
           "MAYOR",
-          "FURNITURE",
+          "MAYOR'S PERMIT",
+          "MAYORS PERMIT",
+          "BPLO",
+          "DTI",
           "ESTABLISHMENT",
           "STALL",
         ];
@@ -170,15 +176,81 @@ class DocumentVerifier {
       // - OR has at least 2 type-specific terms
       final bool hasCertTerm = matchedCert.isNotEmpty;
       final bool hasAuthorityTerm = matchedAuthority.isNotEmpty;
-      final bool hasSpecificMatch = matchedSpecific.length >= 2 || (hasCertTerm && matchedSpecific.isNotEmpty);
 
-      if ((hasCertTerm && hasAuthorityTerm) || hasSpecificMatch) {
-        return DocumentVerificationResult(
-          isValid: true,
-          message: "Document successfully verified as a valid $documentType.",
-          detectedKeywords: allMatches.toList(),
-          extractedSnippet: fullText.length > 150 ? fullText.substring(0, 150) : fullText,
-        );
+      // Cross-document rejection for Barangay Certificate vs. Business Permit
+      if (normalizedType.contains("barangay")) {
+        final bool looksLikeBusinessPermit = fullText.contains("BUSINESS PERMIT") ||
+            fullText.contains("MAYOR'S PERMIT") ||
+            fullText.contains("MAYORS PERMIT") ||
+            fullText.contains("BPLO") ||
+            fullText.contains("PERMIT TO OPERATE") ||
+            fullText.contains("BUSINESS LICENSE");
+        final bool hasStrongBarangayHeader = fullText.contains("BARANGAY CERTIFICATE") ||
+            fullText.contains("BARANGAY CLEARANCE") ||
+            fullText.contains("PUNONG BARANGAY");
+        if (looksLikeBusinessPermit && !hasStrongBarangayHeader) {
+          return DocumentVerificationResult(
+            isValid: false,
+            message:
+                "This appears to be a Business Permit, not a Barangay Certificate. Please upload a valid Barangay Certificate.",
+            detectedKeywords: allMatches.toList(),
+            extractedSnippet: fullText.length > 120 ? fullText.substring(0, 120) : fullText,
+          );
+        }
+        final bool isBarangayValid = matchedSpecific.contains("BARANGAY") ||
+            matchedSpecific.contains("PUNONG BARANGAY") ||
+            (matchedSpecific.length >= 2 && (hasCertTerm || hasAuthorityTerm));
+        if (isBarangayValid) {
+          return DocumentVerificationResult(
+            isValid: true,
+            message: "Document successfully verified as a valid $documentType.",
+            detectedKeywords: allMatches.toList(),
+            extractedSnippet: fullText.length > 150 ? fullText.substring(0, 150) : fullText,
+          );
+        }
+      } else if (normalizedType.contains("business")) {
+        final bool looksLikeBarangayCert = fullText.contains("PUNONG BARANGAY") ||
+            fullText.contains("BARANGAY CLEARANCE") ||
+            fullText.contains("BARANGAY CERTIFICATE") ||
+            fullText.contains("RESIDENCY") ||
+            fullText.contains("BONAFIDE") ||
+            fullText.contains("BONA-FIDE");
+        final bool hasStrongBusinessHeader = fullText.contains("BUSINESS") ||
+            fullText.contains("MAYOR'S PERMIT") ||
+            fullText.contains("MAYORS PERMIT") ||
+            fullText.contains("BPLO") ||
+            fullText.contains("DTI") ||
+            fullText.contains("COMMERCIAL");
+        if (looksLikeBarangayCert && !hasStrongBusinessHeader) {
+          return DocumentVerificationResult(
+            isValid: false,
+            message:
+                "This appears to be a Barangay Certificate, not a Business Permit. Please upload a valid Business Permit.",
+            detectedKeywords: allMatches.toList(),
+            extractedSnippet: fullText.length > 120 ? fullText.substring(0, 120) : fullText,
+          );
+        }
+        final bool isBusinessValid = hasStrongBusinessHeader &&
+            (hasCertTerm || hasAuthorityTerm || matchedSpecific.length >= 2);
+        if (isBusinessValid) {
+          return DocumentVerificationResult(
+            isValid: true,
+            message: "Document successfully verified as a valid $documentType.",
+            detectedKeywords: allMatches.toList(),
+            extractedSnippet: fullText.length > 150 ? fullText.substring(0, 150) : fullText,
+          );
+        }
+      } else {
+        final bool hasSpecificMatch =
+            matchedSpecific.length >= 2 || (hasCertTerm && matchedSpecific.isNotEmpty);
+        if ((hasCertTerm && hasAuthorityTerm) || hasSpecificMatch) {
+          return DocumentVerificationResult(
+            isValid: true,
+            message: "Document successfully verified as a valid $documentType.",
+            detectedKeywords: allMatches.toList(),
+            extractedSnippet: fullText.length > 150 ? fullText.substring(0, 150) : fullText,
+          );
+        }
       }
 
       // If text exists but neither certificate nor official authority is detected

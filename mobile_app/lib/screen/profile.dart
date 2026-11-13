@@ -711,10 +711,14 @@ String? _extractStoragePath(String publicUrl) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+        Expanded(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+          ),
         ),
+        const SizedBox(width: 8),
         Text(
           value,
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
@@ -727,10 +731,14 @@ String? _extractStoragePath(String publicUrl) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+        Expanded(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+          ),
         ),
+        const SizedBox(width: 8),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [

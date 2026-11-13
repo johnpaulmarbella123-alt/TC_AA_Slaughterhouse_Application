@@ -745,12 +745,14 @@ class _DelayedOperationDialogState extends State<_DelayedOperationDialog> {
                       children: [
                         Icon(Icons.info_outline, size: 16, color: Color(0xFF1E855A)),
                         SizedBox(width: 8),
-                        Text(
-                          'Facility Technical Delay — ₱0 Penalty Fee',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E855A),
+                        Expanded(
+                          child: Text(
+                            'Facility Technical Delay — ₱0 Penalty Fee',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1E855A),
+                            ),
                           ),
                         ),
                       ],

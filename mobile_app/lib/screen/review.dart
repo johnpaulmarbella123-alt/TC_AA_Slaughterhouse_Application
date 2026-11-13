@@ -352,23 +352,29 @@ class _ReviewContentState extends State<ReviewContent> {
                 ),
               ),
               const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 13)),
-                  Row(
-                    children: [
-                      _buildStars(rating),
-                      const SizedBox(width: 6),
-                      Text(
-                        '$dateStr${service.isNotEmpty ? ' • $service' : ''}',
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-                      ),
-                    ],
-                  ),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    Row(
+                      children: [
+                        _buildStars(rating),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            '$dateStr${service.isNotEmpty ? ' • $service' : ''}',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
