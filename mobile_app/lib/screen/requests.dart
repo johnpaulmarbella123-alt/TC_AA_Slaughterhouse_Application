@@ -1356,6 +1356,7 @@ class _RequestsContentState extends State<RequestsContent> {
       try {
         await supabase.from('profiles').update({
           'dealer_category': chosenRole,
+          'role_confirmed': true,
         }).eq('id', user.id);
       } catch (_) {}
     }
@@ -1378,21 +1379,31 @@ class _RequestsContentState extends State<RequestsContent> {
         children: [
           // Stepper indicator: Choose Role -> Create Request -> Submit
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
               color: const Color(0xFFF0FDF4),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFFBBF7D0)),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildStepPill("1", "Choose Role", true),
-                const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
-                _buildStepPill("2", "Create Request", false),
-                const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
-                _buildStepPill("3", "Submit", false),
-              ],
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildStepPill("1", "Choose Role", true),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                  ),
+                  _buildStepPill("2", "Create Request", false),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                  ),
+                  _buildStepPill("3", "Submit", false),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 20),
@@ -1814,38 +1825,16 @@ class _RequestsContentState extends State<RequestsContent> {
                               ),
                               const SizedBox(height: 8),
                               Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Row(
-                                    children: [
-                                      const Icon(Icons.lock_outline, size: 13, color: Color(0xFF1E855A)),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        "Permanent Role: ${isBarangay ? 'Barangay Dealer' : 'Market Dealer'}",
-                                        style: const TextStyle(
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF1E855A),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  InkWell(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => const HowItWorksScreen(initialTabIndex: 2),
-                                        ),
-                                      );
-                                    },
-                                    child: const Text(
-                                      "Why is this locked? (FAQ)",
-                                      style: TextStyle(
-                                        fontSize: 11,
+                                  const Icon(Icons.lock_outline, size: 13, color: Color(0xFF1E855A)),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      "Permanent Role: ${isBarangay ? 'Barangay Dealer' : 'Market Dealer'}",
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w600,
                                         color: Color(0xFF1E855A),
-                                        decoration: TextDecoration.underline,
-                                        fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                   ),

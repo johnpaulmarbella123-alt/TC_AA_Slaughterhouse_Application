@@ -90,6 +90,8 @@ class _AdminShellState extends State<AdminShell> {
         _reportsInitialTab = tabArg;
       } else if (index == 7 && tabArg is int) {
         _settingsInitialTab = tabArg;
+      } else if (index == 7 && tabArg == 'customers') {
+        _settingsInitialTab = 5;
       }
     });
   }

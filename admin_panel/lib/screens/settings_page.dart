@@ -71,7 +71,14 @@ class _SettingsPageState extends State<SettingsPage>
   late TextEditingController _headerSubtitleCtrl;
   late String _selectedLogoPath;
 
-  // ─── 5. CUSTOMER REVIEWS STATE ───
+  // ─── 5. CUSTOMER ACCOUNTS STATE ───
+  List<Map<String, dynamic>>? _customerAccounts = [];
+  bool _loadingCustomers = false;
+  String _customerSearchQuery = '';
+  String _customerStatusFilter = 'all'; // 'all' | 'active' | 'deactivated'
+  final TextEditingController _customerSearchCtrl = TextEditingController();
+
+  // ─── 6. CUSTOMER REVIEWS STATE ───
   List<Map<String, dynamic>>? _adminReviews = [];
   bool _loadingReviews = false;
   String _reviewSearchQuery = '';
@@ -88,9 +95,9 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void initState() {
     super.initState();
-    _currentTabIndex = widget.initialTab.clamp(0, 5);
+    _currentTabIndex = widget.initialTab.clamp(0, 6);
     _tabController = TabController(
-      length: 6,
+      length: 7,
       vsync: this,
       initialIndex: _currentTabIndex,
     );
@@ -123,7 +130,8 @@ class _SettingsPageState extends State<SettingsPage>
       }
     });
 
-    // Fetch customer reviews and public metrics
+    // Fetch customer accounts, reviews and public metrics
+    _loadCustomerAccounts();
     _loadAdminReviews();
 
     // Initialize schedule controllers
@@ -161,7 +169,7 @@ class _SettingsPageState extends State<SettingsPage>
   void didUpdateWidget(SettingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.initialTab != oldWidget.initialTab) {
-      final target = widget.initialTab.clamp(0, 5);
+      final target = widget.initialTab.clamp(0, 6);
       if (_currentTabIndex != target) {
         setState(() {
           _currentTabIndex = target;
@@ -174,6 +182,7 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void dispose() {
     _tabController.dispose();
+    _customerSearchCtrl.dispose();
     _facilityFeeCtrl.dispose();
     _permitFeeCtrl.dispose();
     _vetCertFeeCtrl.dispose();
@@ -261,15 +270,19 @@ class _SettingsPageState extends State<SettingsPage>
 
       int completed = 0;
       int total = 0;
-      double compRate = 94.0;
+      double compRate = 0.0;
       try {
         final reqData = await client.from('requests').select('status');
         final reqList = List<Map<String, dynamic>>.from(reqData);
-        total = reqList.length;
-        completed = reqList.where((r) {
+        for (var r in reqList) {
           final s = (r['status'] ?? '').toString().toLowerCase();
-          return s == 'released' || s == 'completed';
-        }).length;
+          if (s != 'cancelled' && s != 'rejected') {
+            total++;
+            if (s == 'released' || s == 'completed') {
+              completed++;
+            }
+          }
+        }
         if (total > 0) {
           compRate = (completed / total) * 100.0;
         }
@@ -277,13 +290,8 @@ class _SettingsPageState extends State<SettingsPage>
         debugPrint('Could not fetch requests for satisfaction rate: $err');
       }
 
-      double blended;
-      if (reviews.isNotEmpty) {
-        final revScore = (avg / 5.0) * 100.0;
-        blended = (0.60 * revScore) + (0.40 * compRate);
-      } else {
-        blended = compRate;
-      }
+      final double revScore = reviews.isNotEmpty ? (avg / 5.0) * 100.0 : 0.0;
+      final double blended = (0.50 * compRate) + (0.50 * revScore);
 
       if (mounted) {
         setState(() {
@@ -357,14 +365,15 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   Widget build(BuildContext context) {
     // Hot-reload resilience for Flutter Web
+    _customerAccounts ??= [];
     _adminReviews ??= [];
     _reviewRatingCounts ??= {5: 0, 4: 0, 3: 0, 2: 0, 1: 0};
-    if (_tabController.length != 6) {
+    if (_tabController.length != 7) {
       _tabController.dispose();
       _tabController = TabController(
-        length: 6,
+        length: 7,
         vsync: this,
-        initialIndex: _currentTabIndex.clamp(0, 5),
+        initialIndex: _currentTabIndex.clamp(0, 6),
       );
       _tabController.addListener(() {
         if (_tabController.index != _currentTabIndex && !_tabController.indexIsChanging) {
@@ -434,6 +443,7 @@ class _SettingsPageState extends State<SettingsPage>
                 Tab(icon: Icon(Icons.schedule_outlined, size: 20), text: 'Schedule & Capacity'),
                 Tab(icon: Icon(Icons.person_outline, size: 20), text: 'My Profile'),
                 Tab(icon: Icon(Icons.palette_outlined, size: 20), text: 'Appearance'),
+                Tab(icon: Icon(Icons.people_outline, size: 20), text: 'Customer Accounts'),
                 Tab(icon: Icon(Icons.rate_review_outlined, size: 20), text: 'Customer Reviews'),
               ],
             ),
@@ -449,6 +459,7 @@ class _SettingsPageState extends State<SettingsPage>
                 _buildScheduleCapacityTab(isDark),
                 _buildMyProfileTab(isDark),
                 _buildAppearanceTab(isDark),
+                _buildCustomerAccountsTab(isDark),
                 _buildCustomerReviewsTab(isDark),
               ],
             ),
@@ -2704,7 +2715,480 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   // ═══════════════════════════════════════════════════════════
-  //  5. CUSTOMER REVIEWS & FEEDBACK TAB
+  //  5. CUSTOMER ACCOUNTS TAB (Registered Mobile Users)
+  // ═══════════════════════════════════════════════════════════
+  Future<void> _loadCustomerAccounts() async {
+    if (mounted) setState(() => _loadingCustomers = true);
+    try {
+      final client = Supabase.instance.client;
+      final profilesData = await client
+          .from('profiles')
+          .select()
+          .order('created_at', ascending: false);
+
+      const staffRoles = {'admin', 'inspector', 'cashier', 'clerk', 'staff'};
+      final customers = <Map<String, dynamic>>[];
+
+      // Also fetch request counts & latest barangay/market per user
+      final Map<String, Map<String, dynamic>> reqStats = {};
+      try {
+        final reqs = await client
+            .from('requests')
+            .select('user_id, request_type, barangay, market_name, stall_number, marking_tag');
+        for (final r in List<Map<String, dynamic>>.from(reqs)) {
+          final uid = r['user_id']?.toString() ?? '';
+          if (uid.isEmpty) continue;
+          final entry = reqStats.putIfAbsent(uid, () => {'count': 0});
+          entry['count'] = (entry['count'] as int) + 1;
+          entry['request_type'] ??= r['request_type'];
+          entry['barangay'] ??= r['barangay'];
+          entry['market_name'] ??= r['market_name'];
+          entry['stall_number'] ??= r['stall_number'];
+          entry['marking_tag'] ??= r['marking_tag'];
+        }
+      } catch (_) {}
+
+      for (final p in List<Map<String, dynamic>>.from(profilesData)) {
+        final role = (p['role'] ?? '').toString().toLowerCase().trim();
+        if (staffRoles.contains(role)) continue;
+        final uid = p['id']?.toString() ?? '';
+        final stats = reqStats[uid];
+        customers.add({
+          ...p,
+          '_request_count': stats?['count'] ?? 0,
+          '_req_type': stats?['request_type'],
+          '_req_barangay': stats?['barangay'],
+          '_req_market': stats?['market_name'],
+          '_req_stall': stats?['stall_number'],
+          '_req_marking': stats?['marking_tag'],
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _customerAccounts = customers;
+          _loadingCustomers = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading customer accounts: $e');
+      if (mounted) setState(() => _loadingCustomers = false);
+    }
+  }
+
+  String _resolveDealerRoleLabel(Map<String, dynamic> c) {
+    final confirmed = c['role_confirmed'] == true;
+    final cat = (c['dealer_category'] ?? c['_req_type'] ?? '').toString().toLowerCase().trim();
+    if (!confirmed && c['_req_type'] == null) {
+      return 'Role Not Selected Yet';
+    }
+    if (cat == 'market') return 'Market Dealer';
+    if (cat == 'barangay') return 'Barangay Dealer';
+    return 'Role Not Selected Yet';
+  }
+
+  String _resolveDealerLocation(Map<String, dynamic> c) {
+    final market = (c['_req_market'] ?? '').toString().trim();
+    final stall = (c['_req_stall'] ?? '').toString().trim();
+    final brgy = (c['_req_barangay'] ?? '').toString().trim();
+    final addr = (c['address'] ?? '').toString().trim();
+    if (market.isNotEmpty) {
+      return stall.isNotEmpty ? '$market (Stall $stall)' : market;
+    }
+    if (brgy.isNotEmpty) return brgy;
+    if (addr.isNotEmpty) return addr;
+    return 'No location provided yet';
+  }
+
+  Future<void> _toggleCustomerActive(Map<String, dynamic> customer) async {
+    final id = customer['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final currentlyActive = customer['is_active'] != false;
+    final name = (customer['display_name'] ?? customer['phone'] ?? customer['email'] ?? 'this customer').toString();
+
+    String? reason;
+    if (currentlyActive) {
+      final reasonCtrl = TextEditingController(text: 'Accumulated multiple penalties');
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Deactivate $name?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Deactivating blocks this customer from logging in or submitting new slaughter requests.',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Reason (shown to customer)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Deactivate'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+      reason = reasonCtrl.text.trim().isEmpty ? 'Deactivated by Admin' : reasonCtrl.text.trim();
+    }
+
+    try {
+      await Supabase.instance.client.from('profiles').update({
+        'is_active': !currentlyActive,
+        'deactivated_at': currentlyActive ? DateTime.now().toUtc().toIso8601String() : null,
+        'deactivation_reason': currentlyActive ? reason : null,
+      }).eq('id', id);
+
+      await _loadCustomerAccounts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(currentlyActive
+                ? '$name has been deactivated.'
+                : '$name has been reactivated.'),
+            backgroundColor: currentlyActive ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update status: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteCustomerAccount(Map<String, dynamic> customer) async {
+    final id = customer['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final name = (customer['display_name'] ?? customer['phone'] ?? customer['email'] ?? 'this customer').toString();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Customer Account?'),
+        content: Text(
+          'Permanently delete $name? Their profile and authentication login will be removed and they will no longer be able to sign in.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete Permanently'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await Supabase.instance.client.from('profiles').delete().eq('id', id);
+      await _loadCustomerAccounts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$name deleted permanently.'),
+            backgroundColor: const Color(0xFFDC2626),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to delete customer: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Widget _buildCustomerAccountsTab(bool isDark) {
+    final all = _customerAccounts ?? <Map<String, dynamic>>[];
+    final activeCount = all.where((c) => c['is_active'] != false).length;
+    final deactivatedCount = all.length - activeCount;
+
+    final filtered = all.where((c) {
+      final isActive = c['is_active'] != false;
+      if (_customerStatusFilter == 'active' && !isActive) return false;
+      if (_customerStatusFilter == 'deactivated' && isActive) return false;
+      if (_customerSearchQuery.isNotEmpty) {
+        final q = _customerSearchQuery.toLowerCase();
+        final name = (c['display_name'] ?? '').toString().toLowerCase();
+        final email = (c['email'] ?? '').toString().toLowerCase();
+        final phone = (c['phone'] ?? '').toString().toLowerCase();
+        final addr = _resolveDealerLocation(c).toLowerCase();
+        final role = _resolveDealerRoleLabel(c).toLowerCase();
+        if (!name.contains(q) && !email.contains(q) && !phone.contains(q) && !addr.contains(q) && !role.contains(q)) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
+
+    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final borderCol = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final textCol = isDark ? Colors.white : const Color(0xFF0F172A);
+    final subCol = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Registered Mobile Customers',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: textCol),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Monitor newly signed-up mobile app users, their selected dealer role & location, and deactivate or remove accounts.',
+                      style: TextStyle(fontSize: 13, color: subCol),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton.icon(
+                onPressed: _loadingCustomers ? null : _loadCustomerAccounts,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Refresh'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF16A34A),
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _customerStatChip('Total Registered', all.length.toString(), const Color(0xFF0284C7), cardBg, borderCol, textCol, subCol),
+              _customerStatChip('Active Accounts', activeCount.toString(), const Color(0xFF16A34A), cardBg, borderCol, textCol, subCol),
+              _customerStatChip('Deactivated', deactivatedCount.toString(), const Color(0xFFD97706), cardBg, borderCol, textCol, subCol),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _customerSearchCtrl,
+                  onChanged: (v) => setState(() => _customerSearchQuery = v.trim()),
+                  decoration: InputDecoration(
+                    hintText: 'Search by name, phone, email, barangay/market, or role...',
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    filled: true,
+                    fillColor: cardBg,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'all', label: Text('All')),
+                  ButtonSegment(value: 'active', label: Text('Active')),
+                  ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
+                ],
+                selected: {_customerStatusFilter},
+                onSelectionChanged: (s) => setState(() => _customerStatusFilter = s.first),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_loadingCustomers)
+            const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
+          else if (filtered.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
+              decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderCol)),
+              child: Center(
+                child: Text(
+                  all.isEmpty ? 'No mobile customers registered yet.' : 'No customers match your search/filter.',
+                  style: TextStyle(color: subCol, fontSize: 14),
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: filtered.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final c = filtered[index];
+                final isActive = c['is_active'] != false;
+                final name = (c['display_name'] ?? '').toString().trim().isNotEmpty
+                    ? c['display_name'].toString()
+                    : 'Unnamed Customer';
+                final contact = [
+                  if ((c['phone'] ?? '').toString().trim().isNotEmpty) c['phone'].toString().trim(),
+                  if ((c['email'] ?? '').toString().trim().isNotEmpty) c['email'].toString().trim(),
+                ].join(' • ');
+                final roleLabel = _resolveDealerRoleLabel(c);
+                final location = _resolveDealerLocation(c);
+                final reqCount = (c['_request_count'] as int?) ?? 0;
+                final reason = (c['deactivation_reason'] ?? '').toString().trim();
+
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: isActive ? borderCol : const Color(0xFFF59E0B).withValues(alpha: 0.6)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      CircleAvatar(
+                        radius: 22,
+                        backgroundColor: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                        child: Icon(
+                          isActive ? Icons.person_outline : Icons.block,
+                          color: isActive ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textCol)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: roleLabel == 'Role Not Selected Yet'
+                                        ? const Color(0xFFF1F5F9)
+                                        : const Color(0xFFE0F2FE),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    roleLabel,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: roleLabel == 'Role Not Selected Yet'
+                                          ? const Color(0xFF64748B)
+                                          : const Color(0xFF0369A1),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    isActive ? 'Active' : 'Deactivated',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: isActive ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            if (contact.isNotEmpty)
+                              Text(contact, style: TextStyle(fontSize: 12.5, color: subCol)),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Location: $location  •  Requests: $reqCount',
+                              style: TextStyle(fontSize: 12, color: subCol),
+                            ),
+                            if (!isActive && reason.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Deactivation reason: $reason',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFFD97706), fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () => _toggleCustomerActive(c),
+                            icon: Icon(isActive ? Icons.pause_circle_outline : Icons.check_circle_outline, size: 16),
+                            label: Text(isActive ? 'Deactivate' : 'Reactivate'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                              side: BorderSide(color: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A)),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () => _deleteCustomerAccount(c),
+                            icon: const Icon(Icons.delete_outline, size: 16),
+                            label: const Text('Delete'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFDC2626),
+                              side: const BorderSide(color: Color(0xFFDC2626)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _customerStatChip(String label, String value, Color accent, Color bg, Color border, Color textCol, Color subCol) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12), border: Border.all(color: border)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: subCol, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: accent)),
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  //  6. CUSTOMER REVIEWS & FEEDBACK TAB
   // ═══════════════════════════════════════════════════════════
   Widget _buildCustomerReviewsTab(bool isDark) {
     final reviews = _adminReviews ?? <Map<String, dynamic>>[];
@@ -3225,10 +3709,9 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Widget _buildSatisfactionCard(bool isDark) {
-    final reviews = _adminReviews ?? [];
     final compRate = _reviewTotalOrdersCount > 0
         ? (_reviewCompletedOrdersCount / _reviewTotalOrdersCount) * 100.0
-        : 94.0;
+        : 0.0;
     final reviewPct = (_reviewAverageRating / 5.0) * 100.0;
 
     return Card(
@@ -3285,9 +3768,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             const SizedBox(height: 6),
             Text(
-              reviews.isNotEmpty
-                  ? '60% Customer Reviews (${reviewPct.toStringAsFixed(0)}%) + 40% Completed Orders (${compRate.toStringAsFixed(0)}%)'
-                  : 'Based on 100% order completion rate (${compRate.toStringAsFixed(0)}%) until first reviews are submitted.',
+              '50% Customer Reviews (${reviewPct.toStringAsFixed(0)}%) + 50% Completed Orders (${compRate.toStringAsFixed(0)}%)',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w500,

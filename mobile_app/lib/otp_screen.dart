@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'auth/auth_server.dart';
 import 'pages/home_page.dart';
 
 class OtpScreen extends StatefulWidget {
@@ -30,6 +31,7 @@ class _OtpScreenState extends State<OtpScreen> {
 
   bool isLoading = false;
   bool isResending = false;
+  bool _isVerified = false;
 
   bool get isEmail => widget.identifier.contains('@');
 
@@ -55,6 +57,7 @@ class _OtpScreenState extends State<OtpScreen> {
       final user = response.user;
 
       if (user != null) {
+        _isVerified = true;
         // Set password and user metadata
         await supabase.auth.updateUser(
           UserAttributes(
@@ -181,7 +184,14 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop && !_isVerified) {
+          AuthService().cleanupUnverifiedSignup(widget.identifier);
+        }
+      },
+      child: Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text('Verify Code'),
@@ -335,6 +345,7 @@ class _OtpScreenState extends State<OtpScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }

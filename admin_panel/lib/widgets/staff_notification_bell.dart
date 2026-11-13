@@ -205,6 +205,12 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
         bg = const Color(0xFFEDE9FE);
         moduleLabel = 'Payment & Cashiering';
         break;
+      case 'new_customer':
+        iconData = Icons.person_add_alt_1_outlined;
+        accent = const Color(0xFF0284C7);
+        bg = const Color(0xFFE0F2FE);
+        moduleLabel = 'Customer Accounts';
+        break;
       case 'ready_for_release':
         iconData = Icons.inventory_2_outlined;
         accent = const Color(0xFF0D9488);

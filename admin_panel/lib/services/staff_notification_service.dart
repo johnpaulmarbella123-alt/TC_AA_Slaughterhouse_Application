@@ -48,6 +48,7 @@ class StaffNotification {
   /// 3 = Slaughter & Inspection
   /// 4 = Payment & Cashiering
   /// 5 = Meat Releasing
+  /// 7 = Settings (Customer Accounts)
   int get targetModule {
     switch (type) {
       case 'doc_verified':
@@ -58,6 +59,8 @@ class StaffNotification {
         return 4;
       case 'ready_for_release':
         return 5;
+      case 'new_customer':
+        return 7;
       default:
         return 1;
     }

@@ -20,6 +20,14 @@ class _AuthGateState extends State<AuthGate> {
     _initialScreenFuture = _determineInitialScreen();
   }
 
+  Future<void> _clearInvalidSession(SupabaseClient client) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_customer_logged_in', false);
+      await client.auth.signOut();
+    } catch (_) {}
+  }
+
   Future<Widget> _determineInitialScreen() async {
     try {
       final client = Supabase.instance.client;
@@ -52,9 +60,32 @@ class _AuthGateState extends State<AuthGate> {
           }
         }
 
-        // Verify current user is authenticated
+        // Verify current user is still valid and has an active profile in Supabase
         final user = client.auth.currentUser;
         if (user != null) {
+          try {
+            final userRes = await client.auth.getUser();
+            if (userRes.user == null) {
+              await _clearInvalidSession(client);
+              return const WelcomeScreen();
+            }
+            final profile = await client
+                .from('profiles')
+                .select('id, is_active')
+                .eq('id', user.id)
+                .maybeSingle();
+            if (profile == null || profile['is_active'] == false) {
+              await _clearInvalidSession(client);
+              return const WelcomeScreen();
+            }
+          } catch (e) {
+            if (e is AuthException) {
+              await _clearInvalidSession(client);
+              return const WelcomeScreen();
+            }
+            // Transient network error: allow cached session offline
+          }
+
           final prefs = await SharedPreferences.getInstance();
           await prefs.setBool('is_customer_logged_in', true);
           return const HomeScreen();

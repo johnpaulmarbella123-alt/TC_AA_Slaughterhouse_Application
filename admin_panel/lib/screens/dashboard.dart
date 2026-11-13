@@ -486,8 +486,8 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard avg processing time error: $e');
       }
 
-      // Satisfaction Rate (Blended: 60% Customer Review Ratings + 40% Transaction Completion Rate)
-      double satisfaction = 100.0;
+      // Satisfaction Rate (50% Completed Transactions + 50% Customer Review Ratings)
+      double satisfaction = 0.0;
       try {
         // 1. Transaction completion rate (released / total active requests)
         final allReqRes = await supabase.from('requests').select('status');
@@ -504,7 +504,7 @@ class _DashboardPageState extends State<DashboardPage> {
         }
         final double completionRate = totalRequests > 0
             ? (completedRequests / totalRequests) * 100.0
-            : 100.0;
+            : 0.0;
 
         // 2. Customer review ratings from mobile app
         final reviewsData = await supabase.from('reviews').select('rating');
@@ -518,14 +518,11 @@ class _DashboardPageState extends State<DashboardPage> {
           }
         }
 
-        if (reviewCount > 0) {
-          final double reviewScore = (totalRating / reviewCount / 5.0) * 100.0;
-          satisfaction = (reviewScore * 0.6) + (completionRate * 0.4);
-        } else {
-          // If no reviews yet, use transaction completion rate
-          satisfaction = completionRate;
-        }
-        satisfaction = satisfaction.clamp(0.0, 100.0);
+        final double reviewScore = reviewCount > 0
+            ? (totalRating / reviewCount / 5.0) * 100.0
+            : 0.0;
+
+        satisfaction = ((completionRate * 0.5) + (reviewScore * 0.5)).clamp(0.0, 100.0);
       } catch (e) {
         debugPrint('Dashboard satisfaction rate calculation error: $e');
       }
@@ -1109,7 +1106,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
             // Staff notification bell
             StaffNotificationBell(
-              onNavigate: (m) => widget.onNavigate?.call(m),
+              onNavigate: (m) => widget.onNavigate?.call(m, m == 7 ? 'customers' : null),
             ),
             const SizedBox(width: 4),
 

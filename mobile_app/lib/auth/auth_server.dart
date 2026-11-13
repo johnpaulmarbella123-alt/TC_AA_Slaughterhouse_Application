@@ -41,7 +41,7 @@ class AuthService {
       );
       if (res != null) {
         final Map data = res is Map ? res : jsonDecode(res.toString());
-        if (data['exists'] == true) {
+        if (data['exists'] == true && data['is_verified'] == true) {
           return true;
         }
       }
@@ -79,7 +79,7 @@ class AuthService {
             );
             if (resPhone != null) {
               final Map data = resPhone is Map ? resPhone : jsonDecode(resPhone.toString());
-              if (data['exists'] == true) {
+              if (data['exists'] == true && data['is_verified'] == true) {
                 return true;
               }
             }
@@ -94,6 +94,40 @@ class AuthService {
   // =========================
   // SIGN IN
   // =========================
+  Future<AuthResponse> _ensureActiveProfile(AuthResponse response) async {
+    final user = response.user;
+    if (user != null) {
+      final profile = await _supabase
+          .from('profiles')
+          .select('id, is_active, deactivation_reason')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (profile == null) {
+        await _supabase.auth.signOut();
+        throw 'This account has been deleted or is no longer active.';
+      }
+      if (profile['is_active'] == false) {
+        final reason = (profile['deactivation_reason'] ?? '').toString().trim();
+        await _supabase.auth.signOut();
+        throw reason.isNotEmpty
+            ? 'Account Deactivated: $reason. Please contact TCAA Admin.'
+            : 'Account Deactivated. Please contact TCAA Admin.';
+      }
+    }
+    return response;
+  }
+
+  Future<void> cleanupUnverifiedSignup(String identifier) async {
+    final clean = identifier.trim();
+    if (clean.isEmpty) return;
+    try {
+      await _supabase.rpc(
+        'cleanup_unverified_signup',
+        params: {'identifier': clean},
+      );
+    } catch (_) {}
+  }
+
   Future<AuthResponse> signIn(
     String emailOrPhone,
     String password,
@@ -101,28 +135,31 @@ class AuthService {
     final clean = emailOrPhone.trim();
 
     if (clean.contains('@')) {
-      return await _supabase.auth.signInWithPassword(
+      final res = await _supabase.auth.signInWithPassword(
         email: clean.toLowerCase(),
         password: password,
       );
+      return await _ensureActiveProfile(res);
     } else {
       // It's a phone number
       // 1. Dual-identifier login: resolve linked account email from profiles
       final linkedEmail = await findEmailForPhone(clean);
       if (linkedEmail != null && linkedEmail.isNotEmpty) {
         try {
-          return await _supabase.auth.signInWithPassword(
+          final res = await _supabase.auth.signInWithPassword(
             email: linkedEmail.toLowerCase(),
             password: password,
           );
+          return await _ensureActiveProfile(res);
         } catch (e) {
           // If signing in with linked email failed, fallback to direct phone sign-in
           final formattedPhone = formatToE164Phone(clean);
           try {
-            return await _supabase.auth.signInWithPassword(
+            final res = await _supabase.auth.signInWithPassword(
               phone: formattedPhone,
               password: password,
             );
+            return await _ensureActiveProfile(res);
           } catch (_) {
             rethrow;
           }
@@ -131,10 +168,11 @@ class AuthService {
 
       // 2. Direct phone login (for phone-only registered users)
       final formattedPhone = formatToE164Phone(clean);
-      return await _supabase.auth.signInWithPassword(
+      final res = await _supabase.auth.signInWithPassword(
         phone: formattedPhone,
         password: password,
       );
+      return await _ensureActiveProfile(res);
     }
   }
 
