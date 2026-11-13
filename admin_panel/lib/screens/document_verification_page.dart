@@ -633,6 +633,7 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
         message: '$refNo ($custName) documents verified by clerk — ready for inspection.',
         requestId: (req['id'] as num).toInt(),
         referenceNo: refNo,
+        dedupKey: 'req_${req['id']}_doc_verified',
       );
 
       if (mounted) {

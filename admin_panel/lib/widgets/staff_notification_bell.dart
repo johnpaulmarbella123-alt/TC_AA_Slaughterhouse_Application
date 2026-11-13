@@ -185,9 +185,44 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
 
   Widget _buildItem(StaffNotification n) {
     final isUnread = _service.isUnread(n);
-    final isDocVerified = n.type == 'doc_verified';
-    final accent = isDocVerified ? const Color(0xFF059669) : const Color(0xFF2563EB);
-    final bg = isDocVerified ? const Color(0xFFD1FAE5) : const Color(0xFFDBEAFE);
+
+    final IconData iconData;
+    final Color accent;
+    final Color bg;
+    final String moduleLabel;
+
+    switch (n.type) {
+      case 'doc_verified':
+      case 'separate_facility':
+        iconData = Icons.fact_check_outlined;
+        accent = const Color(0xFF059669);
+        bg = const Color(0xFFD1FAE5);
+        moduleLabel = 'Slaughter & Inspection';
+        break;
+      case 'ready_for_payment':
+        iconData = Icons.payments_outlined;
+        accent = const Color(0xFF7C3AED);
+        bg = const Color(0xFFEDE9FE);
+        moduleLabel = 'Payment & Cashiering';
+        break;
+      case 'ready_for_release':
+        iconData = Icons.inventory_2_outlined;
+        accent = const Color(0xFF0D9488);
+        bg = const Color(0xFFCCFBF1);
+        moduleLabel = 'Meat Releasing';
+        break;
+      case 'inspection_flagged':
+        iconData = Icons.warning_amber_rounded;
+        accent = const Color(0xFFDC2626);
+        bg = const Color(0xFFFEE2E2);
+        moduleLabel = 'Slaughter & Inspection';
+        break;
+      default:
+        iconData = Icons.assignment_outlined;
+        accent = const Color(0xFF2563EB);
+        bg = const Color(0xFFDBEAFE);
+        moduleLabel = 'Receiving';
+    }
 
     return InkWell(
       onTap: () {
@@ -205,8 +240,7 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
               width: 34,
               height: 34,
               decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(9)),
-              child: Icon(isDocVerified ? Icons.fact_check_outlined : Icons.assignment_outlined,
-                  size: 18, color: accent),
+              child: Icon(iconData, size: 18, color: accent),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -230,19 +264,32 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    '${_timeAgo(n.createdAt)} · ${isDocVerified ? 'Slaughter & Inspection' : 'Receiving'}',
+                    '${_timeAgo(n.createdAt)} · $moduleLabel',
                     style: const TextStyle(fontSize: 10.5, color: Color(0xFF94A3B8)),
                   ),
                 ],
               ),
             ),
-            if (isUnread)
+            if (isUnread) ...[
+              const SizedBox(width: 4),
+              Tooltip(
+                message: 'Acknowledge',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => _service.markRead([n.id]),
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: Icon(Icons.check_circle_outline, size: 17, color: accent),
+                  ),
+                ),
+              ),
               Container(
-                margin: const EdgeInsets.only(top: 4, left: 6),
-                width: 8,
-                height: 8,
+                margin: const EdgeInsets.only(top: 8, left: 2),
+                width: 7,
+                height: 7,
                 decoration: const BoxDecoration(color: Color(0xFFDC2626), shape: BoxShape.circle),
               ),
+            ],
           ],
         ),
       ),

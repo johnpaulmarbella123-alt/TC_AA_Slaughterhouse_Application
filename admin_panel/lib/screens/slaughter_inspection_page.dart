@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -2292,6 +2293,35 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         );
       }
 
+      // Notify Clerk / Admin via staff notification bell
+      final staffRefNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final staffCust = widget.request['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      if (newStatus == 'releasable') {
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Clerk',
+          type: 'ready_for_payment',
+          title: 'Ready for Billing & Payment',
+          message: '$staffRefNo ($staffCustLabel) passed inspection — ready for cashiering & payment.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_ready_for_payment',
+        );
+      } else if (newStatus == 'anti_mortem_failed' ||
+          newStatus == 'post_mortem_failed' ||
+          newStatus == 'condemned' ||
+          newStatus == 'delay_error') {
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Admin',
+          type: 'inspection_flagged',
+          title: 'Inspection Flagged',
+          message: '$staffRefNo ($staffCustLabel) marked as ${newStatus.replaceAll('_', ' ')}.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_flagged_$newStatus',
+        );
+      }
+
       // If missed schedule occurred, send dedicated Schedule Notice
       if (_isMissedSchedule) {
         final prefStr = widget.request['preferred_date']?.toString() ?? 'scheduled date';
@@ -3122,6 +3152,19 @@ class _MICDialogState extends State<_MICDialog> {
         await widget.supabase.from('requests').update({
           'status': 'mic_generated',
         }).eq('id', reqId);
+
+        final staffRefNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+        final staffCust = widget.request['customer_name']?.toString().trim();
+        final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Clerk',
+          type: 'ready_for_payment',
+          title: 'Ready for Billing & Payment',
+          message: '$staffRefNo ($staffCustLabel) MIC issued — ready for cashiering & payment.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_ready_for_payment',
+        );
       }
 
       final existing = await widget.supabase.from('slaughter_inspection').select('id, process_notes').eq('request_id', reqId).maybeSingle();
@@ -3763,6 +3806,18 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
               ? (double.tryParse(widget.request['penalty_fee'].toString()) ?? 500.0)
               : 0.0,
         },
+      );
+
+      final staffCust = widget.request['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Clerk',
+        type: 'ready_for_payment',
+        title: 'Ready for Billing & Payment',
+        message: '$refNo ($staffCustLabel) passed inspection — ready for cashiering & payment.',
+        requestId: (reqId as num).toInt(),
+        referenceNo: refNo,
+        dedupKey: 'req_${reqId}_ready_for_payment',
       );
 
       if (mounted) {

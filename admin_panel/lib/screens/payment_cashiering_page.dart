@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/app_settings_service.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
   const PaymentCashieringPage({super.key});
@@ -688,6 +689,18 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       }
 
       await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+
+      final staffCust = req['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Clerk',
+        type: 'ready_for_release',
+        title: 'Payment Confirmed — Ready for Release',
+        message: '$refNo ($staffCustLabel) payment settled — ready for meat releasing.',
+        requestId: (reqId as num).toInt(),
+        referenceNo: refNo,
+        dedupKey: 'req_${reqId}_ready_for_release',
+      );
 
       // Persist whether overdue_penalty or cold_storage_penalty was settled on this receipt
       final hasOverdue = ((fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0;
@@ -2119,6 +2132,18 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       }
 
       await widget.supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+
+      final staffCust = req['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Clerk',
+        type: 'ready_for_release',
+        title: 'Payment Confirmed — Ready for Release',
+        message: '$refNo ($staffCustLabel) payment settled — ready for meat releasing.',
+        requestId: (reqId as num).toInt(),
+        referenceNo: refNo,
+        dedupKey: 'req_${reqId}_ready_for_release',
+      );
 
       // Send notification safely (suppressed for on-site immediate slaughter walk-ins)
       final isImmediateOnSite = (req['anti_mortem']?.toString() == 'Separate Facility') ||

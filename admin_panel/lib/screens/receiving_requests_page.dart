@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/regular_dealers_service.dart';
@@ -2222,6 +2223,16 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         }
 
         // Walk-in immediate slaughter customers wait on-site at the facility; mobile app notifications suppressed
+        final staffCust = _customerNameCtrl.text.trim();
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Inspector',
+          type: 'separate_facility',
+          title: 'Ready for Slaughter & Inspection',
+          message: '$refNo (${staffCust.isNotEmpty ? staffCust : 'Walk-In'}) routed to Separate Facility — ready for inspection.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: refNo,
+          dedupKey: 'req_${reqId}_separate_facility',
+        );
       }
 
       // Ensure newly entered walk-in meat dealer is permanently locked in registry

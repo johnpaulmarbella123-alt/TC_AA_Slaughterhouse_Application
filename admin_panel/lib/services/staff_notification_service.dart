@@ -44,8 +44,24 @@ class StaffNotification {
   bool isReadBy(String email) => readBy.contains(email.toLowerCase());
 
   /// Sidebar module the notification should open.
-  /// 1 = Receiving & New Requests, 3 = Slaughter & Inspection
-  int get targetModule => type == 'doc_verified' ? 3 : 1;
+  /// 1 = Receiving & New Requests
+  /// 3 = Slaughter & Inspection
+  /// 4 = Payment & Cashiering
+  /// 5 = Meat Releasing
+  int get targetModule {
+    switch (type) {
+      case 'doc_verified':
+      case 'separate_facility':
+      case 'inspection_flagged':
+        return 3;
+      case 'ready_for_payment':
+        return 4;
+      case 'ready_for_release':
+        return 5;
+      default:
+        return 1;
+    }
+  }
 }
 
 /// Loads and live-updates staff notifications for the active role.
@@ -78,7 +94,7 @@ class StaffNotificationService extends ChangeNotifier {
       case 'Inspector':
         return const ['Inspector'];
       default:
-        return const ['Clerk', 'Inspector']; // Admin
+        return const ['Clerk', 'Inspector', 'Admin']; // Admin sees all
     }
   }
 
@@ -198,19 +214,19 @@ class StaffNotificationService extends ChangeNotifier {
   }
 
   /// Sends a notification directly to the staff_notifications table from Dart code.
-  /// This ensures notifications are recorded immediately without depending exclusively
-  /// on database triggers or restrictive RLS policies.
+  /// Uses [dedupKey] when provided so DB triggers and direct inserts never duplicate.
   static Future<bool> sendStaffNotification({
-    required String targetRole, // 'Clerk' or 'Inspector'
-    required String type, // 'new_request' or 'doc_verified'
+    required String targetRole, // 'Clerk', 'Inspector', or 'Admin'
+    required String type,
     required String title,
     required String message,
     required int requestId,
     required String referenceNo,
+    String? dedupKey,
   }) async {
     try {
       final supabase = Supabase.instance.client;
-      await supabase.from('staff_notifications').insert({
+      final row = <String, dynamic>{
         'target_role': targetRole,
         'type': type,
         'title': title,
@@ -218,7 +234,21 @@ class StaffNotificationService extends ChangeNotifier {
         'request_id': requestId,
         'reference_no': referenceNo,
         'read_by': <String>[],
-      });
+        if (dedupKey != null && dedupKey.isNotEmpty) 'dedup_key': dedupKey,
+      };
+      if (dedupKey != null && dedupKey.isNotEmpty) {
+        try {
+          await supabase
+              .from('staff_notifications')
+              .upsert(row, onConflict: 'dedup_key', ignoreDuplicates: true);
+        } catch (_) {
+          // Fallback if dedup_key column/index is not yet migrated
+          row.remove('dedup_key');
+          await supabase.from('staff_notifications').insert(row);
+        }
+      } else {
+        await supabase.from('staff_notifications').insert(row);
+      }
       // Trigger instant UI refresh
       instance.refresh();
       return true;
