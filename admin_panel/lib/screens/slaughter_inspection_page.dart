@@ -6,8 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
   const SlaughterInspectionPage({super.key});
@@ -1457,6 +1459,8 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
               TextField(
                 controller: reasonCtrl,
                 maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 style: const TextStyle(fontSize: 13),
                 decoration: InputDecoration(
                   hintText: 'Enter clearance notes or reason if condemning livestock...',
@@ -2289,6 +2293,35 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         );
       }
 
+      // Notify Clerk / Admin via staff notification bell
+      final staffRefNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final staffCust = widget.request['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      if (newStatus == 'releasable') {
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Clerk',
+          type: 'ready_for_payment',
+          title: 'Ready for Billing & Payment',
+          message: '$staffRefNo ($staffCustLabel) passed inspection — ready for cashiering & payment.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_ready_for_payment',
+        );
+      } else if (newStatus == 'anti_mortem_failed' ||
+          newStatus == 'post_mortem_failed' ||
+          newStatus == 'condemned' ||
+          newStatus == 'delay_error') {
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Admin',
+          type: 'inspection_flagged',
+          title: 'Inspection Flagged',
+          message: '$staffRefNo ($staffCustLabel) marked as ${newStatus.replaceAll('_', ' ')}.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_flagged_$newStatus',
+        );
+      }
+
       // If missed schedule occurred, send dedicated Schedule Notice
       if (_isMissedSchedule) {
         final prefStr = widget.request['preferred_date']?.toString() ?? 'scheduled date';
@@ -2720,6 +2753,8 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               const SizedBox(height: 6),
               TextField(
                 controller: _notesCtrl,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 decoration: InputDecoration(
                   filled: true,
                   fillColor: Colors.grey.shade100,
@@ -2766,6 +2801,8 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: _condemnationCtrl,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                         decoration: InputDecoration(
                           hintText: 'Describe the Health issue (e.g., liver abscess, lung lesion, etc...)',
                           hintStyle: const TextStyle(color: Colors.black, fontSize: 13),
@@ -2815,6 +2852,8 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                       TextField(
                         controller: _delayReasonCtrl,
                         maxLines: 2,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                         decoration: InputDecoration(
                           hintText: 'Describe the technical error or reason for delay...',
                           hintStyle: const TextStyle(color: Colors.black, fontSize: 13),
@@ -3113,6 +3152,19 @@ class _MICDialogState extends State<_MICDialog> {
         await widget.supabase.from('requests').update({
           'status': 'mic_generated',
         }).eq('id', reqId);
+
+        final staffRefNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+        final staffCust = widget.request['customer_name']?.toString().trim();
+        final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Clerk',
+          type: 'ready_for_payment',
+          title: 'Ready for Billing & Payment',
+          message: '$staffRefNo ($staffCustLabel) MIC issued — ready for cashiering & payment.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: staffRefNo,
+          dedupKey: 'req_${reqId}_ready_for_payment',
+        );
       }
 
       final existing = await widget.supabase.from('slaughter_inspection').select('id, process_notes').eq('request_id', reqId).maybeSingle();
@@ -3756,6 +3808,18 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
         },
       );
 
+      final staffCust = widget.request['customer_name']?.toString().trim();
+      final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Clerk',
+        type: 'ready_for_payment',
+        title: 'Ready for Billing & Payment',
+        message: '$refNo ($staffCustLabel) passed inspection — ready for cashiering & payment.',
+        requestId: (reqId as num).toInt(),
+        referenceNo: refNo,
+        dedupKey: 'req_${reqId}_ready_for_payment',
+      );
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
@@ -4223,6 +4287,8 @@ class _AntiMortemResponseDialogState extends State<_AntiMortemResponseDialog> {
               TextField(
                 controller: _notesCtrl,
                 maxLines: 2,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 decoration: InputDecoration(
                   hintText: 'Add any notes for the customer...',
                   hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),

@@ -62,12 +62,13 @@ class _OtpScreenState extends State<OtpScreen> {
             data: {
               'display_name': widget.username,
               'address': widget.address,
+              'role_confirmed': false,
             },
           ),
         );
 
         // Save profile data into profiles table
-        final emailValue = isEmail ? widget.identifier : (user.email ?? '');
+        final emailValue = isEmail ? widget.identifier.toLowerCase().trim() : (user.email?.toLowerCase().trim() ?? '');
         final phoneValue = isEmail ? (user.phone ?? '') : widget.identifier;
 
         try {

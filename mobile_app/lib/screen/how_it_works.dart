@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class HowItWorksScreen extends StatelessWidget {
-  const HowItWorksScreen({super.key});
+  final int? initialTabIndex;
+  const HowItWorksScreen({super.key, this.initialTabIndex = 0});
 
   final Color primaryGreen = const Color(0xFF218358);
   final Color darkGreen = const Color(0xFF14532D);
@@ -26,8 +27,10 @@ class HowItWorksScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final safeTabIndex = (initialTabIndex ?? 0).clamp(0, 2);
     return DefaultTabController(
       length: 3,
+      initialIndex: safeTabIndex,
       child: Scaffold(
       backgroundColor: const Color(0xFFF7F9FA),
       appBar: AppBar(
@@ -148,22 +151,30 @@ class HowItWorksScreen extends StatelessWidget {
       },
       {
         "step": "2",
-        "title": "Submit a Slaughter Request",
+        "title": "Choose Your Dealer Role (Barangay or Market)",
         "description":
-            "Go to the 'Requests' tab. Choose your livestock type (Pig/Hog, Cattle, Carabao, Goat, or Sheep), enter the head count, slaughter date, and address / stall destination.",
-        "icon": Icons.assignment_turned_in_rounded,
-        "tip": "Fill in any animal markings or special instructions for easy identification."
+            "Tap 'Get New Requests' to go to the Requests tab. If you are a new user, choose your permanent dealer role first—either 'Barangay' (for barangay/community livestock owners) or 'Market' (for public market stallholders)—and confirm the reminder before proceeding.",
+        "icon": Icons.storefront_rounded,
+        "tip": "Your chosen role (Barangay or Market) is permanently assigned to your account for all future bookings."
       },
       {
         "step": "3",
+        "title": "Create & Submit a Slaughter Request",
+        "description":
+            "Fill out the Create New Request form for your locked role: select your livestock type (Pig/Hog, Cattle, Carabao, Goat, or Sheep), head count, address (and Market Name + Stall Number for Market dealers), preferred schedule date, and permanent livestock marking.",
+        "icon": Icons.assignment_turned_in_rounded,
+        "tip": "Your 1–5 character livestock marking is also permanently locked after your first request."
+      },
+      {
+        "step": "4",
         "title": "Upload Clearances & Permits",
         "description":
-            "Attach clear photos of required legal certificates: Barangay Clearance, Veterinary Health Certificate, and Proof of Livestock Ownership.",
+            "Attach clear photos of required legal certificates: Barangay Certificate (for Barangay role) or Business Permit (for Market role), Proof of Ownership, and optional Veterinary Health Certificate.",
         "icon": Icons.upload_file_rounded,
         "tip": "Clear photos ensure fast approval without administrative delays."
       },
       {
-        "step": "4",
+        "step": "5",
         "title": "Ante-Mortem & Facility Inspection",
         "description":
             "Bring livestock to the Tabaco City Class 'AA' Slaughterhouse. Certified government meat inspectors conduct thorough health and sanitation checks.",
@@ -171,7 +182,7 @@ class HowItWorksScreen extends StatelessWidget {
         "tip": "Livestock must arrive on your scheduled date for inspection."
       },
       {
-        "step": "5",
+        "step": "6",
         "title": "Live Status Updates & Alerts",
         "description":
             "Track your request live in the 'Notify' tab. Receive instant status changes from 'Pending', 'In-Inspection', 'Slaughtered', to 'Ready for Pick-up'.",
@@ -179,7 +190,7 @@ class HowItWorksScreen extends StatelessWidget {
         "tip": "Check for condemnation slips if any part was found unfit for consumption."
       },
       {
-        "step": "6",
+        "step": "7",
         "title": "Digital Payment & Meat Release",
         "description":
             "Review your itemized invoice (ante/post-mortem fees, slaughter fees, corral fees). Pay conveniently via Online Payment (GCash, Maya, GrabPay, Card) or over-the-counter cash, and claim your inspected meat.",
@@ -533,6 +544,18 @@ class HowItWorksScreen extends StatelessWidget {
   // ══════════════════════════════════════════════════════════════════════════════
   Widget _buildFaqTab() {
     final faqs = [
+      {
+        "q": "How do I choose between the Barangay and Market booking option?",
+        "a":
+            "When you tap 'Get New Requests' for the first time, the app will ask you to choose your dealer role before creating a request:\n\n"
+            "• Choose 'Barangay' if you are a barangay resident, backyard livestock owner, or local community butcher slaughtering livestock for barangay distribution or personal/community use. You will need to provide your Barangay Address, Barangay Certificate, Proof of Ownership, and optional Veterinary Health Certificate.\n\n"
+            "• Choose 'Market' if you are a public market meat vendor or commercial stallholder selling meat at a market stall (such as Tabaco City Public Market). You will need to provide your Market Name, Stall Number, Business Permit, Proof of Ownership, and optional Veterinary Health Certificate."
+      },
+      {
+        "q": "Can I switch between Barangay and Market on my second booking?",
+        "a":
+            "No. Once you confirm your role on your first booking (Barangay or Market), your account is permanently assigned and locked to that dealer role for your second and all future bookings. A confirmation reminder is shown before you lock your choice so that your abattoir records and permanent dealer marking stay consistent."
+      },
       {
         "q": "What livestock species can be processed?",
         "a":

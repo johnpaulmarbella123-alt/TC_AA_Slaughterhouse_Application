@@ -9,7 +9,9 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'report_illegal_slaughter_screen.dart';
+import 'how_it_works.dart';
 import '../services/document_verifier.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class RequestsContent extends StatefulWidget {
   const RequestsContent({super.key});
@@ -74,6 +76,12 @@ class _RequestsContentState extends State<RequestsContent> {
   bool _isMarkingLocked = false;
   bool _isCustomerNameLocked = false;
   bool _isRegularDealer = false;
+  bool? _isRoleLocked = false;
+  bool? _isProfileLoading = true;
+  String? _pendingSelectedRole = 'barangay';
+  bool get _roleLocked => _isRoleLocked ?? false;
+  bool get _profileLoading => _isProfileLoading ?? false;
+  String get _selectedRoleKey => _pendingSelectedRole ?? 'barangay';
   StreamSubscription<AuthState>? _authSubscription;
 
   String? selectedLivestock;
@@ -111,23 +119,34 @@ class _RequestsContentState extends State<RequestsContent> {
   Future<void> _loadCustomerProfile() async {
     try {
       final user = supabase.auth.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        if (mounted) setState(() => _isProfileLoading = false);
+        return;
+      }
 
       // 1. Try immediate load from user metadata
       final meta = user.userMetadata;
       String? resolvedName = (meta?['display_name'] ?? meta?['full_name'] ?? meta?['name'])?.toString().trim();
       String? resolvedMarking;
+      String? resolvedRole;
       bool isLocked = false;
       bool isCustNameLocked = false;
       bool isRegular = false;
+      bool hasAuthoritativeRoleLock =
+          meta?['role_confirmed'] == true || meta?['role_confirmed']?.toString() == 'true';
       String? officialDealerName;
 
-      // 2. Fetch latest profile from DB first so we also know display_name / address
+      final metaRole = meta?['dealer_category']?.toString().trim().toLowerCase();
+      if (hasAuthoritativeRoleLock && (metaRole == 'barangay' || metaRole == 'market')) {
+        resolvedRole = metaRole;
+      }
+
+      // 2. Fetch latest profile from DB first so we also know display_name / address / dealer_category
       Map<String, dynamic>? profile;
       try {
         final res = await supabase
             .from('profiles')
-            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type')
+            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category')
             .eq('id', user.id)
             .maybeSingle();
         if (res != null) profile = Map<String, dynamic>.from(res);
@@ -135,7 +154,7 @@ class _RequestsContentState extends State<RequestsContent> {
         try {
           final res = await supabase
               .from('profiles')
-              .select('display_name, address, assigned_marking, marking_locked')
+              .select('display_name, address, assigned_marking, marking_locked, dealer_category')
               .eq('id', user.id)
               .maybeSingle();
           if (res != null) profile = Map<String, dynamic>.from(res);
@@ -168,6 +187,14 @@ class _RequestsContentState extends State<RequestsContent> {
           isRegular = true;
           isCustNameLocked = true;
         }
+        final profCategory = profile['dealer_category']?.toString().trim().toLowerCase();
+        // NOTE: `profiles.dealer_category` has a DB column default of 'barangay' on sign-up,
+        // so only trust `profCategory` if the user already has a locked marking or confirmed their role.
+        if ((isLocked || hasAuthoritativeRoleLock) &&
+            (profCategory == 'barangay' || profCategory == 'market')) {
+          resolvedRole ??= profCategory;
+          hasAuthoritativeRoleLock = true;
+        }
       }
 
       // 3. Check if linked to an official regular dealer in system_settings (authoritative Admin record)
@@ -190,6 +217,7 @@ class _RequestsContentState extends State<RequestsContent> {
               final uId = (item['user_id'] ?? item['userId'])?.toString().trim();
               final itemName = (item['name'] ?? '').toString().trim();
               final itemMarking = (item['markings'] ?? item['marking'] ?? '').toString().trim().toUpperCase();
+              final itemCat = (item['category'] ?? '').toString().trim().toLowerCase();
               if (uId != null && uId.isNotEmpty && uId != user.id) {
                 continue; // Belongs to a different user account
               }
@@ -200,6 +228,10 @@ class _RequestsContentState extends State<RequestsContent> {
               if (matchesUser || matchesName) {
                 if (itemName.isNotEmpty) officialDealerName = itemName;
                 if (itemMarking.isNotEmpty) resolvedMarking = itemMarking;
+                if (itemCat == 'barangay' || itemCat == 'market') {
+                  resolvedRole = itemCat;
+                  hasAuthoritativeRoleLock = true;
+                }
                 isRegular = true;
                 isLocked = true;
                 isCustNameLocked = true;
@@ -210,12 +242,12 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       } catch (_) {}
 
-      // 4. If marking not yet found in regular_dealers/profiles, check user's first submitted request
-      if (resolvedMarking == null || resolvedMarking.isEmpty) {
+      // 4. Always check user's first submitted request for marking or request_type (barangay vs market)
+      if (resolvedMarking == null || resolvedMarking.isEmpty || !hasAuthoritativeRoleLock) {
         try {
           final pastReq = await supabase
               .from('requests')
-              .select('marking, customer_name')
+              .select('marking, customer_name, request_type')
               .eq('user_id', user.id)
               .not('status', 'in', '("rejected","cancelled")')
               .order('created_at', ascending: true)
@@ -224,10 +256,15 @@ class _RequestsContentState extends State<RequestsContent> {
           if (pastReq != null) {
             final m = pastReq['marking']?.toString().trim().toUpperCase();
             if (m != null && m.isNotEmpty) {
-              resolvedMarking = m;
+              resolvedMarking ??= m;
               isLocked = true;
               isCustNameLocked = true;
               isRegular = true;
+            }
+            final rType = pastReq['request_type']?.toString().trim().toLowerCase();
+            if (rType == 'barangay' || rType == 'market') {
+              resolvedRole = rType;
+              hasAuthoritativeRoleLock = true;
             }
             final cName = pastReq['customer_name']?.toString().trim();
             if ((officialDealerName == null || officialDealerName.isEmpty) && cName != null && cName.isNotEmpty) {
@@ -288,10 +325,19 @@ class _RequestsContentState extends State<RequestsContent> {
             _markingController.clear();
             _isMarkingLocked = false;
           }
+          if (hasAuthoritativeRoleLock && (resolvedRole == 'barangay' || resolvedRole == 'market')) {
+            _isRoleLocked = true;
+            isBarangay = (resolvedRole == 'barangay');
+            _pendingSelectedRole = resolvedRole!;
+          } else {
+            _isRoleLocked = false;
+          }
+          _isProfileLoading = false;
         });
       }
     } catch (e) {
       debugPrint('Error loading customer profile: $e');
+      if (mounted) setState(() => _isProfileLoading = false);
     }
   }
 
@@ -324,6 +370,17 @@ class _RequestsContentState extends State<RequestsContent> {
         _markingController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please fill in all required fields (including Livestock Marking)")),
+      );
+      return;
+    }
+
+    if (!isBarangay &&
+        (_marketNameController.text.trim().isEmpty ||
+            _marketStallController.text.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please enter both Market Name and Stall Number for Market requests"),
+        ),
       );
       return;
     }
@@ -470,7 +527,7 @@ class _RequestsContentState extends State<RequestsContent> {
       final finalMarking = markingInput;
       final finalCustomerName = _customerNameController.text.trim();
 
-      // Persist permanent marking in user_metadata & profiles so it stays locked across sessions
+      // Persist permanent marking & dealer_category in user_metadata & profiles so it stays locked across sessions
       try {
         await supabase.auth.updateUser(
           UserAttributes(
@@ -478,6 +535,8 @@ class _RequestsContentState extends State<RequestsContent> {
               'assigned_marking': finalMarking,
               'marking_locked': true,
               'official_dealer_name': finalCustomerName,
+              'dealer_category': isBarangay ? 'barangay' : 'market',
+              'role_confirmed': true,
             },
           ),
         );
@@ -561,8 +620,8 @@ class _RequestsContentState extends State<RequestsContent> {
             'municipality': selectedMunicipality,
             'barangay': selectedBarangay,
             'address': _addressController.text.trim(),
-            'market_stall_number': null,
-            'market_name': null,
+            'market_stall_number': !isBarangay ? _marketStallController.text.trim() : null,
+            'market_name': !isBarangay ? _marketNameController.text.trim() : null,
             'preferred_date': preferredDateIso,
             'marking': finalMarking,
             'special_instruction': _specialInstructionsController.text.trim(),
@@ -601,6 +660,7 @@ class _RequestsContentState extends State<RequestsContent> {
         _isMarkingLocked = true;
         _isCustomerNameLocked = true;
         _isRegularDealer = true;
+        _isRoleLocked = true;
         _customerName = finalCustomerName;
         _markingController.text = finalMarking;
       });
@@ -1138,131 +1198,660 @@ class _RequestsContentState extends State<RequestsContent> {
     }
   }
 
+  Future<void> _showRoleConfirmationDialog() async {
+    final bool isChoosingBarangay = _selectedRoleKey == 'barangay';
+    final String roleTitle = isChoosingBarangay ? 'Barangay Dealer' : 'Market Dealer';
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        icon: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: const BoxDecoration(
+            color: Color(0xFFFFF8E1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.warning_amber_rounded,
+            color: Color(0xFFD97706),
+            size: 36,
+          ),
+        ),
+        title: const Text(
+          "Confirm Permanent Dealer Role",
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFF81C784)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    isChoosingBarangay ? Icons.home_work_outlined : Icons.storefront_outlined,
+                    color: const Color(0xFF1E855A),
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "Selected Role:",
+                          style: TextStyle(fontSize: 11, color: Colors.black54),
+                        ),
+                        Text(
+                          roleTitle,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1B5E20),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_outline, color: Color(0xFFB45309), size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Reminder: Once you confirm this choice, your account will be permanently assigned to this dealer role for this and all future bookings. You will not be able to switch between Barangay and Market later.",
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: Color(0xFF92400E),
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.black87,
+                    side: BorderSide(color: Colors.grey.shade300),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text("Go Back"),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E855A),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text(
+                    "Confirm Role",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      isBarangay = isChoosingBarangay;
+      _isRoleLocked = true;
+    });
+
+    final user = supabase.auth.currentUser;
+    final chosenRole = _selectedRoleKey;
+    if (user != null) {
+      try {
+        await supabase.auth.updateUser(
+          UserAttributes(
+            data: {
+              'dealer_category': chosenRole,
+              'role_confirmed': true,
+            },
+          ),
+        );
+      } catch (_) {}
+
+      try {
+        await supabase.from('profiles').update({
+          'dealer_category': chosenRole,
+        }).eq('id', user.id);
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Role permanently set to $roleTitle. You may now create your request."),
+        backgroundColor: const Color(0xFF1E855A),
+      ),
+    );
+  }
+
+  Widget _buildRoleSelectionView(BuildContext context) {
+    final bool isChoosingBarangay = _selectedRoleKey == 'barangay';
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Stepper indicator: Choose Role -> Create Request -> Submit
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0FDF4),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFBBF7D0)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildStepPill("1", "Choose Role", true),
+                const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                _buildStepPill("2", "Create Request", false),
+                const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                _buildStepPill("3", "Submit", false),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade200),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Choose Your Dealer Role",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  "Since you are new to booking, please select whether you are registering as a Barangay Dealer or a Market Dealer.",
+                  style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.35),
+                ),
+                const SizedBox(height: 18),
+
+                // Option 1: Barangay
+                _buildRoleOptionCard(
+                  roleKey: 'barangay',
+                  title: "Barangay Dealer",
+                  subtitle: "For barangay residents, livestock owners, and community meat dealers",
+                  requirements: "Requires: Barangay Address, Barangay Certificate, Proof of Ownership, and optional Vet Health Certificate.",
+                  icon: Icons.home_work_outlined,
+                  isSelected: isChoosingBarangay,
+                ),
+                const SizedBox(height: 14),
+
+                // Option 2: Market
+                _buildRoleOptionCard(
+                  roleKey: 'market',
+                  title: "Market Dealer",
+                  subtitle: "For public market stallholders and commercial meat vendors",
+                  requirements: "Requires: Market Name, Stall Number, Business Permit, Proof of Ownership, and optional Vet Health Certificate.",
+                  icon: Icons.storefront_outlined,
+                  isSelected: !isChoosingBarangay,
+                ),
+                const SizedBox(height: 18),
+
+                // Permanent Role Reminder Banner
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline, color: Color(0xFFD97706), size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Important Reminder: The role you choose will be permanently assigned to your account. All of your future slaughter requests will be locked to this role.",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF92400E),
+                            height: 1.35,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Helper Link to FAQ
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const HowItWorksScreen(initialTabIndex: 2),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.help_outline_rounded, size: 18, color: Color(0xFF1E855A)),
+                    label: const Text(
+                      "How do I choose Barangay vs. Market? Read FAQ",
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1E855A),
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _showRoleConfirmationDialog,
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                    label: Text(
+                      "Continue as ${isChoosingBarangay ? 'Barangay' : 'Market'} Dealer",
+                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E855A),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepPill(String stepNum, String label, bool isActive) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 22,
+          height: 22,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isActive ? const Color(0xFF1E855A) : Colors.grey.shade300,
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            stepNum,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: isActive ? Colors.white : Colors.black54,
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+            color: isActive ? const Color(0xFF1B5E20) : Colors.black54,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoleOptionCard({
+    required String roleKey,
+    required String title,
+    required String subtitle,
+    required String requirements,
+    required IconData icon,
+    required bool isSelected,
+  }) {
+    return GestureDetector(
+      onTap: () => setState(() => _pendingSelectedRole = roleKey),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFE8F5E9) : const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF1E855A) : Colors.grey.shade300,
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFF1E855A) : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                icon,
+                color: isSelected ? Colors.white : Colors.grey.shade700,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? const Color(0xFF1B5E20) : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      Icon(
+                        isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                        color: isSelected ? const Color(0xFF1E855A) : Colors.grey,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 12.5, color: Colors.black87, height: 1.3),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    requirements,
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Page Header & Title
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFC8E6C9), // Light green background
-                ),
+        child: _profileLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: Color(0xFF1E855A)),
+              )
+            : SingleChildScrollView(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      "Create New Requests",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      "Submit your processing request with required documents.",
-                      style: TextStyle(fontSize: 11, color: Colors.black87),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Center(
-                child: Text(
-                  "Create New Request",
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Center(
-                child: Text(
-                  "Fill details below to quickly submit a service request.",
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color.fromARGB(255, 41, 40, 40),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // 2. Main Form Container & State Toggle
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey.shade200),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                  children: [
+                    // 1. Page Header & Title
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFC8E6C9), // Light green background
                       ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      // Custom Toggle
-                      Container(
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(25),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _roleLocked ? "Create New Requests" : "Choose Dealer Role",
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _roleLocked
+                                ? "Submit your processing request with required documents."
+                                : "Select your permanent dealer role before creating a request.",
+                            style: const TextStyle(fontSize: 11, color: Colors.black87),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    if (!_roleLocked) ...[
+                      _buildRoleSelectionView(context),
+                      const SizedBox(height: 40),
+                    ] else ...[
+                      const Center(
+                        child: Text(
+                          "Create New Request",
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () => setState(() => isBarangay = true),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: isBarangay ? const Color(0xFF1E855A) : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      "Barangay",
-                                      style: TextStyle(
-                                        color: isBarangay ? Colors.white : Colors.black54,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Expanded(
-                              child: GestureDetector(
-                                onTap: () => setState(() => isBarangay = false),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: !isBarangay ? const Color(0xFF1E855A) : Colors.transparent,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Center(
-                                    child: Text(
-                                      "Market",
-                                      style: TextStyle(
-                                        color: !isBarangay ? Colors.white : Colors.black54,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Center(
+                        child: Text(
+                          "Fill details below to quickly submit a service request.",
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color.fromARGB(255, 41, 40, 40),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),
+
+                      // 2. Main Form Container & Locked Role Toggle
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.grey.shade200),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              // Custom Toggle (Locked to chosen dealer role)
+                              Container(
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(25),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          if (!isBarangay) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  "Your account is permanently locked as a Market Dealer based on your initial role selection.",
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: isBarangay ? const Color(0xFF1E855A) : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Center(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (isBarangay) ...[
+                                                  const Icon(Icons.lock, size: 14, color: Colors.white),
+                                                  const SizedBox(width: 5),
+                                                ],
+                                                Text(
+                                                  "Barangay",
+                                                  style: TextStyle(
+                                                    color: isBarangay ? Colors.white : Colors.black38,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          if (isBarangay) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text(
+                                                  "Your account is permanently locked as a Barangay Dealer based on your initial role selection.",
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: !isBarangay ? const Color(0xFF1E855A) : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(20),
+                                          ),
+                                          child: Center(
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (!isBarangay) ...[
+                                                  const Icon(Icons.lock, size: 14, color: Colors.white),
+                                                  const SizedBox(width: 5),
+                                                ],
+                                                Text(
+                                                  "Market",
+                                                  style: TextStyle(
+                                                    color: !isBarangay ? Colors.white : Colors.black38,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.lock_outline, size: 13, color: Color(0xFF1E855A)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        "Permanent Role: ${isBarangay ? 'Barangay Dealer' : 'Market Dealer'}",
+                                        style: const TextStyle(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: Color(0xFF1E855A),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  InkWell(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => const HowItWorksScreen(initialTabIndex: 2),
+                                        ),
+                                      );
+                                    },
+                                    child: const Text(
+                                      "Why is this locked? (FAQ)",
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Color(0xFF1E855A),
+                                        decoration: TextDecoration.underline,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 20),
 
                       if (_isRegularDealer) ...[
                         Container(
@@ -1310,6 +1899,8 @@ class _RequestsContentState extends State<RequestsContent> {
                         _customerName.isNotEmpty ? _customerName : "Enter customer name",
                         controller: _customerNameController,
                         readOnly: _isCustomerNameLocked || _customerNameController.text.isNotEmpty,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [WordsCapitalizationFormatter()],
                         prefixIcon: const Icon(Icons.person_outline, size: 20, color: Color(0xFF1E855A)),
                         suffixIcon: _customerNameController.text.isNotEmpty
                             ? Padding(
@@ -1461,7 +2052,38 @@ class _RequestsContentState extends State<RequestsContent> {
                         "Complete Address",
                         "House No. / Street",
                         controller: _addressController,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [WordsCapitalizationFormatter()],
                       ),
+
+                      if (!isBarangay) ...[
+                        const SizedBox(height: 16),
+                        _buildTextField(
+                          "Market Name *",
+                          "e.g. Tabaco City Public Market",
+                          controller: _marketNameController,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [WordsCapitalizationFormatter()],
+                          prefixIcon: const Icon(
+                            Icons.storefront_outlined,
+                            size: 20,
+                            color: Color(0xFF1E855A),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildTextField(
+                          "Stall Number *",
+                          "e.g. Stall #12 or Meat Section A-4",
+                          controller: _marketStallController,
+                          textCapitalization: TextCapitalization.words,
+                          inputFormatters: const [WordsCapitalizationFormatter()],
+                          prefixIcon: const Icon(
+                            Icons.confirmation_number_outlined,
+                            size: 20,
+                            color: Color(0xFF1E855A),
+                          ),
+                        ),
+                      ],
 
                       const SizedBox(height: 32),
 
@@ -1484,6 +2106,8 @@ class _RequestsContentState extends State<RequestsContent> {
                         "Any specific requests or requirements...",
                         maxLines: 3,
                         controller: _specialInstructionsController,
+                        textCapitalization: TextCapitalization.sentences,
+                        inputFormatters: const [SentencesCapitalizationFormatter()],
                       ),
                       const SizedBox(height: 16),
                       _buildTextField(
@@ -1499,6 +2123,7 @@ class _RequestsContentState extends State<RequestsContent> {
                             : [
                                 FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
                                 LengthLimitingTextInputFormatter(5),
+                                const UpperCaseTextFormatter(),
                               ],
                         prefixIcon: _isMarkingLocked
                             ? const Icon(Icons.lock, color: Color(0xFF2D6A4F), size: 18)
@@ -1580,6 +2205,7 @@ class _RequestsContentState extends State<RequestsContent> {
                 ),
               ),
               const SizedBox(height: 40),
+            ],
             ],
           ),
         ),

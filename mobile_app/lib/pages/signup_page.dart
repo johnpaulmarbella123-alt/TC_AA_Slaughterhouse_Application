@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../otp_screen.dart';
 import '../screen/how_it_works.dart';
+import '../utils/text_capitalization_formatters.dart';
 import '../widgets/terms_and_conditions_dialog.dart';
 
 class SignupPages extends StatefulWidget {
@@ -101,18 +103,28 @@ class _SignupScreenState
         throw 'Password must be at least 6 characters.';
       }
 
-      bool isPhone = input.startsWith('09') || input.startsWith('+63');
+      bool isPhone = input.startsWith('09') ||
+          input.startsWith('+63') ||
+          (input.startsWith('9') && input.length == 10 && RegExp(r'^\d+$').hasMatch(input));
       String identifier = input;
 
       if (isPhone) {
-        if (input.startsWith('09')) {
-          identifier = '+63${input.substring(1)}';
+        identifier = _authService.formatToE164Phone(input);
+        if (!identifier.startsWith('+639') || identifier.length != 13) {
+          throw 'Please enter a valid 11-digit mobile number (e.g. 09123456789).';
         }
       } else {
+        identifier = input.toLowerCase();
         final emailRegex = RegExp(r'^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$');
-        if (!emailRegex.hasMatch(input)) {
+        if (!emailRegex.hasMatch(identifier)) {
           throw 'Please enter a complete and valid email (e.g. name@gmail.com).';
         }
+      }
+
+      // Check if account already exists with this email or phone number
+      final exists = await _authService.isAccountExists(identifier);
+      if (exists) {
+        throw 'An account with this email address or phone number already exists. Please log in or reset your password.';
       }
 
       // Send OTP via Supabase
@@ -298,6 +310,8 @@ class _SignupScreenState
                       hint: "Enter full name",
                       icon: Icons.person_outline,
                       controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
                     ),
 
                     const SizedBox(height: 20),
@@ -311,6 +325,9 @@ class _SignupScreenState
 
                       controller:
                           _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      textCapitalization: TextCapitalization.none,
+                      autocorrect: false,
                     ),
 
                     const SizedBox(height: 20),
@@ -323,6 +340,8 @@ class _SignupScreenState
 
                       controller:
                           _addressController,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
                     ),
 
                     const SizedBox(height: 20),
@@ -567,6 +586,10 @@ class _SignupScreenState
     TextEditingController? controller,
 
     VoidCallback? onToggleVisibility,
+    TextInputType keyboardType = TextInputType.text,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
+    bool autocorrect = true,
   }) {
 
     return Container(
@@ -593,6 +616,10 @@ class _SignupScreenState
         controller: controller,
 
         obscureText: obscureText,
+        keyboardType: keyboardType,
+        textCapitalization: textCapitalization,
+        inputFormatters: inputFormatters,
+        autocorrect: autocorrect,
 
         decoration: InputDecoration(
 

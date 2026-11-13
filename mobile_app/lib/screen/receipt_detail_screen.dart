@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dashed_line.dart';
 import 'payment.dart' show kMintHeader;
 import 'select_payment_screen.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 const kAccentGreen = Color(0xFF1BC47D);
 
@@ -1271,6 +1272,8 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     _sheetLabel('Representative Full Name *'),
                     TextField(
                       controller: nameCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
                       decoration: _sheetInputDecoration('e.g. Juan Dela Cruz'),
                       style: const TextStyle(fontSize: 13),
                     ),
@@ -1304,6 +1307,8 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     _sheetLabel('Valid ID Number *'),
                     TextField(
                       controller: idNumCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: const [UpperCaseTextFormatter()],
                       decoration: _sheetInputDecoration('Enter ID Card Number'),
                       style: const TextStyle(fontSize: 13),
                     ),

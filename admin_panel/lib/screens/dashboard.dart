@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_settings_service.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class DashboardPage extends StatefulWidget {
   final void Function(int index, [String? tab])? onNavigate;
@@ -1105,6 +1106,12 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ),
             const SizedBox(width: 8),
+
+            // Staff notification bell
+            StaffNotificationBell(
+              onNavigate: (m) => widget.onNavigate?.call(m),
+            ),
+            const SizedBox(width: 4),
 
             // Refresh action
             IconButton(
@@ -3040,6 +3047,10 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ),
         const SizedBox(width: 16),
+        StaffNotificationBell(
+          onNavigate: (m) => widget.onNavigate?.call(m),
+        ),
+        const SizedBox(width: 10),
         Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -3256,6 +3267,10 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                         ),
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    StaffNotificationBell(
+                      onNavigate: (m) => widget.onNavigate?.call(m),
                     ),
                     const SizedBox(width: 10),
                     Container(

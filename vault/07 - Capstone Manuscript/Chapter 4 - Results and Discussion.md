@@ -205,75 +205,100 @@ Logical design represents an abstract, implementation-independent blueprint of t
 
 #### Proposed System Flowchart
 
-The Proposed System Flowchart depicted in Figure 20 defines the sequential operational algorithm and logical decision branches governing animal intake, clinical triage, payment processing, and meat dispatch within the Tabaco City Slaughterhouse.
+The Proposed System Flowchart depicted in Figure 20 defines the dual-track operational algorithm, role-based dispatcher, decision trees, and cross-functional interactions governing animal intake, clinical triage, payment processing, meat release, and administrative oversight within the Tabaco City Slaughterhouse. Immediately upon launching the system, the **Account Type / Platform Router** branches into two synchronized tracks with their respective authentication protocols:
+
+1. **Track 1: Internal Staff Cascading Role Dispatcher (`Internal User — Web Admin Portal`)**:
+   - **Staff Authentication (`Staff Authenticated?`)**: Internal abattoir personnel authenticate strictly via administrator-provisioned **Email & Password** credentials (`signInWithPassword`) without public registration or OTP requirements.
+   - **Administrator (`Is Admin? == Yes`)**: Routes to the **Admin Workstation**. While retaining full superuser access across all operational modules (Receiving, Document Verification, Slaughter Inspection, Cashiering, Meat Releasing), the Administrator's primary focus centers on **Reports & Records**—specifically compiling the official Daily Slaughterhouse Production Report (formatted as a legal-sized 8.5" × 14" document complying with National Meat Inspection Service [NMIS] regulatory standards), generating municipal fiscal audit ledgers, and investigating whistleblower incident dossiers for inter-agency enforcement with the City Veterinary Office (CVO) and Philippine National Police (PNP).
+   - **Receiving Clerk & Cashier (`Is Clerk? == Yes`)**: Routes to the **Clerk Workstation**, governing front-of-house intake and financial settlement: (a) *Receiving & New Requests* (evaluating daily corral capacity and barangay/market delivery quotas), (b) *Document Verification* (auditing physical livestock ear-tags against uploaded Veterinary Health Certificates and shipping permits), (c) *Payment & Cashiering* (computing municipal tariffs, accepting over-the-counter cash tendered or verifying digital PayMongo webhook settlements, and issuing Official Receipts `RCP-YYYY-XXX`), and (d) *Meat Releasing* (scanning the cryptographically signed QR gate pass at the dispatch loading dock and stamping `released_at = NOW()`).
+   - **Veterinary Meat Inspector (`Is Inspector? == Yes`)**: Routes to the **Inspector Workstation**, commanding abattoir floor operations and biological safety checks: (a) *Clinical Ante-Mortem Inspection* at holding pens (quarantining or incinerating unfit livestock under Condemnation Slip `CS-YYYY-XXX`), (b) *Slaughter Operations Line Supervision* across hygienic stations (stunning, bleeding, scalding/dehairing, evisceration, splitting), (c) *Post-Mortem Visceral Pathology* on carcasses and offal, and (d) *Calibrated Carcass Weighing (kg)* and stamping digital Meat Inspection Certificates (MIC).
+
+2. **Track 2: Customer / Client Service Pipeline (`Customer / Client — Mobile App`)**:
+   - **Customer Authentication & Mobile Sign-Up OTP (`Customer Authenticated?`)**: Returning customers sign in using their registered Email/Password, while new customers registering on the mobile application must complete **Sign-Up with One-Time Password (OTP) Verification** to validate account ownership.
+   - **Action Type Selection**: Allows registered meat dealers, market vendors, or walk-in citizens to choose between filing a *Whistleblower Tip* (attaching GPS geolocation and photographic evidence of clandestine slaughter) or initiating a *Slaughter Service Request*.
+   - **End-to-End Service Progression & Cross-Functional Gatekeeping**: The customer's slaughter request progresses sequentially through each physical and digital gate—Intake Approval $\rightarrow$ Document Verification $\rightarrow$ Ante-Mortem Inspection $\rightarrow$ Slaughter Operations Line $\rightarrow$ Post-Mortem Inspection $\rightarrow$ Carcass Weighing & MIC $\rightarrow$ Municipal Fee Computation $\rightarrow$ Multi-Channel Payment Settlement $\rightarrow$ Dispatch Loading Dock Verification $\rightarrow$ Confirmed Pickup. Dotted cross-links explicitly illustrate how the Clerk, Inspector, and Administrator workstations drive each stage of the customer's transaction lifecycle.
+   - **Multi-Channel Payment Gateway**: Expanding beyond single-wallet GCash, the payment stage integrates a comprehensive **PayMongo Multi-Channel Online Gateway** supporting **GCash, Maya, GrabPay, Visa/Mastercard credit and debit cards, and national QR Ph standards** with automated serverless webhook signature validation (`Status == 'paid'`), operating alongside traditional municipal over-the-counter cash cashiering.
 
 ```mermaid
-graph TD
-    subgraph Figure 20: Proposed System Flowchart
-        Init["<b>System Initialization & State Declaration</b><br/>Acronyms: CST = Customer | REC = Receiving Clerk | INSP = Inspector<br/>CSH = Cashier | ADM = Administrator<br/>Variables: USR=0, PR=0, OR=0, QR=0, CS=0"] --> Start([Start: Launch Application])
+flowchart TD
+    Start([Start]) --> AccountType{"Account Type?"}
 
-        Start --> AuthGate{"Is User Authenticated?<br/>(GoTrue Session Active?)"}
-        
-        AuthGate -- "No" --> LoginForm["Display Login Screen<br/>(Input Email/Password or Phone OTP)"]
-        LoginForm --> ValidateCreds{"Are Credentials<br/>Valid?"}
-        ValidateCreds -- "No" --> Err401["Output: 401 Unauthorized<br/>Display Error Notification"] --> NodeB2
-        ValidateCreds -- "Yes" --> SetSession["Set USR = Session.User.ID<br/>Load Encrypted JWT Token"] --> AuthGate
+    %% ─── AUTHENTICATION & ROLE ROUTING ───
+    AccountType -- "Staff" --> StaffAuth{"Staff Authenticated?"}
+    StaffAuth -- "No" --> StaffLogin["Staff Login"] --> StaffAuth
+    StaffAuth -- "Yes" --> IsAdmin{"Admin?"}
 
-        AuthGate -- "Yes" --> RoleRouter{"Evaluate Active<br/>User Role (USR)"}
+    IsAdmin -- "No" --> IsClerk{"Clerk?"}
+    IsClerk -- "No" --> IsInspector{"Inspector?"}
 
-        RoleRouter -- "Role == CST" --> CstChoice{"Select Service<br/>Transaction Type"}
-        CstChoice -- "Whistleblower Tip" --> WbInput["Capture Geolocation, Timestamp,<br/>Description & Evidence Photo"] --> PackWb["Construct Payload_Whistleblower"] --> NodeB1
-        CstChoice -- "Slaughter Booking" --> BookForm["Select Date, Species & Head Count (Q)"]
-        BookForm --> QuotaCheck{"Check Daily Quota:<br/>Capacity >= Q AND Time < 15:00?"}
-        QuotaCheck -- "No" --> Err422_Quota["Output: 422 Unprocessable Entity<br/>'Quota Exceeded / Booking Closed'"] --> NodeB2
-        QuotaCheck -- "Yes" --> UploadDocs["Upload Digital Permits (VHC & Shipping Permit)"]
-        UploadDocs --> PackIntake["Construct Payload_Intake"] --> NodeB1
+    AccountType -- "Customer" --> CustAuth{"Customer Authenticated?"}
+    CustAuth -- "No" --> CustLogin["Login / Sign-Up (OTP)"] --> CustAuth
 
-        RoleRouter -- "Role == REC" --> RecQueue["Fetch Pending Intake Queue"]
-        RecQueue --> TriageAudit{"Physical Triage:<br/>Do Ear-Tags Match Permits?"}
-        TriageAudit -- "No" --> RecReject["Set status = 'cancelled'<br/>Log Rejection Reason"] --> PackRecRej["Construct Payload_TriageReject"] --> NodeB1
-        TriageAudit -- "Yes" --> RecAccept["Assign Pen ID; Set status = 'doc_verified'"] --> PackRecAcc["Construct Payload_TriagePass"] --> NodeB1
-
-        RoleRouter -- "Role == INSP" --> InspSelect{"Select Inspection Stage"}
-        InspSelect -- "Ante-Mortem" --> AnteExam{"Clinical Ante-Mortem:<br/>Is Animal Sound?"}
-        AnteExam -- "No" --> AnteFail["Set status = 'anti_mortem_failed'<br/>Generate Condemnation Slip (CS-YYYY-XXX)"] --> PackAnteFail["Construct Payload_CondemnAnte"] --> NodeB1
-        AnteExam -- "Yes" --> AntePass["Set status = 'ante_passed'<br/>Authorize Slaughter Floor Entry"] --> PackAntePass["Construct Payload_AntePass"] --> NodeB1
-        InspSelect -- "Post-Mortem" --> PostExam{"Visceral Post-Mortem:<br/>Is Carcass Wholesome?"}
-        PostExam -- "No" --> PostFail["Set status = 'post_mortem_failed'<br/>Generate Condemnation Notice"] --> PackPostFail["Construct Payload_CondemnPost"] --> NodeB1
-        PostExam -- "Yes" --> WeighScale["Record Dressed Weight W (kg)<br/>Generate MIC; Set status = 'ready_for_payment'"] --> PackInspPass["Construct Payload_Inspection"] --> NodeB1
-
-        RoleRouter -- "Role == CSH" --> CashQueue["Fetch Unpaid Invoice Queue"]
-        CashQueue --> CalcTariff["Compute Municipal Tariff Total"]
-        CalcTariff --> PayMethod{"Select Payment Method"}
-        PayMethod -- "GCash" --> PayMongoAPI["Invoke PayMongo API: Create Checkout URL"]
-        PayMongoAPI --> PayMongoHook{"Webhook Callback:<br/>Status == 'paid'?"}
-        PayMongoHook -- "No" --> Err422_Pay["Output: 422 Payment Incomplete"] --> NodeB2
-        PayMongoHook -- "Yes" --> SetPR_E["Set PR = Payment_Intent_ID"] --> GenReceipt
-        PayMethod -- "Cash" --> CashTender["Input Cash Tendered (T)"]
-        CashTender --> CashCheck{"Is Tendered T >= Total?"}
-        CashCheck -- "No" --> Err422_Cash["Output: 422 Insufficient Cash"] --> NodeB2
-        CashCheck -- "Yes" --> CalcChange["Compute Change = T - Total<br/>Set PR = Cash_Session_ID"] --> GenReceipt
-        GenReceipt["Increment OR; Issue Receipt (RCP-YYYY-XXX)<br/>Generate QR Gate Pass; Set status = 'paid'"] --> PackCash["Construct Payload_Cashier"] --> NodeB1
-
-        RoleRouter -- "Role == ADM" --> AdmSelect{"Select Admin Task"}
-        AdmSelect -- "Meat Dispatch" --> ScanQR["Scan Gate Pass QR Token at Loading Dock"]
-        ScanQR --> VerifyQR{"Is QR Valid & status == 'paid'?"}
-        VerifyQR -- "No" --> Err403_Disp["Output: 403 Forbidden Access"] --> NodeB2
-        VerifyQR -- "Yes" --> ConfirmDisp["Set status = 'completed'; released_at = NOW()"] --> PackDisp["Construct Payload_Dispatch"] --> NodeB1
-        AdmSelect -- "Statutory PDF" --> QueryReport["Query Daily Aggregates (Intake, Weight, Fees)"]
-        QueryReport --> CompilePDF["Execute ReportPdfGenerator:<br/>Compile Legal-Size NMIS Daily PDF (8.5x14)"] --> PackRep["Construct Payload_Report"] --> NodeB1
-
-        NodeB1(["<b>Confluence Node B1</b><br/>Execute ACID SQL Mutation via Supabase Client"])
-        NodeB1 --> AcidCheck{"Did PostgreSQL ACID<br/>Transaction Succeed?"}
-        AcidCheck -- "No" --> Rollback["Execute SQL ROLLBACK & Abort Changes<br/>Display Error Notification Toast"] --> NodeB2
-        AcidCheck -- "Yes" --> CommitSQL["Execute SQL COMMIT to PostgreSQL 16<br/>Broadcast WebSocket Event via Realtime"]
-        CommitSQL --> IssueArtifacts["Issue HTTP 200 OK & Emit Artifacts<br/>(Receipt, Gate Pass, Condemnation Slip, PDF)"] --> NodeB2
-
-        NodeB2(["<b>Confluence Node B2</b><br/>Process Termination / Idle State"]) --> End([End: Await Next Action])
+    %% ─── STAGE 1: CUSTOMER REQUEST ───
+    subgraph Stage1 ["Stage 1: Customer Request [Customer]"]
+        CustAuth -- "Yes" --> ActionType{"Action Type?"}
+        ActionType -- "Whistleblower" --> WbSubmit["Submit Illegal Report"]
+        ActionType -- "Slaughter Service" --> SubmitReq["Submit Request"]
     end
+
+    %% ─── STAGE 2: INTAKE & DOCS ───
+    subgraph Stage2 ["Stage 2: Intake & Verification [Clerk]"]
+        SubmitReq --> IntakeApp{"Intake Approved?"}
+        IntakeApp -- "No" --> RejectNotif["Reject & Notify"]
+        IntakeApp -- "Yes" --> DocsVer{"Docs Verified?"}
+        DocsVer -- "No" --> CancelNotif["Cancel & Notify"]
+    end
+
+    %% ─── STAGE 3: SLAUGHTER & INSPECTION ───
+    subgraph Stage3 ["Stage 3: Slaughter & Inspection [Inspector]"]
+        DocsVer -- "Yes" --> AnteExam{"Ante-Mortem Passed?"}
+        AnteExam -- "No" --> CondemnAnte["Condemn & Notify"]
+        AnteExam -- "Yes" --> SlaughterLine["Slaughter Line"]
+        SlaughterLine --> PostExam{"Post-Mortem Passed?"}
+        PostExam -- "No" --> CondemnPost["Condemn & Confiscate"]
+        PostExam -- "Yes" --> WeighMIC["Weigh Carcass & MIC"]
+    end
+
+    %% ─── STAGE 4: PAYMENT & MEAT RELEASE ───
+    subgraph Stage4 ["Stage 4: Payment & Release [Clerk / Customer]"]
+        WeighMIC --> ComputeFees["Compute Fees"]
+        ComputeFees --> PayMethod{"Payment Method?"}
+        PayMethod -- "Online" --> OnlinePay["Online (GCash/Maya/Card/QR)"]
+        PayMethod -- "Cash" --> CashPay["Cash Payment"]
+        OnlinePay --> PayVerified{"Payment Verified?"}
+        CashPay --> PayVerified
+        PayVerified -- "No" --> PayMethod
+        PayVerified -- "Yes" --> ReceiptPass["Issue Receipt & QR Pass"]
+        ReceiptPass --> QRValid{"QR Gate Pass Valid?"}
+        QRValid -- "No" --> QRValid
+        QRValid -- "Yes" --> ConfirmPickup["Confirm Pickup"]
+    end
+
+    %% ─── STAGE 5: REPORTS & RECORDS ───
+    subgraph Stage5 ["Stage 5: Reports & Records [Admin]"]
+        WbSubmit --> WbReview["Investigate Report"]
+        ConfirmPickup --> CompilePDF["Compile NMIS Report"]
+        WbReview --> UpdateAudit["Update Audit Records"]
+        CompilePDF --> UpdateAudit
+    end
+
+    %% ─── LOGICAL ROLE HAND-OFFS ───
+    IsClerk -- "Yes" --> IntakeApp
+    IsClerk -- "Yes" --> ComputeFees
+    IsInspector -- "Yes" --> AnteExam
+    IsAdmin -- "Yes" --> WbReview
+    IsAdmin -- "Yes" --> CompilePDF
+
+    RejectNotif --> EndNode([End])
+    CancelNotif --> EndNode
+    CondemnAnte --> EndNode
+    CondemnPost --> EndNode
+    UpdateAudit --> EndNode
 ```
 
 Figure 20. Proposed System Flowchart
+
+*(Note: A standalone high-resolution print-ready vector asset is provided in [figure20_proposed_system_flowchart.svg](figure20_proposed_system_flowchart.svg).)*
 
 ---
 
@@ -281,7 +306,7 @@ Figure 20. Proposed System Flowchart
 
 The Use Case Diagram in Figure 21 is a behavioral diagram in the Unified Modeling Language (UML) that captures the functional requirements of a system by modeling the dynamic interactions between external actors and internal system use cases (Sommerville, 2020). It defines the system boundary and illustrates how different user roles engage with specific platform features to achieve operational goals, utilizing `<<include>>` and `<<extend>>` relationships to represent mandatory sub-processes and conditional workflows (Pressman & Maxim, 2020).
 
-The proposed Operation Management Application for AA Slaughterhouse of Tabaco City defines its functional scope across four primary human actors modeled in Figure 21: **Customer / Meat Dealer**, **Receiving Clerk & Cashier**, **Veterinary Meat Inspector**, and **Slaughterhouse Administrator**. On the client side, the **Customer / Meat Dealer** interacts with the mobile portal to *Book Slaughter Schedule* (which `<<includes>>` *Upload Required Documents* and *Select Request Type*), *Track Request Status* (which `<<includes>>` *Receive Push Notifications*), *Pay via GCash*, *View Receipt & Gate Pass*, *View Condemnation Slip*, and *Report Illegal Slaughter* (which `<<includes>>` *Attach Location & Photo*). At the facility entry and payment windows, the **Receiving Clerk & Cashier** utilizes the system to *Approve Requests & Assign Pens* (which `<<includes>>` *Check Pen Capacity*), *Verify Required Documents*, *Compute Slaughter Fees*, *Process Cash Payment*, and *Confirm Meat Release* (which `<<includes>>` *Record Release Timestamp*). On the abattoir floor, the **Veterinary Meat Inspector** engages the platform to *Conduct Ante-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Ante-Mortem Condemnation Slip*), *Update Slaughter Stage*, *Perform Post-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Post-Mortem Condemnation Slip*), and *Record Carcass Weight* (which `<<includes>>` *Issue Meat Inspection Certificate (MIC)*). Finally, the **Slaughterhouse Administrator** oversees system governance by executing use cases to *Manage Users & Roles*, *Manage Illegal Slaughter Reports* (which `<<includes>>` *Update Case Status*), *Generate Production Reports*, and *View Dashboard & Records*.
+The proposed Operation Management Application for AA Slaughterhouse of Tabaco City defines its functional scope across four primary human actors modeled in Figure 21: **Customer / Meat Dealer**, **Receiving Clerk & Cashier**, **Veterinary Meat Inspector**, and **Slaughterhouse Administrator**. On the client side, the **Customer / Meat Dealer** interacts with the mobile portal to *Book Slaughter Schedule* (which `<<includes>>` *Upload Required Documents* and *Select Request Type*), *Track Request Status* (which `<<includes>>` *Receive Push Notifications*), *Settle Municipal Fees* (choosing between multi-channel online checkout via PayMongo [GCash, Maya, Cards, QR Ph] or over-the-counter cash), *View Receipt & Gate Pass*, *View Condemnation Slip*, and *Report Illegal Slaughter* (which `<<includes>>` *Attach Location & Photo*). At the facility entry and payment windows, the **Receiving Clerk & Cashier** utilizes the system to *Approve Requests & Assign Pens* (which `<<includes>>` *Check Pen Capacity*), *Verify Required Documents*, *Compute Slaughter Fees*, *Process Cash Payment*, and *Confirm Meat Release* (which `<<includes>>` *Record Release Timestamp*). On the abattoir floor, the **Veterinary Meat Inspector** engages the platform to *Conduct Ante-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Ante-Mortem Condemnation Slip*), *Update Slaughter Stage*, *Perform Post-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Post-Mortem Condemnation Slip*), and *Record Carcass Weight* (which `<<includes>>` *Issue Meat Inspection Certificate (MIC)*). Finally, the **Slaughterhouse Administrator** oversees system governance by executing use cases to *Manage Users & Roles*, *Manage Illegal Slaughter Reports* (which `<<includes>>` *Update Case Status*), *Generate Production Reports*, and *View Dashboard & Records*.
 
 ```mermaid
 graph TD
@@ -894,14 +919,14 @@ The selection of a forty-six-participant cohort satisfies established empirical 
 
 #### Table 7. Demographic Breakdown of Evaluation Participants ($N = 46$)
 
-| Stakeholder Stratum | Role / Operational Designation | Count ($n$) | Percentage (%) |
-| :--- | :--- | :---: | :---: |
-| **Enterprise Management** | Slaughterhouse Administrator & City Veterinarian | 2 | 4.35% |
-| **Veterinary Inspection** | NMIS Accredited Meat Inspection Officers | 4 | 8.70% |
-| **Operations Staff & Cashiers** | Receiving Intake Clerks & Revenue Cashiers | 4 | 8.70% |
-| **Floor Operations & Butchering**| Abattoir Butchers & Overhead Scale Handlers | 6 | 13.04% |
-| **Commercial Client & Consumer** | Public Market Meat Stallholders & Backyard Farmers | 30 | 65.21% |
-| **Total Cohort** | — | **46** | **100.00%** |
+| Stakeholder Stratum               | Role / Operational Designation                     | Count ($n$) | Percentage (%) |
+| :-------------------------------- | :------------------------------------------------- | :---------: | :------------: |
+| **Enterprise Management**         | Slaughterhouse Administrator & City Veterinarian   |      2      |     4.35%      |
+| **Veterinary Inspection**         | NMIS Accredited Meat Inspection Officers           |      4      |     8.70%      |
+| **Operations Staff & Cashiers**   | Receiving Intake Clerks & Revenue Cashiers         |      4      |     8.70%      |
+| **Floor Operations & Butchering** | Abattoir Butchers & Overhead Scale Handlers        |      6      |     13.04%     |
+| **Commercial Client & Consumer**  | Public Market Meat Stallholders & Backyard Farmers |     30      |     65.21%     |
+| **Total Cohort**                  | —                                                  |   **46**    |  **100.00%**   |
 
 ---
 
@@ -952,12 +977,12 @@ Cross-stratum analysis of the empirical evaluation demonstrates remarkable consi
 
 #### Table 10. SUS Score Distribution by Stakeholder Group
 
-| Stakeholder Stratum | Sample ($n$) | Mean SUS Score | Letter Grade | Adjective Rating | Acceptability |
-| :--- | :---: | :---: | :---: | :--- | :--- |
-| **Enterprise Management** | 2 | 88.75 | Grade A+ | Best Imaginable | Acceptable |
-| **Veterinary Meat Inspectors** | 4 | 87.50 | Grade A+ | Excellent | Acceptable |
-| **Operations Staff & Cashiers** | 4 | 86.25 | Grade A+ | Excellent | Acceptable |
-| **Abattoir Butchers & Handlers**| 6 | 83.33 | Grade A | Excellent | Acceptable |
-| **Commercial Meat Dealers** | 15 | 86.83 | Grade A+ | Excellent | Acceptable |
-| **Backyard Livestock Raisers** | 15 | 86.50 | Grade A+ | Excellent | Acceptable |
-| **Overall Combined Evaluation** | **46** | **86.60** | **Grade A+** | **Excellent** | **Acceptable** |
+| Stakeholder Stratum              | Sample ($n$) | Mean SUS Score | Letter Grade | Adjective Rating | Acceptability  |
+| :------------------------------- | :----------: | :------------: | :----------: | :--------------- | :------------- |
+| **Enterprise Management**        |      2       |     88.75      |   Grade A+   | Best Imaginable  | Acceptable     |
+| **Veterinary Meat Inspectors**   |      4       |     87.50      |   Grade A+   | Excellent        | Acceptable     |
+| **Operations Staff & Cashiers**  |      4       |     86.25      |   Grade A+   | Excellent        | Acceptable     |
+| **Abattoir Butchers & Handlers** |      6       |     83.33      |   Grade A    | Excellent        | Acceptable     |
+| **Commercial Meat Dealers**      |      15      |     86.83      |   Grade A+   | Excellent        | Acceptable     |
+| **Backyard Livestock Raisers**   |      15      |     86.50      |   Grade A+   | Excellent        | Acceptable     |
+| **Overall Combined Evaluation**  |    **46**    |   **86.60**    | **Grade A+** | **Excellent**    | **Acceptable** |

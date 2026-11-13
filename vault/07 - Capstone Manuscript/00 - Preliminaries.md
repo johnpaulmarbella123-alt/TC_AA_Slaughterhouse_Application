@@ -146,48 +146,55 @@ PRELIMINARIES
 - List of Figures ................................................................................................................. xii
 - List of Tables .................................................................................................................. xiii
 
-INTRODUCTION
+CHAPTER 1: INTRODUCTION
 - Background of the Study ................................................................................................. 1
-- Significance of the Study ................................................................................................. 18
-- Statement of the Problem ................................................................................................ 20
-- Objectives of the Study .................................................................................................... 21
-- Definition of Terms ......................................................................................................... 22
+- Company Profile ............................................................................................................. 4
+- Scope and Delimitation of the Study ............................................................................... 7
+- Significance of the Study ................................................................................................. 10
+- Statement of the Problem ................................................................................................ 11
+- Objectives of the Study .................................................................................................... 11
+- Definition of Terms ......................................................................................................... 12
 
-METHODS
-- Software Development Methodology .............................................................................. 25
-- Data Gathering Techniques ............................................................................................. 28
-- Sources of Data ............................................................................................................... 29
-- Tools for Data Analysis ................................................................................................... 30
+CHAPTER 2: REVIEW OF RELATED LITERATURE AND TECHNICAL BACKGROUND
+- Review of Related Literature and Systems ...................................................................... 14
+- Conceptual Design .......................................................................................................... 16
+- Technical Background & Software Development Methodology ........................................ 17
 
-RESULTS
-- Information Requirements ............................................................................................... 33
-- Features of Proposed System .......................................................................................... 40
-- System Design ................................................................................................................. 58
-- Physical Design ............................................................................................................... 70
-- System Architecture ........................................................................................................ 76
-- Recommended Hardware and Software Requirements ..................................................... 81
-- User Acceptance Level .................................................................................................... 90
+CHAPTER 3: METHODS
+- Software Development Methodology .............................................................................. 19
+- Data Gathering Techniques ............................................................................................. 21
+- Sources of Data ............................................................................................................... 22
+- Tools for Data Analysis ................................................................................................... 23
 
-DISCUSSION
-- Findings .......................................................................................................................... 98
-- Conclusion ..................................................................................................................... 101
-- Recommendations ........................................................................................................... 103
+CHAPTER 4: RESULTS
+- Information Requirements ............................................................................................... 25
+- Features of Proposed System .......................................................................................... 28
+- System Design (Conceptual and Logical Design) .............................................................. 38
+- Physical Design & Architectural Design ........................................................................... 57
+- Recommended Hardware and Software Requirements ..................................................... 65
+- User Acceptance Level (SUS Evaluation) ........................................................................ 74
 
-REFERENCES ................................................................................................................... 106
+CHAPTER 5: DISCUSSION
+- Findings .......................................................................................................................... 84
+- Conclusions .................................................................................................................... 88
+- Recommendations ........................................................................................................... 89
+- Areas for Further Studies ................................................................................................ 89
+
+REFERENCES ................................................................................................................... 90
 
 APPENDICES
-- A Communication Letter ................................................................................................. 126
-- B Data Dictionary ........................................................................................................... 127
-- C User’s Manual ............................................................................................................. 133
-- D HIPO Chart ................................................................................................................. 134
-- E Gantt Chart ................................................................................................................. 136
-- F Interview Questionnaire .............................................................................................. 137
-- G System Usability Scale ................................................................................................. 138
-- H SUS Result .................................................................................................................. 139
-- I User Interfaces ............................................................................................................. 141
-- J Source Code ................................................................................................................. 144
+- Appendix A: Formal Communication Letter ..................................................................... 93
+- Appendix B: Master Technical Data Dictionary ................................................................ 96
+- Appendix C: System User’s Manual Guide ...................................................................... 102
+- Appendix D: HIPO Chart ................................................................................................. 106
+- Appendix E: Project Implementation Gantt Chart ............................................................. 108
+- Appendix F: Interview Questionnaire .............................................................................. 110
+- Appendix G: System Usability Scale (SUS) Questionnaire ................................................. 112
+- Appendix H: SUS Evaluation Results ............................................................................... 113
+- Appendix I: User Interface Screen Catalog ...................................................................... 114
+- Appendix J: Source Code Repository & Setup ................................................................. 115
 
-CURRICULUM VITAE ...................................................................................................... 147
+CURRICULUM VITAE ...................................................................................................... 116
 
 ---
 
@@ -195,16 +202,16 @@ CURRICULUM VITAE ...............................................................
 
 | Table | Title | Page |
 | :---: | :--- | :---: |
-| **1** | Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements | 34 |
-| **2** | Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements | 36 |
-| **3** | Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements | 39 |
-| **4** | Development Tools Used | 86 |
-| **5** | Recommended Software Requirements | 88 |
-| **6** | Recommended Hardware Requirements | 89 |
-| **7** | Demographic Breakdown of Evaluation Participants | 91 |
-| **8** | SUS Item Response Analysis | 93 |
-| **9** | Usability vs Learnability Subscale Breakdown | 95 |
-| **10**| SUS Score Distribution by Stakeholder Group | 96 |
+| **1** | Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements | 25 |
+| **2** | Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements | 26 |
+| **3** | Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements | 27 |
+| **4** | Development Tools Used | 65 |
+| **5** | Recommended Software Requirements | 66 |
+| **6** | Recommended Hardware Requirements | 68 |
+| **7** | Demographic Breakdown of Evaluation Participants ($N = 46$) | 74 |
+| **8** | SUS Item Response Analysis ($N = 46$) | 76 |
+| **9** | Usability vs Learnability Subscale Breakdown | 78 |
+| **10**| SUS Score Distribution by Stakeholder Group | 80 |
 
 ---
 
@@ -212,30 +219,30 @@ CURRICULUM VITAE ...............................................................
 
 | Figure | Title                                                              | Page |
 | :----: | :----------------------------------------------------------------- | :--: |
-| **1**  | Geographic Location & Site Layout of Tabaco City AA Slaughterhouse |  17  |
-| **2**  | Rapid Application Development (RAD) Process Model                  |  26  |
-| **3**  | Staff Authentication & Role-Based Access Gateway                   |  41  |
-| **4**  | Customer Portal Mobile Home & Status Timeline                      |  42  |
-| **5**  | Intake Schedule Booking & Animal Specification Interface           |  43  |
-| **6**  | Statutory Document & Permit Upload Interface                       |  45  |
-| **7**  | Admin Intake Triage & Holding Pen Allocation Console               |  46  |
-| **8**  | Document Verification & Physical Compliance Gateway                |  47  |
-| **9**  | Ante-Mortem Inspection & Corral Clinical Logbook                   |  48  |
-| **10** | Slaughter Line Process Stage Tracking Board                        |  50  |
-| **11** | Post-Mortem Veterinary Examination Station                         |  51  |
-| **12** | Digital Carcass Weighing Scale & MIC Approval Interface            |  52  |
-| **13** | Official Digital Meat Condemnation Slip Preview                    |  53  |
-| **14** | Municipal Tariff Billing & Cashiering Workspace                    |  55  |
-| **15** | PayMongo Hosted GCash Digital Payment Gateway                      |  56  |
-| **16** | Official Slaughterhouse Receipt & Barcode Gate Pass                |  57  |
-| **17** | Meat Releasing & Dispatch Confirmation Console                     |  58  |
-| **18** | Illegal Slaughter Whistleblower Reporting & Investigation Console  |  59  |
-| **19** | Conceptual Design Diagram (Input-Process-Output Framework)         |  60  |
-| **20** | Proposed System Flowchart                                          |  62  |
-| **21** | Use Case Diagram                                                   |  64  |
-| **22** | Class Diagram                                                      |  66  |
-| **23** | Sequence Diagram                                                   |  68  |
-| **24** | Package Diagram                                                    |  70  |
-| **25** | Decoupled Multi-Tier Software Architecture (MVC Pattern)           |  72  |
-| **26** | Architectural Design of the Proposed System                        |  79  |
-| **27** | Deployment Diagram                                                 |  81  |
+| **1**  | Geographic Location & Site Layout of Tabaco City AA Slaughterhouse |  5   |
+| **2**  | Rapid Application Development (RAD) Process Model                  |  20  |
+| **3**  | Staff Authentication & Role-Based Access Gateway                   |  28  |
+| **4**  | Customer Portal Mobile Home & Status Timeline                      |  29  |
+| **5**  | Intake Schedule Booking & Animal Specification Interface           |  30  |
+| **6**  | Statutory Document & Permit Upload Interface                       |  31  |
+| **7**  | Admin Intake Triage & Holding Pen Allocation Console               |  32  |
+| **8**  | Document Verification & Physical Compliance Gateway                |  33  |
+| **9**  | Ante-Mortem Inspection & Corral Clinical Logbook                   |  34  |
+| **10** | Slaughter Line Process Stage Tracking Board                        |  35  |
+| **11** | Post-Mortem Veterinary Examination Station                         |  36  |
+| **12** | Digital Carcass Weighing Scale & MIC Approval Interface            |  37  |
+| **13** | Official Digital Meat Condemnation Slip Preview                    |  38  |
+| **14** | Municipal Tariff Billing & Cashiering Workspace                    |  39  |
+| **15** | PayMongo Hosted GCash Digital Payment Gateway                      |  40  |
+| **16** | Official Slaughterhouse Receipt & Barcode Gate Pass                |  41  |
+| **17** | Meat Releasing & Dispatch Confirmation Console                     |  42  |
+| **18** | Illegal Slaughter Whistleblower Reporting & Investigation Console  |  43  |
+| **19** | Conceptual Design Diagram (Input-Process-Output Framework)         |  44  |
+| **20** | Proposed System Flowchart                                          |  46  |
+| **21** | Use Case Diagram                                                   |  49  |
+| **22** | Class Diagram                                                      |  52  |
+| **23** | Sequence Diagram of the System                                     |  54  |
+| **24** | Package Diagram                                                    |  56  |
+| **25** | Decoupled Multi-Tier Software Architecture (MVC Pattern)           |  58  |
+| **26** | Architectural Design of the Proposed System                        |  61  |
+| **27** | Deployment Diagram                                                 |  63  |

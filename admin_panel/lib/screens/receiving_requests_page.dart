@@ -7,9 +7,12 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/regular_dealers_service.dart';
+import 'package:flutter/services.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
   const ReceivingRequestsPage({super.key});
@@ -353,6 +356,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                 TextField(
                   controller: markingCtrl,
                   textCapitalization: TextCapitalization.characters,
+                  inputFormatters: const [UpperCaseTextFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Permanent Marking Tag',
                     border: OutlineInputBorder(),
@@ -752,7 +756,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                               horizontalMargin: 24,
                               columns: const [
                                 DataColumn(label: Text('Reference #')),
-                                DataColumn(label: Text('City/Brgy.')),
+                                DataColumn(label: Text('Location / Market')),
                                 DataColumn(label: Text('Customer')),
                                 DataColumn(label: Text('Livestock')),
                                 DataColumn(label: Text('Type')),
@@ -762,9 +766,16 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                               ],
                               rows: _approvedRequests.map((req) {
                                 final refNo = _buildRefNo(req);
+                                final isMarketReq = req['request_type'] == 'market';
+                                final mName = (req['market_name'] ?? '').toString().trim();
+                                final mStall = (req['market_stall_number'] ?? '').toString().trim();
+                                final cityBrgy = '${req['municipality'] ?? ''}/ ${req['barangay'] ?? ''}'.trim();
+                                final locDisplay = isMarketReq && (mName.isNotEmpty || mStall.isNotEmpty)
+                                    ? '${mName.isNotEmpty ? mName : 'Public Market'}${mStall.isNotEmpty ? ' (Stall: $mStall)' : ''}'
+                                    : cityBrgy;
                                 return DataRow(cells: [
                                   DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.w600))),
-                                  DataCell(Text('${req['municipality'] ?? ''}/ ${req['barangay'] ?? ''}')),
+                                  DataCell(Text(locDisplay)),
                                   DataCell(
                                     Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
@@ -837,11 +848,14 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
 
   Future<void> _showUpdateApprovedRequestDialog(Map<String, dynamic> req) async {
     final refNo = _buildRefNo(req);
+    final isMarketReq = req['request_type'] == 'market';
     final nameCtrl = TextEditingController(text: (req['customer_name'] ?? '').toString());
     final countCtrl = TextEditingController(text: (req['animal_count'] ?? 1).toString());
     final markingCtrl = TextEditingController(
       text: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
     );
+    final marketNameCtrl = TextEditingController(text: (req['market_name'] ?? '').toString());
+    final marketStallCtrl = TextEditingController(text: (req['market_stall_number'] ?? '').toString());
     final dateCtrl = TextEditingController(
       text: (req['preferred_date'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString(),
     );
@@ -878,6 +892,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                 children: [
                   TextField(
                     controller: nameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Customer Name',
                       border: OutlineInputBorder(),
@@ -918,6 +934,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                         child: TextField(
                           controller: markingCtrl,
                           textCapitalization: TextCapitalization.characters,
+                          inputFormatters: const [UpperCaseTextFormatter()],
                           decoration: const InputDecoration(
                             labelText: 'Marking Tag',
                             border: OutlineInputBorder(),
@@ -928,6 +945,38 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  if (isMarketReq) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: marketNameCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            inputFormatters: const [WordsCapitalizationFormatter()],
+                            decoration: const InputDecoration(
+                              labelText: 'Market Name',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: marketStallCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            inputFormatters: const [WordsCapitalizationFormatter()],
+                            decoration: const InputDecoration(
+                              labelText: 'Stall Number',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   TextField(
                     controller: dateCtrl,
                     decoration: const InputDecoration(
@@ -940,6 +989,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                   TextField(
                     controller: noteCtrl,
                     maxLines: 2,
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [SentencesCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Special Instructions',
                       border: OutlineInputBorder(),
@@ -966,6 +1017,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     'livestock_type': selectedLivestock,
                     'animal_count': newCount,
                     'marking': newMarking,
+                    if (isMarketReq) 'market_name': marketNameCtrl.text.trim(),
+                    if (isMarketReq) 'market_stall_number': marketStallCtrl.text.trim(),
                     'preferred_date': dateCtrl.text.trim(),
                     'special_instruction': noteCtrl.text.trim(),
                   }).eq('id', req['id']);
@@ -1123,8 +1176,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     columns: [
                       const DataColumn(label: Text('Reference #')),
                       const DataColumn(label: Text('Customer Name')),
-                      const DataColumn(label: Text('Municipality')),
-                      const DataColumn(label: Text('Barangay')),
+                      DataColumn(label: Text(_pendingTabIndex == 0 ? 'Municipality' : 'Market Name')),
+                      DataColumn(label: Text(_pendingTabIndex == 0 ? 'Barangay' : 'Stall #')),
                       const DataColumn(label: Text('Livestock')),
                       const DataColumn(label: Text('Marking')),
                       const DataColumn(label: Text('Schedule Date')),
@@ -1224,8 +1277,24 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                             ],
                           ),
                         ),
-                        DataCell(Text(req['municipality'] ?? '')),
-                        DataCell(Text(req['barangay'] ?? '')),
+                        DataCell(
+                          Text(
+                            _pendingTabIndex == 0
+                                ? (req['municipality'] ?? '—').toString()
+                                : ((req['market_name'] ?? '').toString().trim().isNotEmpty
+                                    ? req['market_name'].toString()
+                                    : (req['municipality'] ?? '—').toString()),
+                          ),
+                        ),
+                        DataCell(
+                          Text(
+                            _pendingTabIndex == 0
+                                ? (req['barangay'] ?? '—').toString()
+                                : ((req['market_stall_number'] ?? '').toString().trim().isNotEmpty
+                                    ? req['market_stall_number'].toString()
+                                    : (req['barangay'] ?? '—').toString()),
+                          ),
+                        ),
                         DataCell(Text(
                           '${req['animal_count'] ?? 0} head(s)\n${req['livestock_type'] ?? ''}',
                         )),
@@ -1701,6 +1770,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   final _contactNumberCtrl = TextEditingController();
   final _animalCountCtrl = TextEditingController();
   final _markingCtrl = TextEditingController();
+  final _marketNameCtrl = TextEditingController();
+  final _marketStallCtrl = TextEditingController();
 
   final FocusNode _customerNameFocus = FocusNode();
   final FocusNode _animalCountFocus = FocusNode();
@@ -1890,6 +1961,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         if (item.barangay != null && item.barangay!.isNotEmpty) {
           _selectedBarangay = item.barangay;
         }
+      } else {
+        // Market customer
+        if (item.storeName != null && item.storeName!.isNotEmpty) {
+          _marketNameCtrl.text = item.storeName!;
+        }
+        if (item.stallNumber != null && item.stallNumber!.isNotEmpty) {
+          _marketStallCtrl.text = item.stallNumber!;
+        }
       }
 
       // Pre-select usual animal type
@@ -1974,6 +2053,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     _contactNumberCtrl.dispose();
     _animalCountCtrl.dispose();
     _markingCtrl.dispose();
+    _marketNameCtrl.dispose();
+    _marketStallCtrl.dispose();
     _customerNameFocus.dispose();
     _animalCountFocus.dispose();
     super.dispose();
@@ -1993,6 +2074,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         (_selectedMunicipality == null || _selectedBarangay == null)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select Municipality and Barangay')),
+      );
+      return;
+    }
+
+    if (!_isBarangay &&
+        (_marketNameCtrl.text.trim().isEmpty || _marketStallCtrl.text.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter both Market Name and Stall Number')),
       );
       return;
     }
@@ -2069,8 +2158,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         'province': _isBarangay ? _selectedProvince : null,
         'municipality': _isBarangay ? _selectedMunicipality : null,
         'barangay': _isBarangay ? _selectedBarangay : null,
-        'market_stall_number': null,
-        'market_name': null,
+        'market_stall_number': !_isBarangay ? _marketStallCtrl.text.trim() : null,
+        'market_name': !_isBarangay ? _marketNameCtrl.text.trim() : null,
         'marking': _markingCtrl.text.trim(),
         'preferred_date': DateTime.now().toIso8601String().split('T')[0], // today's date
         'status': _isSeparateFacility ? 'slaughter_started' : 'approved', // Separate Facility bypasses Doc Verification directly into Slaughter & Inspection
@@ -2116,7 +2205,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
       final destOrOrigin = _isBarangay
           ? '${_selectedBarangay ?? ''}, ${_selectedMunicipality ?? 'Tabaco City'}, $_selectedProvince'
-          : 'Tabaco Public Market';
+          : '${_marketNameCtrl.text.trim()} (Stall: ${_marketStallCtrl.text.trim()})';
 
       // If Separate Facility (Emergency Slaughter), create slaughter_inspection row & notify linked account
       if (_isSeparateFacility) {
@@ -2134,6 +2223,16 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         }
 
         // Walk-in immediate slaughter customers wait on-site at the facility; mobile app notifications suppressed
+        final staffCust = _customerNameCtrl.text.trim();
+        await StaffNotificationService.sendStaffNotification(
+          targetRole: 'Inspector',
+          type: 'separate_facility',
+          title: 'Ready for Slaughter & Inspection',
+          message: '$refNo (${staffCust.isNotEmpty ? staffCust : 'Walk-In'}) routed to Separate Facility — ready for inspection.',
+          requestId: (reqId as num).toInt(),
+          referenceNo: refNo,
+          dedupKey: 'req_${reqId}_separate_facility',
+        );
       }
 
       // Ensure newly entered walk-in meat dealer is permanently locked in registry
@@ -2297,6 +2396,9 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               if (_isBarangay) ...[
                 ..._buildBarangayFields(),
                 const SizedBox(height: 16),
+              ] else ...[
+                ..._buildMarketFields(),
+                const SizedBox(height: 16),
               ],
 
               // ── Marking ──
@@ -2339,6 +2441,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 _markingCtrl,
                 'Enter unique marking (e.g., MK, MK-1)..',
                 readOnly: _isMarkingLocked,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: const [UpperCaseTextFormatter()],
               ),
               const SizedBox(height: 18),
 
@@ -2530,6 +2634,48 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     ];
   }
 
+  List<Widget> _buildMarketFields() {
+    return [
+      Row(
+        children: [
+          Expanded(
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Market Name *'),
+                const SizedBox(height: 6),
+                _buildTextField(
+                  _marketNameCtrl,
+                  'e.g. Tabaco City Public Market',
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabel('Stall Number *'),
+                const SizedBox(height: 6),
+                _buildTextField(
+                  _marketStallCtrl,
+                  'e.g. Stall #12',
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
   Widget _buildTypeButton(String label, String sub, bool isBarangay) {
     final isActive = _isBarangay == isBarangay;
     return GestureDetector(
@@ -2582,12 +2728,16 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     TextInputType keyboardType = TextInputType.text,
     FocusNode? focusNode,
     bool readOnly = false,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       controller: ctrl,
       focusNode: focusNode,
       readOnly: readOnly,
       keyboardType: keyboardType,
+      textCapitalization: textCapitalization,
+      inputFormatters: inputFormatters,
       style: TextStyle(
         fontSize: 13,
         fontWeight: readOnly ? FontWeight.bold : FontWeight.normal,
@@ -2635,6 +2785,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 return TextField(
                   controller: controller,
                   focusNode: focusNode,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
                   style: const TextStyle(fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'Type surname, full name, or marking (e.g. Bondad, 4)...',
@@ -2836,6 +2988,8 @@ class _RejectDialogState extends State<_RejectDialog> {
             TextField(
               controller: _controller,
               maxLines: 3,
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [SentencesCapitalizationFormatter()],
               decoration: InputDecoration(
                 filled: true,
                 fillColor: const Color(0xFFF7FAFC),

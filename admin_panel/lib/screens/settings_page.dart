@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
 import '../services/app_settings_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class SettingsPage extends StatefulWidget {
   final int initialTab;
@@ -927,6 +928,12 @@ class _SettingsPageState extends State<SettingsPage>
           keyboardType: isNumeric
               ? const TextInputType.numberWithOptions(decimal: true)
               : TextInputType.text,
+          textCapitalization: isNumeric
+              ? TextCapitalization.none
+              : TextCapitalization.words,
+          inputFormatters: isNumeric
+              ? null
+              : const [WordsCapitalizationFormatter()],
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
             prefixText: isNumeric ? '₱ ' : null,
@@ -1239,6 +1246,8 @@ class _SettingsPageState extends State<SettingsPage>
               children: [
                 TextField(
                   controller: nameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Full Name',
                     prefixIcon: Icon(Icons.person_outline, size: 18),
@@ -1868,6 +1877,8 @@ class _SettingsPageState extends State<SettingsPage>
                   const SizedBox(height: 16),
                   TextField(
                     controller: _noticeMsgCtrl,
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [SentencesCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Public Advisory / Schedule Notice Message',
                       hintText: 'Standard operating hours active.',
@@ -2045,6 +2056,8 @@ class _SettingsPageState extends State<SettingsPage>
                   // Edit Name Field
                   TextField(
                     controller: _profileNameCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Full Legal Name',
                       prefixIcon: Icon(Icons.badge_outlined),
@@ -2542,6 +2555,8 @@ class _SettingsPageState extends State<SettingsPage>
                   // Header Text Inputs
                   TextField(
                     controller: _headerTitleCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Header Title Text',
                       hintText: 'Tabaco City Slaughterhouse',
@@ -2551,6 +2566,8 @@ class _SettingsPageState extends State<SettingsPage>
                   const SizedBox(height: 14),
                   TextField(
                     controller: _headerSubtitleCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Header Subtitle Text',
                       hintText: 'Management System',

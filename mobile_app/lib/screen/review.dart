@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class ReviewContent extends StatefulWidget {
   const ReviewContent({super.key});
@@ -591,6 +592,8 @@ class _WriteReviewSheetState extends State<_WriteReviewSheet> {
             const SizedBox(height: 8),
             TextField(
               controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [WordsCapitalizationFormatter()],
               decoration: InputDecoration(
                 hintText: 'Enter your full name',
                 filled: true,
@@ -631,6 +634,8 @@ class _WriteReviewSheetState extends State<_WriteReviewSheet> {
             TextField(
               controller: _commentController,
               maxLines: 4,
+              textCapitalization: TextCapitalization.sentences,
+              inputFormatters: const [SentencesCapitalizationFormatter()],
               decoration: InputDecoration(
                 hintText: 'Share your experience...',
                 filled: true,

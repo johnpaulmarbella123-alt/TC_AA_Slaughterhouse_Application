@@ -7,7 +7,9 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
+import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
   const DocumentVerificationPage({super.key});
@@ -272,25 +274,37 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
                         headingTextStyle: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF4A5568), fontSize: 12),
                         dataTextStyle: const TextStyle(color: Color(0xFF2D3748), fontSize: 12),
                         columnSpacing: colSpacing, horizontalMargin: 20,
-                        columns: const [
-                          DataColumn(label: Text('Reference #')), DataColumn(label: Text('Customer')),
-                          DataColumn(label: Text('Livestock')), DataColumn(label: Text('Markings')),
-                          DataColumn(label: Text('Required Documents')), DataColumn(label: Text('Schedule Date')),
-                          DataColumn(label: Text('Actions')),
+                        columns: [
+                          const DataColumn(label: Text('Reference #')),
+                          const DataColumn(label: Text('Customer')),
+                          if (!isBarangay) const DataColumn(label: Text('Market / Stall #')),
+                          const DataColumn(label: Text('Livestock')),
+                          const DataColumn(label: Text('Markings')),
+                          const DataColumn(label: Text('Required Documents')),
+                          const DataColumn(label: Text('Schedule Date')),
+                          const DataColumn(label: Text('Actions')),
                         ],
-                        rows: requests.map((req) => DataRow(cells: [
-                          DataCell(Text(_refNo(req), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2D6A4F)))),
-                          DataCell(Text(req['customer_name'] ?? '—')),
-                          DataCell(Text('${(req['animal_count'] ?? 0)} head(s)\n${(req['livestock_type'] ?? '')}')),
-                          DataCell(Text(req['marking'] ?? '—')),
-                          DataCell(SizedBox(width: 250, child: _buildDocBadges(req, isBarangay))),
-                          DataCell(SizedBox(width: 100, child: Text(_formatDate(req['preferred_date'])))),
-                          DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
-                            _actionBtn(label: 'Verify', color: const Color(0xFF276749), bgColor: const Color(0xFFF0FFF4), borderColor: const Color(0xFF9AE6B4), onTap: () => _openVerifyDialog(req)),
-                            const SizedBox(width: 6),
-                            _actionBtn(label: 'Reject', color: const Color(0xFFE53E3E), bgColor: const Color(0xFFFFF5F5), borderColor: const Color(0xFFFEB2B2), onTap: () => _rejectRequest(req)),
-                          ])),
-                        ])).toList(),
+                        rows: requests.map((req) {
+                          final mName = (req['market_name'] ?? '').toString().trim();
+                          final mStall = (req['market_stall_number'] ?? '').toString().trim();
+                          final marketDisplay = (mName.isNotEmpty || mStall.isNotEmpty)
+                              ? '${mName.isNotEmpty ? mName : 'Public Market'}\n${mStall.isNotEmpty ? 'Stall: $mStall' : ''}'.trim()
+                              : '—';
+                          return DataRow(cells: [
+                            DataCell(Text(_refNo(req), style: const TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF2D6A4F)))),
+                            DataCell(Text(req['customer_name'] ?? '—')),
+                            if (!isBarangay) DataCell(Text(marketDisplay)),
+                            DataCell(Text('${(req['animal_count'] ?? 0)} head(s)\n${(req['livestock_type'] ?? '')}')),
+                            DataCell(Text(req['marking'] ?? '—')),
+                            DataCell(SizedBox(width: 250, child: _buildDocBadges(req, isBarangay))),
+                            DataCell(SizedBox(width: 100, child: Text(_formatDate(req['preferred_date'])))),
+                            DataCell(Row(mainAxisSize: MainAxisSize.min, children: [
+                              _actionBtn(label: 'Verify', color: const Color(0xFF276749), bgColor: const Color(0xFFF0FFF4), borderColor: const Color(0xFF9AE6B4), onTap: () => _openVerifyDialog(req)),
+                              const SizedBox(width: 6),
+                              _actionBtn(label: 'Reject', color: const Color(0xFFE53E3E), bgColor: const Color(0xFFFFF5F5), borderColor: const Color(0xFFFEB2B2), onTap: () => _rejectRequest(req)),
+                            ])),
+                          ]);
+                        }).toList(),
                       )),
                     ),
                   ),
@@ -609,6 +623,19 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
           if (notes.isNotEmpty) 'verification_notes': notes,
         },
       );
+
+      // Notify Inspector directly that documents are verified and ready for Ante-Mortem inspection
+      final custName = req['customer_name']?.toString() ?? 'Customer';
+      await StaffNotificationService.sendStaffNotification(
+        targetRole: 'Inspector',
+        type: 'doc_verified',
+        title: 'Ready for Ante-Mortem',
+        message: '$refNo ($custName) documents verified by clerk — ready for inspection.',
+        requestId: (req['id'] as num).toInt(),
+        referenceNo: refNo,
+        dedupKey: 'req_${req['id']}_doc_verified',
+      );
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
@@ -646,12 +673,42 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(color: const Color(0xFFF7FAFC), borderRadius: BorderRadius.circular(10), border: Border.all(color: Colors.grey.shade200)),
-            child: Row(children: [
-              Expanded(child: _metaItem('Scheduled Date', dateStr)),
-              Expanded(child: _metaItem('Reference #', refNo)),
-              Expanded(child: _metaItem('Customer', req['customer_name'] ?? '—')),
-              Expanded(child: _metaItem('Request Type', isBarangay ? 'Barangay' : 'Market')),
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(child: _metaItem('Scheduled Date', dateStr)),
+                  Expanded(child: _metaItem('Reference #', refNo)),
+                  Expanded(child: _metaItem('Customer', req['customer_name'] ?? '—')),
+                  Expanded(child: _metaItem('Request Type', isBarangay ? 'Barangay' : 'Market')),
+                ]),
+                if (!isBarangay &&
+                    ((req['market_name'] ?? '').toString().trim().isNotEmpty ||
+                        (req['market_stall_number'] ?? '').toString().trim().isNotEmpty)) ...[
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      flex: 2,
+                      child: _metaItem(
+                        'Market Name',
+                        (req['market_name'] ?? '').toString().trim().isNotEmpty
+                            ? req['market_name'].toString()
+                            : '—',
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: _metaItem(
+                        'Stall Number',
+                        (req['market_stall_number'] ?? '').toString().trim().isNotEmpty
+                            ? req['market_stall_number'].toString()
+                            : '—',
+                      ),
+                    ),
+                  ]),
+                ],
+              ],
+            ),
           ),
           const SizedBox(height: 20),
 
@@ -672,6 +729,8 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
           const SizedBox(height: 8),
           TextField(
             controller: _notesCtrl, maxLines: 3, style: const TextStyle(fontSize: 13),
+            textCapitalization: TextCapitalization.sentences,
+            inputFormatters: const [SentencesCapitalizationFormatter()],
             decoration: InputDecoration(
               hintText: 'Add any notes about the documents...', hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
               filled: true, fillColor: const Color(0xFFF7FAFC), contentPadding: const EdgeInsets.all(12),
@@ -953,6 +1012,8 @@ class _DocRejectDialogState extends State<_DocRejectDialog> {
         const SizedBox(height: 8),
         TextField(
           controller: _ctrl, maxLines: 3, style: const TextStyle(fontSize: 13),
+          textCapitalization: TextCapitalization.sentences,
+          inputFormatters: const [SentencesCapitalizationFormatter()],
           decoration: InputDecoration(
             filled: true, fillColor: const Color(0xFFF7FAFC),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),

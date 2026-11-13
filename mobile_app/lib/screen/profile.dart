@@ -1,11 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../pages/home_page.dart'; // for globalAvatarUrl
+import '../utils/text_capitalization_formatters.dart';
 import 'dart:async';
 
 class ProfileContent extends StatefulWidget {
@@ -593,6 +595,8 @@ String? _extractStoragePath(String publicUrl) {
               icon: Icons.person_outline,
               controller: _nameController,
               isEditing: isEditing,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [WordsCapitalizationFormatter()],
             ),
             const SizedBox(height: 16),
             _buildDataField(
@@ -607,6 +611,8 @@ String? _extractStoragePath(String publicUrl) {
               icon: Icons.location_on_outlined,
               controller: _addressController,
               isEditing: isEditing,
+              textCapitalization: TextCapitalization.words,
+              inputFormatters: const [WordsCapitalizationFormatter()],
             ),
           ],
         ),
@@ -619,6 +625,8 @@ String? _extractStoragePath(String publicUrl) {
     required IconData icon,
     required TextEditingController controller,
     required bool isEditing,
+    TextCapitalization textCapitalization = TextCapitalization.none,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -639,6 +647,8 @@ String? _extractStoragePath(String publicUrl) {
                 child: isEditing
                     ? TextField(
                         controller: controller,
+                        textCapitalization: textCapitalization,
+                        inputFormatters: inputFormatters,
                         decoration: const InputDecoration(border: InputBorder.none),
                       )
                     : Padding(

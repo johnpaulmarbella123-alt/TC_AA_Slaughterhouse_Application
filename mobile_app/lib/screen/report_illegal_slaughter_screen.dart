@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 /// Full-screen page for reporting illegal slaughter activities.
 class ReportIllegalSlaughterScreen extends StatelessWidget {
@@ -1150,6 +1151,8 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
               const SizedBox(height: 6),
               TextFormField(
                 controller: _locationCtrl,
+                textCapitalization: TextCapitalization.words,
+                inputFormatters: const [WordsCapitalizationFormatter()],
                 decoration: _inputDeco(
                   "Exact address or landmark",
                   prefixIcon: Icons.location_on_outlined,
@@ -1181,6 +1184,8 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
               TextFormField(
                 controller: _descriptionCtrl,
                 maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                inputFormatters: const [SentencesCapitalizationFormatter()],
                 decoration: _inputDeco(
                   "Describe what you observed, including specific violations, number of animals, conditions, etc.",
                 ),
@@ -1330,6 +1335,8 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                 const SizedBox(height: 6),
                 TextFormField(
                   controller: _nameCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: const [WordsCapitalizationFormatter()],
                   decoration: _inputDeco(
                     "Full name",
                     prefixIcon: Icons.person_outline,
