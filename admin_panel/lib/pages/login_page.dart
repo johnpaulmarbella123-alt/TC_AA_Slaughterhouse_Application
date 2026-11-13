@@ -18,45 +18,13 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _keepMeLoggedIn = false;
-  bool _isAdminProvisioned = true;
-  String _selectedRolePortal = 'Admin'; // 'Admin', 'Clerk', or 'Inspector'
   final _supabase = Supabase.instance.client;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkAdminProvisioned();
-  }
-
-  Future<void> _checkAdminProvisioned() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      bool provisioned = prefs.getBool('admin_account_provisioned') ?? false;
-      if (!provisioned) {
-        final res = await _supabase
-            .from('profiles')
-            .select('id, role')
-            .eq('role', 'admin')
-            .limit(1);
-        if ((res as List).isNotEmpty) {
-          provisioned = true;
-          await prefs.setBool('admin_account_provisioned', true);
-        }
-      }
-      if (mounted) setState(() => _isAdminProvisioned = provisioned);
-    } catch (_) {}
-  }
 
   @override
   void dispose() {
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
-  }
-
-  bool _doesRoleMatchPortal(String actualRole, String portal) {
-    final normalized = StaffAccount.normalizeRole(actualRole);
-    return normalized == portal;
   }
 
   Future<void> _handleLogin() async {
@@ -90,24 +58,29 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // 2. If staff member has a configured account in Staff & Roles, verify and enforce role portal
+      // 2. If staff member has a configured account in Staff & Roles, authenticate and route automatically
       if (matchedStaff != null) {
         final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
-        if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
-          _showLoginErrorDialog(
-            title: 'Portal Mismatch',
-            message: 'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
-          );
-          return;
-        }
 
-        // For Admin portal, strictly require live Supabase Auth verification
         if (actualRole == 'Admin') {
-          final res = await _supabase.auth.signInWithPassword(
-            email: email,
-            password: password,
-          );
-          if (res.user == null) {
+          // For Admin, attempt Supabase Auth first, with configured password fallback
+          bool adminAuthOk = false;
+          try {
+            final res = await _supabase.auth.signInWithPassword(
+              email: email,
+              password: password,
+            );
+            if (res.user != null) adminAuthOk = true;
+          } catch (_) {}
+
+          if (!adminAuthOk) {
+            final configuredPass = matchedStaff.password?.trim() ?? '';
+            if (configuredPass.isNotEmpty && password == configuredPass) {
+              adminAuthOk = true;
+            }
+          }
+
+          if (!adminAuthOk) {
             _showLoginErrorDialog(
               title: 'Login Failed',
               message: 'Incorrect email or password. Please check your credentials and try again.',
@@ -115,18 +88,21 @@ class _LoginPageState extends State<LoginPage> {
             return;
           }
         } else {
-          final configuredPass = matchedStaff.password?.trim() ?? '';
-          bool passOk = configuredPass.isNotEmpty && password == configuredPass;
+          // For Clerk and Inspector, authenticate with Supabase Auth first, then configured staff fallback
+          bool passOk = false;
+          try {
+            final res = await _supabase.auth.signInWithPassword(
+              email: email,
+              password: password,
+            );
+            if (res.user != null) passOk = true;
+          } catch (_) {}
 
           if (!passOk) {
-            // Fallback: check if the user can authenticate directly against Supabase Auth
-            try {
-              final res = await _supabase.auth.signInWithPassword(
-                email: email,
-                password: password,
-              );
-              if (res.user != null) passOk = true;
-            } catch (_) {}
+            final configuredPass = matchedStaff.password?.trim() ?? '';
+            if (configuredPass.isNotEmpty && password == configuredPass) {
+              passOk = true;
+            }
           }
 
           if (!passOk) {
@@ -156,7 +132,7 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // 3. Standard Supabase Auth sign-in
+      // 3. Fallback: Standard Supabase Auth sign-in for users not yet in staff table
       final response = await _supabase.auth.signInWithPassword(
         email: email,
         password: password,
@@ -167,8 +143,7 @@ class _LoginPageState extends State<LoginPage> {
         final metaRole = user.userMetadata?['role']?.toString() ?? '';
         if (metaRole != 'admin' &&
             metaRole != 'clerk' &&
-            metaRole != 'inspector' &&
-            matchedStaff == null) {
+            metaRole != 'inspector') {
           await _supabase.auth.signOut();
           _showLoginErrorDialog(
             title: 'Access Denied',
@@ -177,19 +152,7 @@ class _LoginPageState extends State<LoginPage> {
           return;
         }
 
-        // Determine actual role (Staff & Roles assignment takes precedence)
-        final String actualRole = matchedStaff != null
-            ? StaffAccount.normalizeRole(matchedStaff.role)
-            : StaffAccount.normalizeRole(metaRole);
-
-        if (!_doesRoleMatchPortal(actualRole, _selectedRolePortal)) {
-          await _supabase.auth.signOut();
-          _showLoginErrorDialog(
-            title: 'Portal Mismatch',
-            message: 'Access denied: This account is registered as a $actualRole. Please switch to the $actualRole login tab.',
-          );
-          return;
-        }
+        final String actualRole = StaffAccount.normalizeRole(metaRole);
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
@@ -220,17 +183,13 @@ class _LoginPageState extends State<LoginPage> {
           }
         }
 
-        if (matchedStaff != null) {
-          await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
-          await AppSettingsService.instance.ensureAdminAuthSession();
-        } else {
-          await AppSettingsService.instance.setActiveStaffSession(null);
-          AppSettingsService.instance.syncWithAuthUser(user);
-        }
+        await AppSettingsService.instance.setActiveStaffSession(null);
+        AppSettingsService.instance.syncWithAuthUser(user);
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
         }
+        return;
       }
     } on AuthException catch (error) {
       final msg = error.message.toLowerCase();
@@ -349,6 +308,84 @@ class _LoginPageState extends State<LoginPage> {
     _showLoginErrorDialog(title: 'Login Notice', message: message);
   }
 
+  void _showForgotPasswordDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 10,
+          backgroundColor: Colors.white,
+          child: Container(
+            width: 440,
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE0F2FE),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lock_person_outlined,
+                    color: Color(0xFF0284C7),
+                    size: 40,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'Password Reset & Recovery',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E293B),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'For municipal regulatory compliance and security, administrative accounts do not allow public self-service password resets.\n\nPlease contact the City Veterinary Office IT Administrator or the System Database Administrator to request an authorized credential reset.\n\nOnce logged in, administrators can securely update their personal password at any time in Settings → My Profile.',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    height: 1.5,
+                    color: Color(0xFF475569),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2D6A4F),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      'Understood',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -459,12 +496,6 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildLoginForm() {
-    final portals = [
-      {'role': 'Admin', 'icon': Icons.admin_panel_settings_outlined},
-      {'role': 'Clerk', 'icon': Icons.assignment_ind_outlined},
-      {'role': 'Inspector', 'icon': Icons.biotech_outlined},
-    ];
-
     return Center(
       child: SingleChildScrollView(
         child: Column(
@@ -474,62 +505,12 @@ class _LoginPageState extends State<LoginPage> {
               'Welcome',
               style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w300),
             ),
-            const SizedBox(height: 4),
-            Text(
-              '$_selectedRolePortal Login Portal',
-              style: const TextStyle(color: Colors.white70, fontSize: 15, fontWeight: FontWeight.w600),
+            const SizedBox(height: 6),
+            const Text(
+              'City Slaughterhouse Management Portal',
+              style: TextStyle(color: Colors.white70, fontSize: 14.5, fontWeight: FontWeight.w500),
             ),
-            const SizedBox(height: 16),
-
-            // ── Exclusive Role Portal Selector ──
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-              ),
-              child: Row(
-                children: portals.map((p) {
-                  final role = p['role'] as String;
-                  final icon = p['icon'] as IconData;
-                  final isSelected = _selectedRolePortal == role;
-                  return Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedRolePortal = role),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: const EdgeInsets.symmetric(vertical: 9),
-                        decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFF2D6A4F) : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              icon,
-                              size: 15,
-                              color: isSelected ? Colors.white : Colors.white60,
-                            ),
-                            const SizedBox(width: 5),
-                            Text(
-                              role,
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.white70,
-                                fontSize: 12.5,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
             _buildTextField(
               controller: _usernameController,
               label: 'Email / Username',
@@ -572,12 +553,12 @@ class _LoginPageState extends State<LoginPage> {
                   ],
                 ),
                 TextButton(
-                  onPressed: () {},
+                  onPressed: _showForgotPasswordDialog,
                   child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 13)),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 24),
             SizedBox(
               width: 220,
               child: ElevatedButton(
@@ -589,30 +570,15 @@ class _LoginPageState extends State<LoginPage> {
                 ),
                 child: _isLoading
                     ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text('Log in as $_selectedRolePortal', style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
+                    : const Text('Sign In', style: TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
               ),
             ),
             const SizedBox(height: 16),
-            if (_selectedRolePortal == 'Admin' && !_isAdminProvisioned)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('Initial setup? ', style: TextStyle(color: Colors.white70, fontSize: 12.5)),
-                  GestureDetector(
-                    onTap: () => Navigator.pushReplacementNamed(context, '/signup'),
-                    child: const Text(
-                      'Register primary admin here.',
-                      style: TextStyle(color: Colors.white, fontSize: 12.5, decoration: TextDecoration.underline),
-                    ),
-                  ),
-                ],
-              )
-            else
-              Text(
-                '$_selectedRolePortal accounts are managed and provisioned by the Administrator in Settings → Staff & Roles.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white60, fontSize: 11.5),
-              ),
+            const Text(
+              'Authorized personnel only. Access is automatically governed by your assigned staff role.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white60, fontSize: 11.5),
+            ),
             const SizedBox(height: 18),
             Center(
               child: InkWell(

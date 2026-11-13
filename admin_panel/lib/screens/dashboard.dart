@@ -339,41 +339,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
       final reqList = List<Map<String, dynamic>>.from(data);
       for (var req in reqList) {
-        final reqId = req['id'];
-        final reqIdStr = reqId?.toString();
-        final stRaw = req['status']?.toString().toLowerCase() ?? '';
-        final pRaw = req['payments'];
-        Map<String, dynamic>? firstPay;
-        if (pRaw is List && pRaw.isNotEmpty && pRaw.first is Map) {
-          firstPay = Map<String, dynamic>.from(pRaw.first as Map);
-        } else if (pRaw is Map) {
-          firstPay = Map<String, dynamic>.from(pRaw);
-        }
-        final methodStr = (firstPay?['payment_method'] ?? '').toString().trim().toLowerCase();
-        if (firstPay != null &&
-            firstPay['status'] != 'paid' &&
-            (methodStr == 'gcash' || (reqIdStr == '122' && stRaw == 'payment_pending'))) {
-          final receiptNo = 'RCP-${DateTime.now().year}-${reqIdStr?.padLeft(3, '0')}';
-          firstPay['payment_method'] = 'GCash';
-          firstPay['status'] = 'paid';
-          firstPay['balance'] = 0;
-          firstPay['receipt_number'] = receiptNo;
-          req['payments'] = [firstPay];
-          if (stRaw == 'payment_pending' || stRaw == 'releasable' || stRaw == 'mic_generated') {
-            req['status'] = 'paid';
-          }
-          try {
-            await supabase.from('payments').update({
-              'payment_method': 'GCash',
-              'status': 'paid',
-              'balance': 0,
-              'receipt_number': receiptNo,
-              'cashier_name': 'PayMongo (Auto)',
-            }).eq('request_id', reqId);
-            await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
-          } catch (_) {}
-        }
-
         final st = req['status']?.toString().toLowerCase() ?? '';
         final releasedAt = req['released_at'];
 
@@ -520,19 +485,49 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard avg processing time error: $e');
       }
 
-      // Satisfaction Rate
-      double satisfaction = 94.0;
+      // Satisfaction Rate (Blended: 60% Customer Review Ratings + 40% Transaction Completion Rate)
+      double satisfaction = 100.0;
       try {
+        // 1. Transaction completion rate (released / total active requests)
+        final allReqRes = await supabase.from('requests').select('status');
+        int totalRequests = 0;
+        int completedRequests = 0;
+        for (var req in List<Map<String, dynamic>>.from(allReqRes)) {
+          final s = req['status']?.toString().toLowerCase() ?? '';
+          if (s != 'cancelled' && s != 'rejected') {
+            totalRequests++;
+            if (s == 'released' || s == 'completed') {
+              completedRequests++;
+            }
+          }
+        }
+        final double completionRate = totalRequests > 0
+            ? (completedRequests / totalRequests) * 100.0
+            : 100.0;
+
+        // 2. Customer review ratings from mobile app
         final reviewsData = await supabase.from('reviews').select('rating');
         double totalRating = 0;
         int reviewCount = 0;
         for (var r in List<Map<String, dynamic>>.from(reviewsData)) {
           final rating = double.tryParse(r['rating']?.toString() ?? '0') ?? 0;
-          totalRating += rating;
-          reviewCount++;
+          if (rating > 0) {
+            totalRating += rating;
+            reviewCount++;
+          }
         }
-        if (reviewCount > 0) satisfaction = (totalRating / reviewCount / 5.0) * 100;
-      } catch (_) {}
+
+        if (reviewCount > 0) {
+          final double reviewScore = (totalRating / reviewCount / 5.0) * 100.0;
+          satisfaction = (reviewScore * 0.6) + (completionRate * 0.4);
+        } else {
+          // If no reviews yet, use transaction completion rate
+          satisfaction = completionRate;
+        }
+        satisfaction = satisfaction.clamp(0.0, 100.0);
+      } catch (e) {
+        debugPrint('Dashboard satisfaction rate calculation error: $e');
+      }
 
       if (mounted) {
         setState(() {

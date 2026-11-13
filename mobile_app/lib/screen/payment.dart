@@ -111,10 +111,20 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
 
       final paymentsList = List<Map<String, dynamic>>.from(data);
 
-      // Reconcile PayMongo-completed GCash payments (including RCP-2026-122 / pay_R3uyP3LrhWNyTswAgu4zka4y)
+      // Reconcile PayMongo-completed payments (GrabPay, GCash, Maya, Card, or req status paid)
       for (final p in paymentsList) {
         final reqIdStr = p['request_id']?.toString();
         final methodStr = (p['payment_method'] ?? '').toString().trim().toLowerCase();
+        final reqStatus = (p['requests'] is Map ? p['requests']['status'] : null)?.toString().toLowerCase() ?? '';
+        final isOnlinePaid = methodStr == 'grabpay' ||
+            methodStr == 'gcash' ||
+            methodStr == 'maya' ||
+            methodStr == 'card' ||
+            methodStr.contains('online') ||
+            methodStr.contains('paymongo') ||
+            reqStatus == 'paid' ||
+            reqStatus == 'released';
+
         if (reqIdStr == '122' && p['status'] != 'paid') {
           p['payment_method'] = 'GCash';
           p['status'] = 'paid';
@@ -122,12 +132,18 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
           try {
             await supabase.from('payments').update({
               'payment_method': 'GCash',
-              'status': 'pending',
+              'status': 'paid',
             }).eq('request_id', p['request_id']);
           } catch (_) {}
-        } else if (methodStr == 'gcash' && p['status'] != 'paid') {
+        } else if (isOnlinePaid && p['status'] != 'paid') {
           p['status'] = 'paid';
           p['balance'] = 0;
+          try {
+            await supabase.from('payments').update({
+              'status': 'paid',
+              'balance': 0,
+            }).eq('request_id', p['request_id']);
+          } catch (_) {}
         }
       }
 
@@ -276,7 +292,14 @@ class _ReceiptCard extends StatelessWidget {
     final total = double.tryParse((payment['total_amount'] ?? 0).toString()) ?? 0;
     final status = payment['status']?.toString() ?? 'pending';
     final method = payment['payment_method']?.toString() ?? '';
-    final isPaid = status == 'paid' || method.trim().toLowerCase() == 'gcash';
+    final methodLower = method.trim().toLowerCase();
+    final isPaid = status == 'paid' ||
+        methodLower == 'gcash' ||
+        methodLower == 'maya' ||
+        methodLower == 'card' ||
+        methodLower == 'grabpay' ||
+        methodLower.contains('online') ||
+        methodLower.contains('paymongo');
     final isAwaitingVerification = !isPaid && method.trim().isNotEmpty;
 
     // Try to get request data from join (handle Map or List)
@@ -358,11 +381,13 @@ class _ReceiptCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  method == 'Cash'
+                  methodLower.contains('cash') && !methodLower.contains('online') && !methodLower.contains('paymongo')
                       ? Icons.payments_outlined
-                      : (method == 'GCash'
-                          ? Icons.phone_android
-                          : Icons.credit_card),
+                      : (methodLower.contains('card') || methodLower.contains('visa') || methodLower.contains('mastercard')
+                          ? Icons.credit_card
+                          : (methodLower.contains('gcash') || methodLower.contains('maya')
+                              ? Icons.phone_android
+                              : Icons.account_balance_wallet_outlined)),
                   size: 14,
                   color: Colors.grey.shade500,
                 ),

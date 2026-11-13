@@ -159,6 +159,33 @@ class _NotifyPageState extends State<NotifyPage> {
         return !title.contains('report filed successfully');
       }).toList();
 
+      // Deduplicate "payment_confirmed" notifications for the same receipt
+      // Keeps only the most recent notification and collects duplicate IDs
+      final seenPaymentKeys = <String>{};
+      final duplicatePaymentIdsToDelete = <dynamic>[];
+      final List<Map<String, dynamic>> dedupedList = [];
+
+      for (final n in cleanedList) {
+        final type = (n['type'] ?? '').toString().toLowerCase();
+        final title = (n['title'] ?? '').toString().toLowerCase();
+        final isPaymentConf = type == 'payment_confirmed' || title.contains('payment confirmed');
+
+        if (isPaymentConf) {
+          final msg = (n['message'] ?? '').toString().trim();
+          final match = RegExp(r'RCP-\d{4}-\d+', caseSensitive: false).firstMatch(msg);
+          final dedupKey = match != null ? match.group(0)!.toUpperCase() : msg;
+
+          if (seenPaymentKeys.contains(dedupKey)) {
+            if (n['id'] != null) {
+              duplicatePaymentIdsToDelete.add(n['id']);
+            }
+            continue;
+          }
+          seenPaymentKeys.add(dedupKey);
+        }
+        dedupedList.add(n);
+      }
+
       // Silently clean up any duplicate records from Supabase in the background
       try {
         await supabase
@@ -168,9 +195,21 @@ class _NotifyPageState extends State<NotifyPage> {
             .ilike('title', '%report filed successfully%');
       } catch (_) {}
 
+      if (duplicatePaymentIdsToDelete.isNotEmpty) {
+        try {
+          await supabase
+              .from('notifications')
+              .delete()
+              .inFilter('id', duplicatePaymentIdsToDelete);
+          debugPrint('Cleaned up ${duplicatePaymentIdsToDelete.length} duplicate payment notifications');
+        } catch (delErr) {
+          debugPrint('Duplicate payment notification cleanup error: $delErr');
+        }
+      }
+
       if (mounted) {
         setState(() {
-          notifications = cleanedList;
+          notifications = dedupedList;
           isLoading = false;
           // New unread notifications go to Unread tab; only switch if user hasn't explicitly selected
           if (!_userSwitchedTab) {
@@ -301,11 +340,11 @@ class _NotifyPageState extends State<NotifyPage> {
   // =========================
   // FILTER
   // "Unread" tab contains new unread notifications.
-  // "All" tab contains everything that has already been read.
+  // "All" tab contains all notifications (both unread and read).
   // =========================
   List<Map<String, dynamic>> get _filtered => showUnreadOnly
       ? notifications.where((n) => !_asBool(n['is_read'])).toList()
-      : notifications.where((n) => _asBool(n['is_read'])).toList();
+      : notifications;
 
   int get _unreadCount =>
       notifications.where((n) => !_asBool(n['is_read'])).length;
@@ -2025,7 +2064,7 @@ class _NotifyPageState extends State<NotifyPage> {
             Icon(Icons.notifications_off_outlined, size: 48, color: Colors.grey.shade300),
             const SizedBox(height: 12),
             Text(
-              showUnreadOnly ? 'No unread notifications' : 'No read notifications yet',
+              showUnreadOnly ? 'No unread notifications' : 'No notifications yet',
               style: TextStyle(color: Colors.grey.shade400),
             ),
           ],

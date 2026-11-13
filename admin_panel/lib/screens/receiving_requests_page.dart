@@ -517,185 +517,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   }
 
   // ════════════════════════════════════════════
-  //  UPDATE APPROVED REQUEST
-  // ════════════════════════════════════════════
-  Future<void> _showUpdateRequestDialog(Map<String, dynamic> request) async {
-    final refNo = _buildRefNo(request);
-    final customerName = (request['customer_name'] ?? 'Customer').toString();
-    final currentMarking = (request['marking'] ?? request['customer_marking'] ?? '').toString();
-    final currentCount = (request['animal_count'] ?? 1).toString();
-    final currentInstruction = (request['special_instruction'] ?? '').toString();
-
-    DateTime selectedDate;
-    try {
-      selectedDate = request['preferred_date'] != null
-          ? DateTime.parse(request['preferred_date'].toString())
-          : DateTime.now();
-    } catch (_) {
-      selectedDate = DateTime.now();
-    }
-
-    final markingCtrl = TextEditingController(text: currentMarking);
-    final countCtrl = TextEditingController(text: currentCount);
-    final instructionCtrl = TextEditingController(text: currentInstruction);
-    final dateCtrl = TextEditingController(text: DateFormat('yyyy-MM-dd').format(selectedDate));
-
-    final updated = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE8F5E9),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.edit_note, color: Color(0xFF2D6A4F), size: 22),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Update Request', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    Text('Ref # $refNo • $customerName', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: SizedBox(
-              width: 440,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: markingCtrl,
-                    textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: 'Marking Tag / Pen',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.tag),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: countCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Head Count',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.numbers),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: dateCtrl,
-                    readOnly: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Scheduled Date',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.calendar_today),
-                    ),
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: selectedDate,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2035),
-                      );
-                      if (picked != null) {
-                        selectedDate = picked;
-                        setDialogState(() {
-                          dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
-                        });
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: instructionCtrl,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Special Instructions',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.assignment_outlined),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D6A4F),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text('Save Changes'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (updated != true) return;
-
-    try {
-      final newCount = int.tryParse(countCtrl.text.trim()) ?? (request['animal_count'] ?? 1);
-      final newMarking = markingCtrl.text.trim().toUpperCase();
-      final newDate = dateCtrl.text.trim();
-      final newInstruction = instructionCtrl.text.trim();
-
-      await supabase.from('requests').update({
-        'marking': newMarking,
-        'animal_count': newCount,
-        'preferred_date': newDate,
-        'special_instruction': newInstruction,
-      }).eq('id', request['id']);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Text('Ref # $refNo updated successfully!'),
-              ],
-            ),
-            backgroundColor: const Color(0xFF2D6A4F),
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-        );
-      }
-      _loadRequests(silent: true);
-    } catch (e) {
-      debugPrint('Error updating request: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error updating request: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
-    }
-  }
-
-  // ════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════
   @override
@@ -789,29 +610,34 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   Widget _buildSearchAndActions() {
     return Row(
       children: [
-        // Search
+        // Search (Compact 250px width, 36px height)
         SizedBox(
-          width: 320,
+          width: 250,
+          height: 36,
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
+            style: const TextStyle(fontSize: 13),
+            textAlignVertical: TextAlignVertical.center,
             decoration: InputDecoration(
+              isDense: true,
               hintText: 'Search by reference or customer...',
-              hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 14),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0)),
+              hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: Colors.grey.shade300),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: BorderSide(color: Colors.grey.shade300),
               ),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5),
               ),
             ),
@@ -982,7 +808,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                                   DataCell(Text(_formatDate(req['preferred_date']))),
                                   DataCell(
                                     OutlinedButton(
-                                      onPressed: () => _showUpdateRequestDialog(req),
+                                      onPressed: () => _showUpdateApprovedRequestDialog(req),
                                       style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                                         side: BorderSide(color: Colors.grey.shade300),
@@ -1005,6 +831,173 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                   },
                 ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _showUpdateApprovedRequestDialog(Map<String, dynamic> req) async {
+    final refNo = _buildRefNo(req);
+    final nameCtrl = TextEditingController(text: (req['customer_name'] ?? '').toString());
+    final countCtrl = TextEditingController(text: (req['animal_count'] ?? 1).toString());
+    final markingCtrl = TextEditingController(
+      text: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
+    );
+    final dateCtrl = TextEditingController(
+      text: (req['preferred_date'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString(),
+    );
+    final noteCtrl = TextEditingController(text: (req['special_instruction'] ?? '').toString());
+
+    const livestockOptions = ['Pig/Hog', 'Cattle/Cow', 'Carabao', 'Goat', 'Poultry'];
+    String selectedLivestock = (req['livestock_type'] ?? 'Pig/Hog').toString();
+    if (!livestockOptions.contains(selectedLivestock)) {
+      selectedLivestock = livestockOptions.first;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              const Icon(Icons.edit_note, color: Color(0xFF2D6A4F)),
+              const SizedBox(width: 8),
+              Text(
+                'Update Approved Request ($refNo)',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Customer Name',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedLivestock,
+                    decoration: const InputDecoration(
+                      labelText: 'Livestock Type',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    items: livestockOptions
+                        .map((item) => DropdownMenuItem(value: item, child: Text(item)))
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) setDialogState(() => selectedLivestock = val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: countCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Animal Count (Heads)',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: markingCtrl,
+                          textCapitalization: TextCapitalization.characters,
+                          decoration: const InputDecoration(
+                            labelText: 'Marking Tag',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: dateCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Preferred Date (YYYY-MM-DD)',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Special Instructions',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newCount = int.tryParse(countCtrl.text.trim()) ?? 1;
+                final newMarking = markingCtrl.text.trim().toUpperCase();
+                Navigator.pop(ctx);
+                try {
+                  await supabase.from('requests').update({
+                    'customer_name': nameCtrl.text.trim(),
+                    'livestock_type': selectedLivestock,
+                    'animal_count': newCount,
+                    'marking': newMarking,
+                    'preferred_date': dateCtrl.text.trim(),
+                    'special_instruction': noteCtrl.text.trim(),
+                  }).eq('id', req['id']);
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Updated request $refNo successfully.'),
+                        backgroundColor: const Color(0xFF2D6A4F),
+                      ),
+                    );
+                  }
+                  await _loadRequests();
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Failed to update request: $e'),
+                        backgroundColor: Colors.redAccent,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D6A4F),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2140,25 +2133,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
           debugPrint('Error inserting separate facility inspection row: $inspErr');
         }
 
-        if (matchedUserId != null) {
-          final livestockType = _selectedAnimalType ?? 'Livestock';
-          final animalCount = int.tryParse(_animalCountCtrl.text.trim()) ?? 1;
-          await NotificationService.sendNotificationSafely(
-            widget.supabase,
-            userId: matchedUserId,
-            title: 'Separate Facility — Emergency Slaughter',
-            message:
-                'Your $animalCount head(s) of $livestockType ($refNo) arrived deceased due to $_selectedEmergencyCause (non-infectious) and is being processed immediately in the Separate Facility, bypassing the standard slaughterhouse queue.',
-            type: 'separate_facility_slaughter',
-            data: {
-              'request_id': reqId,
-              'livestock_type': livestockType,
-              'animal_count': animalCount,
-              'emergency_cause': _selectedEmergencyCause,
-              'facility': 'Separate Facility',
-            },
-          );
-        }
+        // Walk-in immediate slaughter customers wait on-site at the facility; mobile app notifications suppressed
       }
 
       // Ensure newly entered walk-in meat dealer is permanently locked in registry
@@ -2979,24 +2954,32 @@ class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEBFFF5),
+                    color: widget.isSeparateFacility ? const Color(0xFFFFF7ED) : const Color(0xFFEBFFF5),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.receipt_long, color: Color(0xFF2D6A4F), size: 26),
+                  child: Icon(
+                    widget.isSeparateFacility ? Icons.bolt_rounded : Icons.receipt_long,
+                    color: widget.isSeparateFacility ? const Color(0xFFEA580C) : const Color(0xFF2D6A4F),
+                    size: 26,
+                  ),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Walk-In Receiving & Mobile Claim Stub',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
+                        widget.isSeparateFacility
+                            ? 'Immediate Slaughter Receiving Stub'
+                            : 'Walk-In Receiving & Mobile Claim Stub',
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
-                        'Print or provide this Reference No. to the walk-in customer.',
-                        style: TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
+                        widget.isSeparateFacility
+                            ? 'Customer waiting on-site for immediate processing.'
+                            : 'Print or provide this Reference No. to the walk-in customer.',
+                        style: const TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
                       ),
                     ],
                   ),
@@ -3085,57 +3068,59 @@ class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
                 ),
               ),
             ],
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (!widget.isLinkedToAccount) ...[
-                    Container(
-                      width: 82,
-                      height: 82,
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.amber.shade300),
+            if (!widget.isSeparateFacility) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (!widget.isLinkedToAccount) ...[
+                      Container(
+                        width: 82,
+                        height: 82,
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Image.asset(
+                          'assets/images/app_qr_code.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
+                        ),
                       ),
-                      child: Image.asset(
-                        'assets/images/app_qr_code.png',
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
+                      const SizedBox(width: 12),
+                    ] else ...[
+                      Icon(
+                        Icons.verified_user,
+                        size: 24,
+                        color: Colors.blue.shade700,
+                      ),
+                      const SizedBox(width: 10),
+                    ],
+                    Expanded(
+                      child: Text(
+                        widget.isLinkedToAccount
+                            ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
+                            : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                  ] else ...[
-                    Icon(
-                      Icons.verified_user,
-                      size: 24,
-                      color: Colors.blue.shade700,
-                    ),
-                    const SizedBox(width: 10),
                   ],
-                  Expanded(
-                    child: Text(
-                      widget.isLinkedToAccount
-                          ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
-                          : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        height: 1.4,
-                        color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: 24),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,

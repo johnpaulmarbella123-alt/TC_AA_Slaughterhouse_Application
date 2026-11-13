@@ -286,26 +286,34 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   Widget _buildFilterRow() {
     return Row(
       children: [
+        // Search (Compact 250px width, 36px height)
         SizedBox(
-          width: 300,
+          width: 250,
+          height: 36,
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
+            style: const TextStyle(fontSize: 13),
+            textAlignVertical: TextAlignVertical.center,
             decoration: InputDecoration(
+              isDense: true,
               hintText: 'Search by reference number...',
               hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 20),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
               filled: true,
               fillColor: const Color(0xFFEDF2F7),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
             ),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
+        // Dropdown Button (Compact 36px height)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             color: const Color(0xFFEDF2F7),
             borderRadius: BorderRadius.circular(8),
@@ -313,7 +321,8 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: _filterStage,
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+              isDense: true,
+              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
               items: ['All', 'Separate Facility (Weighing)', 'Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay']
                   .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
                   .toList(),
@@ -2265,8 +2274,11 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         await widget.supabase.from('slaughter_inspection').insert(inspectionData);
       }
 
-      // Safely dispatch customer notification without blocking the update
-      if (notifTitle != null && notifMessage != null && notifType != null) {
+      // Safely dispatch customer notification without blocking the update (suppressed for on-site immediate slaughter walk-ins)
+      final bool isImmediateSlaughterWalkIn = _antiMortem == 'Separate Facility' ||
+          (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
+          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      if (!isImmediateSlaughterWalkIn && notifTitle != null && notifMessage != null && notifType != null) {
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,
@@ -3115,9 +3127,11 @@ class _MICDialogState extends State<_MICDialog> {
         }).eq('request_id', reqId);
       }
 
-      // 3. Notify customer safely
+      // 3. Notify customer safely (suppressed for on-site immediate slaughter walk-ins)
+      final isImmediateOnSite = (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
+          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
       final userId = widget.request['user_id']?.toString() ?? widget.request['customer_id']?.toString();
-      if (userId != null && userId.isNotEmpty) {
+      if (!isImmediateOnSite && userId != null && userId.isNotEmpty) {
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,

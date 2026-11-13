@@ -297,11 +297,24 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   }
 
   bool _isPaid(Map<String, dynamic> req) {
-    if (req['status'] == 'released') return true;
+    final reqStatus = req['status']?.toString().toLowerCase();
+    if (reqStatus == 'released' || reqStatus == 'paid') return true;
     final payment = req['payment'] as Map<String, dynamic>?;
     final payStatus = payment?['status']?.toString().toLowerCase();
-    final reqStatus = req['status']?.toString().toLowerCase();
-    return payStatus == 'paid' || reqStatus == 'paid';
+    if (payStatus == 'paid') return true;
+    final payments = req['payments'];
+    if (payments is List && payments.isNotEmpty) {
+      return payments.any((p) => (p is Map) && p['status']?.toString().toLowerCase() == 'paid');
+    }
+    return false;
+  }
+
+  bool _isImmediateSlaughter(Map<String, dynamic> req) {
+    return (req['anti_mortem']?.toString() == 'Separate Facility') ||
+        (req['slaughter_inspection'] is Map &&
+            (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' ||
+                (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+        (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
   }
 
   String _releaseStatus(Map<String, dynamic> req) {
@@ -748,26 +761,34 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   Widget _buildFilterRow() {
     return Row(
       children: [
+        // Search (Compact 250px width, 36px height)
         SizedBox(
-          width: 340,
+          width: 250,
+          height: 36,
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
+            style: const TextStyle(fontSize: 13),
+            textAlignVertical: TextAlignVertical.center,
             decoration: InputDecoration(
+              isDense: true,
               hintText: 'Search by reference or customer...',
               hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 20),
+              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
               filled: true,
               fillColor: const Color(0xFFEDF2F7),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
             ),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
+        // Dropdown Button (Compact 36px height)
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             color: const Color(0xFFEDF2F7),
             borderRadius: BorderRadius.circular(8),
@@ -775,7 +796,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: _filterStatus,
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+              isDense: true,
+              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
               items: ['All', 'Ready', 'Awaiting Payment', 'Out for Delivery', 'Released']
                   .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
                   .toList(),
@@ -874,9 +896,39 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         } catch (_) {}
                       }
 
+                      final isImmediateSlaughter = _isImmediateSlaughter(req);
+
                       return DataRow(cells: [
                         DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                        DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                        DataCell(Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                            if (isImmediateSlaughter) ...[
+                              const SizedBox(height: 3),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFFF7ED),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFFF97316)),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.bolt, size: 11, color: Color(0xFFC2410C)),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      'Waiting On-Site / Immediate',
+                                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        )),
                         DataCell(Text(req['contact_number']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 12))),
                         DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
                         DataCell(Text(mic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey.shade700))),
@@ -1048,7 +1100,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
 
     if (!isPaid) {
       return Tooltip(
-        message: 'Payment not yet verified by clerk. Dispatching delivery van is locked.',
+        message: 'Payment not yet verified by clerk. Dispatching is locked.',
         child: OutlinedButton.icon(
           icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
           onPressed: () {
@@ -1082,7 +1134,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         side: const BorderSide(color: Color(0xFF185FA5)),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
       ),
-      label: const Text('Dispatch Van', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      label: const Text('Dispatch', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
     );
   }
 
@@ -1105,6 +1157,22 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     if (!_isPaid(req)) {
       return _buildAwaitingPaymentButton(req);
     }
+
+    final isImmediate = _isImmediateSlaughter(req);
+    if (isImmediate) {
+      return OutlinedButton(
+        onPressed: () => _showReleaseDialog(req, isDelivery: false),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFF2D6A4F),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          minimumSize: const Size(0, 34),
+          side: const BorderSide(color: Color(0xFF2D6A4F)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        child: const Text('Verify Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      );
+    }
+
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1151,6 +1219,34 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   }
 
   Widget _buildAwaitingPaymentButton(Map<String, dynamic> req) {
+    final waitingBtn = Tooltip(
+      message: 'Claimant must settle payment at the Cashier window first before carcass handover',
+      child: OutlinedButton.icon(
+        icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
+        onPressed: () {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first before carcass release.'),
+              backgroundColor: Color(0xFFD97706),
+            ),
+          );
+        },
+        style: OutlinedButton.styleFrom(
+          foregroundColor: const Color(0xFFB45309),
+          backgroundColor: const Color(0xFFFFFBEB),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          minimumSize: const Size(0, 34),
+          side: const BorderSide(color: Color(0xFFFCD34D)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        label: const Text('Waiting for Cashier Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+      ),
+    );
+
+    if (_isImmediateSlaughter(req)) {
+      return waitingBtn;
+    }
+
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
 
     return Row(
@@ -1182,29 +1278,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           ),
         ),
         const SizedBox(width: 8),
-        Tooltip(
-          message: 'Claimant must settle payment at the Cashier window first before carcass handover',
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFFB45309)),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Payment not yet verified. Please advise customer to pay at the Cashier window first before carcass release.'),
-                  backgroundColor: Color(0xFFD97706),
-                ),
-              );
-            },
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFB45309),
-              backgroundColor: const Color(0xFFFFFBEB),
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              minimumSize: const Size(0, 34),
-              side: const BorderSide(color: Color(0xFFFCD34D)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            ),
-            label: const Text('Waiting for Cashier Payment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-          ),
-        ),
+        waitingBtn,
       ],
     );
   }
@@ -1264,26 +1338,31 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         });
       } catch (_) {}
 
-      await NotificationService.sendNotificationSafely(
-        supabase,
-        userId: userId,
-        title: isPaid
-            ? 'Meat Ready for Collection (Claim Before 5:00 PM)'
-            : 'Meat Ready for Collection — Payment Required',
-        message: isPaid
-            ? 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! REMINDER: Please pick up your carcass on or before $deadlineStr. If not picked up by 5:00 PM, an automatic \u20b1150.00 Cold Storage penalty fee will apply.'
-            : 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! Before claiming your carcass from the dispatcher, please complete your payment of $amountStr at the Cashier window. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated. REMINDER: Please complete payment and pick up your meat on or before $deadlineStr — a \u20b1150.00 Cold Storage fee applies if unclaimed by 5:00 PM, and a \u20b1100.00 Overdue Payment penalty applies if unpaid by 5:00 PM.',
-        type: 'meat_pickup',
-        data: {
-          'request_id': reqId,
-          'reference_no': ref,
-          'release_type': 'pickup',
-          'payment_status': isPaid ? 'paid' : 'unpaid',
-          'payment_method': payment?['payment_method'] ?? 'Cash on Pickup',
-          'amount': amount,
-          'pickup_deadline': deadline.toIso8601String(),
-        },
-      );
+      // Suppressed for on-site immediate slaughter walk-ins
+      final isImmediateOnSite = _isImmediateSlaughter(req);
+
+      if (!isImmediateOnSite && userId != null && userId.isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          supabase,
+          userId: userId,
+          title: isPaid
+              ? 'Meat Ready for Collection (Claim Before 5:00 PM)'
+              : 'Meat Ready for Collection — Payment Required',
+          message: isPaid
+              ? 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! REMINDER: Please pick up your carcass on or before $deadlineStr. If not picked up by 5:00 PM, an automatic \u20b1150.00 Cold Storage penalty fee will apply.'
+              : 'Your meat order (Ref: $ref) is ready for collection at the slaughterhouse! Before claiming your carcass from the dispatcher, please complete your payment of $amountStr at the Cashier window. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated. REMINDER: Please complete payment and pick up your meat on or before $deadlineStr — a \u20b1150.00 Cold Storage fee applies if unclaimed by 5:00 PM, and a \u20b1100.00 Overdue Payment penalty applies if unpaid by 5:00 PM.',
+          type: 'meat_pickup',
+          data: {
+            'request_id': reqId,
+            'reference_no': ref,
+            'release_type': 'pickup',
+            'payment_status': isPaid ? 'paid' : 'unpaid',
+            'payment_method': payment?['payment_method'] ?? 'Cash on Pickup',
+            'amount': amount,
+            'pickup_deadline': deadline.toIso8601String(),
+          },
+        );
+      }
 
       _loadRequests(silent: true);
 
@@ -1583,7 +1662,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                   border: Border.all(color: const Color(0xFFFCD34D)),
                 ),
                 child: const Text(
-                  'Recalling this dispatch will revert its status back to "Payment Pending". Once the cashier verifies payment in Payment & Cashiering, the "Dispatch Van" button will be unlocked.',
+                  'Recalling this dispatch will revert its status back to "Payment Pending". Once the cashier verifies payment in Payment & Cashiering, the "Dispatch" button will be unlocked.',
                   style: TextStyle(fontSize: 12, color: Color(0xFF92400E)),
                 ),
               ),
