@@ -4,7 +4,7 @@ import '../services/staff_notification_service.dart';
 /// Header bell for Admin / Clerk / Inspector dashboards.
 /// Shows unread count and a dropdown list of staff notifications.
 class StaffNotificationBell extends StatefulWidget {
-  final void Function(int moduleIndex) onNavigate;
+  final void Function(int moduleIndex, [String? tab]) onNavigate;
 
   const StaffNotificationBell({super.key, required this.onNavigate});
 
@@ -234,7 +234,7 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
       onTap: () {
         _service.markRead([n.id]);
         _menuController.close();
-        widget.onNavigate(n.targetModule);
+        widget.onNavigate(n.targetModule, n.targetTab);
       },
       child: Container(
         color: isUnread ? const Color(0xFFF0FDF4) : Colors.white,

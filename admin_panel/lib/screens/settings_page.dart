@@ -7,8 +7,9 @@ import '../utils/text_capitalization_formatters.dart';
 
 class SettingsPage extends StatefulWidget {
   final int initialTab;
+  final int navVersion;
 
-  const SettingsPage({super.key, this.initialTab = 0});
+  const SettingsPage({super.key, this.initialTab = 0, this.navVersion = 0});
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -168,13 +169,17 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void didUpdateWidget(SettingsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.initialTab != oldWidget.initialTab) {
+    if (widget.initialTab != oldWidget.initialTab ||
+        widget.navVersion != oldWidget.navVersion) {
       final target = widget.initialTab.clamp(0, 6);
       if (_currentTabIndex != target) {
         setState(() {
           _currentTabIndex = target;
         });
         _tabController.animateTo(target);
+      }
+      if (target == 5) {
+        _loadCustomerAccounts();
       }
     }
   }
@@ -2990,19 +2995,24 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           const SizedBox(height: 18),
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: TextField(
-                  controller: _customerSearchCtrl,
-                  onChanged: (v) => setState(() => _customerSearchQuery = v.trim()),
-                  decoration: InputDecoration(
-                    hintText: 'Search by name, phone, email, barangay/market, or role...',
-                    prefixIcon: const Icon(Icons.search, size: 18),
-                    filled: true,
-                    fillColor: cardBg,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 380),
+                  child: TextField(
+                    controller: _customerSearchCtrl,
+                    onChanged: (v) => setState(() => _customerSearchQuery = v.trim()),
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Search by name, phone, email, barangay/market, or role...',
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      filled: true,
+                      fillColor: cardBg,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+                    ),
                   ),
                 ),
               ),

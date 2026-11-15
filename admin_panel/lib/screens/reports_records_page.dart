@@ -227,6 +227,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
       try {
         await RegularDealersService.instance.init();
+        await RegularDealersService.instance.syncFromConfirmedProfiles();
         await RegularDealersService.instance.syncCustomersFromRequests(enriched);
       } catch (_) {}
 
@@ -3798,18 +3799,34 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                               ),
                             ),
                             DataCell(
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFE6F9F0),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
-                                ),
-                                child: Text(
-                                  d.markings,
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2D6A4F)),
-                                ),
-                              ),
+                              Builder(builder: (_) {
+                                final isPendingMarking = d.markings.trim().isEmpty ||
+                                    d.markings.trim().toUpperCase() == 'PENDING';
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isPendingMarking
+                                        ? const Color(0xFFFEF3C7)
+                                        : const Color(0xFFE6F9F0),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: isPendingMarking
+                                          ? const Color(0xFFD97706).withValues(alpha: 0.4)
+                                          : const Color(0xFF2D6A4F).withValues(alpha: 0.4),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    isPendingMarking ? 'PENDING' : d.markings,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                      color: isPendingMarking
+                                          ? const Color(0xFFB45309)
+                                          : const Color(0xFF2D6A4F),
+                                    ),
+                                  ),
+                                );
+                              }),
                             ),
                             DataCell(
                               Container(

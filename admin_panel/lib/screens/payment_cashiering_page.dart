@@ -7,9 +7,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/app_settings_service.dart';
 import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
-  const PaymentCashieringPage({super.key});
+  final void Function(int moduleIndex, [String? tab])? onNavigate;
+  const PaymentCashieringPage({super.key, this.onNavigate});
   @override
   State<PaymentCashieringPage> createState() => _PaymentCashieringPageState();
 }
@@ -838,7 +840,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
+          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
+          const SizedBox(width: 6),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => _loadRequests(),

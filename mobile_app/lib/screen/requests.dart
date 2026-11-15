@@ -73,6 +73,8 @@ class _RequestsContentState extends State<RequestsContent> {
   final TextEditingController _dateController = TextEditingController();
 
   String _customerName = '';
+  String _savedMarketName = '';
+  String _savedStallNumber = '';
   bool _isMarkingLocked = false;
   bool _isCustomerNameLocked = false;
   bool _isRegularDealer = false;
@@ -202,13 +204,23 @@ class _RequestsContentState extends State<RequestsContent> {
         if (profBrgy != null && profBrgy.isNotEmpty) {
           selectedBarangay ??= profBrgy;
         }
+        final metaMarket = user.userMetadata?['market_name']?.toString().trim();
         final profMarket = profile['market_name']?.toString().trim();
-        if (profMarket != null && profMarket.isNotEmpty && _marketNameController.text.isEmpty) {
-          _marketNameController.text = profMarket;
+        final resolvedMarket = (profMarket != null && profMarket.isNotEmpty) ? profMarket : metaMarket;
+        if (resolvedMarket != null && resolvedMarket.isNotEmpty) {
+          _savedMarketName = resolvedMarket;
+          if (_marketNameController.text.isEmpty) {
+            _marketNameController.text = resolvedMarket;
+          }
         }
+        final metaStall = user.userMetadata?['stall_number']?.toString().trim();
         final profStall = profile['stall_number']?.toString().trim();
-        if (profStall != null && profStall.isNotEmpty && _marketStallController.text.isEmpty) {
-          _marketStallController.text = profStall;
+        final resolvedStall = (profStall != null && profStall.isNotEmpty) ? profStall : metaStall;
+        if (resolvedStall != null && resolvedStall.isNotEmpty) {
+          _savedStallNumber = resolvedStall;
+          if (_marketStallController.text.isEmpty) {
+            _marketStallController.text = resolvedStall;
+          }
         }
         final profDocUrl = profile['role_document_url']?.toString().trim();
         if (profDocUrl != null && profDocUrl.isNotEmpty) {
@@ -708,8 +720,16 @@ class _RequestsContentState extends State<RequestsContent> {
     }
     _animalCountController.clear();
     _addressController.clear();
-    _marketStallController.clear();
-    _marketNameController.clear();
+    if (!isBarangay && _savedStallNumber.isNotEmpty) {
+      _marketStallController.text = _savedStallNumber;
+    } else {
+      _marketStallController.clear();
+    }
+    if (!isBarangay && _savedMarketName.isNotEmpty) {
+      _marketNameController.text = _savedMarketName;
+    } else {
+      _marketNameController.clear();
+    }
     _specialInstructionsController.clear();
     if (!_isMarkingLocked) {
       _markingController.clear();
@@ -1360,6 +1380,10 @@ class _RequestsContentState extends State<RequestsContent> {
     setState(() {
       isBarangay = isChoosingBarangay;
       _isRoleLocked = true;
+      if (!isChoosingBarangay) {
+        _savedMarketName = _marketNameController.text.trim();
+        _savedStallNumber = _marketStallController.text.trim();
+      }
     });
 
     final user = supabase.auth.currentUser;
@@ -1371,6 +1395,8 @@ class _RequestsContentState extends State<RequestsContent> {
             data: {
               'dealer_category': chosenRole,
               'role_confirmed': true,
+              if (!isChoosingBarangay) 'market_name': _savedMarketName,
+              if (!isChoosingBarangay) 'stall_number': _savedStallNumber,
             },
           ),
         );

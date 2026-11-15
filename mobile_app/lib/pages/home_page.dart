@@ -40,6 +40,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Realtime channel for notification changes.
   RealtimeChannel? _notifChannel;
 
+  /// Realtime channel for profile active/deletion status changes.
+  RealtimeChannel? _profileChannel;
+  bool _isForcedLoggingOut = false;
+
   /// Periodic polling timer to guarantee badge updates every few seconds even
   /// if Supabase Realtime replication is disabled or websocket is delayed.
   Timer? _notifPollingTimer;
@@ -55,16 +59,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Listen for unread count changes (drives bottom-nav rebuild)
     globalUnreadNotifCount.addListener(_onUnreadCountChanged);
 
-    // Start the app-level realtime listener for notifications.
+    // Start the app-level realtime listener for notifications and account status.
     _startNotificationListener();
+    _startProfileStatusListener();
 
     // Initial fetch so badge is correct on app launch.
     _fetchUnreadCount();
 
     // Fast polling fallback (every 4 seconds) to ensure new notifications
-    // show up immediately without requiring the user to switch tabs.
+    // and account deactivation status update immediately.
     _notifPollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       _fetchUnreadCount();
+      _checkAccountStillActive();
     });
 
     // Precache the heavy hero image so it's ready when the Home tab renders
@@ -79,6 +85,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
         return;
       }
+
+      await _checkAccountStillActive();
+      if (_isForcedLoggingOut || !mounted) return;
 
       // If token expired, refresh gracefully in background without signing out
       if (session != null && session.isExpired) {
@@ -104,6 +113,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_notifChannel != null) {
       Supabase.instance.client.removeChannel(_notifChannel!);
     }
+    if (_profileChannel != null) {
+      Supabase.instance.client.removeChannel(_profileChannel!);
+    }
     globalAvatarUrl.removeListener(_onAvatarUrlChanged);
     globalUnreadNotifCount.removeListener(_onUnreadCountChanged);
     _notifyRefreshTrigger.dispose();
@@ -114,10 +126,85 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When user brings app back to foreground, immediately check for new notifications
+    // When user brings app back to foreground, immediately check for new notifications and account status
     if (state == AppLifecycleState.resumed) {
       _fetchUnreadCount();
       _loadAvatar();
+      _checkAccountStillActive();
+    }
+  }
+
+  void _startProfileStatusListener() {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    _profileChannel = Supabase.instance.client.channel('profile-status-${user.id}');
+    _profileChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: user.id,
+          ),
+          callback: (payload) {
+            if (payload.newRecord['is_active'] == false) {
+              _forceSignOutIfDeactivated();
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'profiles',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'id',
+            value: user.id,
+          ),
+          callback: (_) => _forceSignOutIfDeactivated(),
+        )
+        .subscribe();
+  }
+
+  Future<void> _checkAccountStillActive() async {
+    if (_isForcedLoggingOut || !mounted) return;
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final profile = await client
+          .from('profiles')
+          .select('id, is_active')
+          .eq('id', user.id)
+          .maybeSingle();
+      if (profile == null || profile['is_active'] == false) {
+        await _forceSignOutIfDeactivated();
+      }
+    } catch (_) {
+      // Ignore transient network errors while offline
+    }
+  }
+
+  Future<void> _forceSignOutIfDeactivated() async {
+    if (_isForcedLoggingOut) return;
+    _isForcedLoggingOut = true;
+    _notifPollingTimer?.cancel();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_customer_logged_in', false);
+    } catch (_) {}
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {}
+
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, '/WELCOME', (r) => false);
     }
   }
 

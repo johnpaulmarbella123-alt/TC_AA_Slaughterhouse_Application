@@ -24,6 +24,7 @@ class _AdminShellState extends State<AdminShell> {
   int _selectedIndex = 0;
   String? _reportsInitialTab;
   int _settingsInitialTab = 0;
+  int _settingsNavVersion = 0;
   final Set<int> _loadedPages = {0};
 
   @override
@@ -90,8 +91,12 @@ class _AdminShellState extends State<AdminShell> {
         _reportsInitialTab = tabArg;
       } else if (index == 7 && tabArg is int) {
         _settingsInitialTab = tabArg;
+        _settingsNavVersion++;
       } else if (index == 7 && tabArg == 'customers') {
         _settingsInitialTab = 5;
+        _settingsNavVersion++;
+      } else if (index == 7) {
+        _settingsNavVersion++;
       }
     });
   }
@@ -125,19 +130,19 @@ class _AdminShellState extends State<AdminShell> {
                         ? DashboardPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(1)
-                        ? const ReceivingRequestsPage()
+                        ? ReceivingRequestsPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(2)
-                        ? const DocumentVerificationPage()
+                        ? DocumentVerificationPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(3)
-                        ? const SlaughterInspectionPage()
+                        ? SlaughterInspectionPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(4)
-                        ? const PaymentCashieringPage()
+                        ? PaymentCashieringPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(5)
-                        ? const MeatReleasingPage()
+                        ? MeatReleasingPage(onNavigate: _onNavigate)
                         : const SizedBox.shrink(),
                     _loadedPages.contains(6)
                         ? ReportsRecordsPage(
@@ -147,6 +152,7 @@ class _AdminShellState extends State<AdminShell> {
                     _loadedPages.contains(7)
                         ? SettingsPage(
                             initialTab: _settingsInitialTab,
+                            navVersion: _settingsNavVersion,
                           )
                         : const SizedBox.shrink(),
                   ],

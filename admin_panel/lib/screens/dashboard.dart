@@ -1106,7 +1106,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
             // Staff notification bell
             StaffNotificationBell(
-              onNavigate: (m) => widget.onNavigate?.call(m, m == 7 ? 'customers' : null),
+              onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
             ),
             const SizedBox(width: 4),
 
@@ -3045,7 +3045,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         const SizedBox(width: 16),
         StaffNotificationBell(
-          onNavigate: (m) => widget.onNavigate?.call(m),
+          onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
         ),
         const SizedBox(width: 10),
         Container(
@@ -3267,7 +3267,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     ),
                     const SizedBox(width: 10),
                     StaffNotificationBell(
-                      onNavigate: (m) => widget.onNavigate?.call(m),
+                      onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
                     ),
                     const SizedBox(width: 10),
                     Container(

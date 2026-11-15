@@ -10,9 +10,11 @@ import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
-  const SlaughterInspectionPage({super.key});
+  final void Function(int moduleIndex, [String? tab])? onNavigate;
+  const SlaughterInspectionPage({super.key, this.onNavigate});
   @override
   State<SlaughterInspectionPage> createState() => _SlaughterInspectionPageState();
 }
@@ -272,6 +274,8 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             ],
           ),
           const Spacer(),
+          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(

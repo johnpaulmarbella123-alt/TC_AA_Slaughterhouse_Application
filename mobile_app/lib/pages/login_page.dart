@@ -18,22 +18,111 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _hasIdentifier = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService = AuthService();
 
   @override
+  void initState() {
+    super.initState();
+    _emailController.addListener(_onIdentifierChanged);
+  }
+
+  void _onIdentifierChanged() {
+    final hasText = _emailController.text.trim().isNotEmpty;
+    if (hasText != _hasIdentifier) {
+      setState(() => _hasIdentifier = hasText);
+    }
+  }
+
+  @override
   void dispose() {
+    _emailController.removeListener(_onIdentifierChanged);
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
+  bool _isValidEmailOrPhone(String input) {
+    final trimmed = input.trim();
+    if (trimmed.contains('@')) {
+      return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(trimmed);
+    }
+    final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.length >= 10 && digits.length <= 13;
+  }
+
+  Future<({bool exists, bool isVerified})?> _checkAccountStatus(String rawInput) async {
+    try {
+      String checkIdentifier = rawInput.trim();
+      if (checkIdentifier.contains('@')) {
+        checkIdentifier = checkIdentifier.toLowerCase();
+      } else {
+        final linkedEmail = await _authService.findEmailForPhone(checkIdentifier);
+        if (linkedEmail != null && linkedEmail.isNotEmpty) {
+          checkIdentifier = linkedEmail.toLowerCase();
+        } else {
+          checkIdentifier = _authService.formatToE164Phone(checkIdentifier);
+        }
+      }
+
+      final res = await Supabase.instance.client.rpc(
+        'check_account_status',
+        params: {'identifier': checkIdentifier},
+      );
+      if (res != null) {
+        final Map data = res is Map ? res : jsonDecode(res.toString());
+        return (
+          exists: data['exists'] == true,
+          isVerified: data['is_verified'] == true,
+        );
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> _login() async {
-    setState(() => _isLoading = true);
     final rawInput = _emailController.text.trim();
     final password = _passwordController.text.trim();
+    if (rawInput.isEmpty || password.isEmpty) {
+      _showSimpleMessageDialog(
+        title: 'Missing Information',
+        message: 'Please enter your email/phone and password.',
+      );
+      return;
+    }
+    if (!_isValidEmailOrPhone(rawInput)) {
+      _showFacebookStyleLoginErrorDialog(
+        isPasswordError: false,
+        isUnverified: false,
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
     try {
+      // Check account registration status first so unregistered accounts
+      // don't consume Supabase Auth sign-in rate-limit attempts.
+      final preStatus = await _checkAccountStatus(rawInput);
+      if (preStatus != null) {
+        if (!preStatus.exists) {
+          if (mounted) {
+            _showFacebookStyleLoginErrorDialog(
+              isPasswordError: false,
+              isUnverified: false,
+            );
+          }
+          return;
+        }
+        if (!preStatus.isVerified) {
+          if (mounted) {
+            _showFacebookStyleLoginErrorDialog(isUnverified: true);
+          }
+          return;
+        }
+      }
+
       // ignore: avoid_print
       print('Attempting login for: $rawInput');
       final response = await _authService.signIn(
@@ -78,11 +167,20 @@ class _LoginScreenState extends State<LoginScreen> {
             isPasswordError: false,
             isUnverified: false,
           );
+        } else if (lower.contains('rate limit') || lower.contains('too many')) {
+          _showFacebookStyleLoginErrorDialog(
+            customTitle: 'Too Many Attempts',
+            customMessage: 'Too many login attempts. Please wait a minute and try again.',
+          );
         } else if (e is AuthException &&
             !e.message.toLowerCase().contains('invalid login credentials') &&
             !e.message.toLowerCase().contains('invalid_credentials') &&
             !e.message.toLowerCase().contains('email not confirmed') &&
-            !e.message.toLowerCase().contains('phone not confirmed')) {
+            !e.message.toLowerCase().contains('phone not confirmed') &&
+            !e.message.toLowerCase().contains('e.164') &&
+            !e.message.toLowerCase().contains('invalid format') &&
+            !e.message.toLowerCase().contains('invalid phone') &&
+            !e.message.toLowerCase().contains('user not found')) {
           _showFacebookStyleLoginErrorDialog(
             customTitle: 'Login Failed',
             customMessage: e.message,
@@ -92,40 +190,14 @@ class _LoginScreenState extends State<LoginScreen> {
           bool isPasswordError = false;
           bool isUnverified = false;
 
-          try {
-            String checkIdentifier = rawInput;
-            if (!checkIdentifier.contains('@')) {
-              final linkedEmail = await _authService.findEmailForPhone(checkIdentifier);
-              if (linkedEmail != null && linkedEmail.isNotEmpty) {
-                checkIdentifier = linkedEmail;
-              } else {
-                checkIdentifier = _authService.formatToE164Phone(checkIdentifier);
-              }
+          final status = await _checkAccountStatus(rawInput);
+          if (status != null) {
+            if (status.exists && status.isVerified) {
+              isPasswordError = true;
+            } else if (status.exists && !status.isVerified) {
+              isUnverified = true;
             }
-
-            final res = await Supabase.instance.client.rpc(
-              'check_account_status',
-              params: {'identifier': checkIdentifier},
-            );
-            if (res != null) {
-              final Map data = res is Map ? res : jsonDecode(res.toString());
-              final bool exists = data['exists'] == true;
-              final bool isVerified = data['is_verified'] == true;
-              if (exists && isVerified) {
-                isPasswordError = true;
-              } else if (exists && !isVerified) {
-                isUnverified = true;
-              } else {
-                isPasswordError = false;
-                isUnverified = false;
-              }
-            } else {
-              final exists = await _authService.isAccountExists(rawInput);
-              if (exists) {
-                isPasswordError = true;
-              }
-            }
-          } catch (_) {
+          } else {
             // Fallback: check database directly
             final exists = await _authService.isAccountExists(rawInput);
             if (exists) {
@@ -136,9 +208,6 @@ class _LoginScreenState extends State<LoginScreen> {
               } else {
                 isPasswordError = true;
               }
-            } else {
-              isPasswordError = false;
-              isUnverified = false;
             }
           }
 
@@ -160,25 +229,99 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  void _showSimpleMessageDialog({
+    required String title,
+    required String message,
+  }) {
+    const brandGreen = Color(0xFF218358);
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 18),
+                child: Column(
+                  children: [
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      message,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF64748B),
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+              InkWell(
+                onTap: () => Navigator.pop(ctx),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    'OK',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: brandGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _showFacebookStyleLoginErrorDialog({
     bool isPasswordError = true,
     bool isUnverified = false,
     String? customTitle,
     String? customMessage,
   }) {
-    final title = customTitle ??
-        (isUnverified
-            ? 'Account Not Verified'
-            : (isPasswordError ? 'Incorrect password' : 'Account not found'));
-    final message = customMessage ??
-        (isUnverified
-            ? "Your account has not been verified yet. Please sign up or complete verification to proceed."
-            : (isPasswordError
-                ? "We can help you log in to your account if you've forgotten your password."
-                : "We couldn't find an account matching that email or mobile number. Would you like to create one?"));
+    if (customTitle != null || customMessage != null) {
+      _showSimpleMessageDialog(
+        title: customTitle ?? 'Login Failed',
+        message: customMessage ?? 'Unable to log in. Please try again.',
+      );
+      return;
+    }
+
+    final title = isUnverified
+        ? 'Account Not Verified'
+        : (isPasswordError ? 'Incorrect password' : 'Account Not Registered');
+    final message = isUnverified
+        ? "Your account has not been verified yet. Please sign up or complete verification to proceed."
+        : (isPasswordError
+            ? "We can help you log in to your account if you've forgotten your password."
+            : "This account is invalid or not registered. Please sign up for an account.");
     final primaryActionText = isUnverified
         ? 'Sign Up'
-        : (isPasswordError ? 'Forgotten password' : 'Create an account');
+        : (isPasswordError ? 'Forgotten password' : 'Sign Up');
 
     const brandGreen = Color(0xFF218358);
 
@@ -392,33 +535,35 @@ class _LoginScreenState extends State<LoginScreen> {
                         });
                       },
                     ),
-                    const SizedBox(height: 12),
-                    // Forget Password
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton(
-                        onPressed: () async {
-                          final identifierFromReset = await Navigator.push<String>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => ForgotPasswordScreen(
-                                initialIdentifier: _emailController.text.trim().isNotEmpty
-                                    ? _emailController.text.trim()
-                                    : null,
+                    if (_hasIdentifier) ...[
+                      const SizedBox(height: 12),
+                      // Forget Password
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () async {
+                            final identifierFromReset = await Navigator.push<String>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ForgotPasswordScreen(
+                                  initialIdentifier: _emailController.text.trim().isNotEmpty
+                                      ? _emailController.text.trim()
+                                      : null,
+                                ),
                               ),
-                            ),
-                          );
-                          if (identifierFromReset != null && identifierFromReset.isNotEmpty) {
-                            _emailController.text = identifierFromReset;
-                            _passwordController.clear();
-                          }
-                        },
-                        child: const Text(
-                          "Forget password?",
-                          style: TextStyle(color: Colors.black54),
+                            );
+                            if (identifierFromReset != null && identifierFromReset.isNotEmpty) {
+                              _emailController.text = identifierFromReset;
+                              _passwordController.clear();
+                            }
+                          },
+                          child: const Text(
+                            "Forget password?",
+                            style: TextStyle(color: Colors.black54),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                     const SizedBox(height: 30),
                     // Main Action
                     SizedBox(

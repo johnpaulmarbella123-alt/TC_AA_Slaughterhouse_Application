@@ -65,6 +65,8 @@ class StaffNotification {
         return 1;
     }
   }
+
+  String? get targetTab => type == 'new_customer' ? 'customers' : null;
 }
 
 /// Loads and live-updates staff notifications for the active role.

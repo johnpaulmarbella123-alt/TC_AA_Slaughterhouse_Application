@@ -10,9 +10,11 @@ import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
-  const DocumentVerificationPage({super.key});
+  final void Function(int moduleIndex, [String? tab])? onNavigate;
+  const DocumentVerificationPage({super.key, this.onNavigate});
   @override
   State<DocumentVerificationPage> createState() => _DocumentVerificationPageState();
 }
@@ -208,6 +210,8 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         ),
         const SizedBox(width: 16),
         Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)), child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568)))),
+        const SizedBox(width: 12),
+        StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
       ]),
     );
   }

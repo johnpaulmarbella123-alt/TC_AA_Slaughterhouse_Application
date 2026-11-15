@@ -6,9 +6,11 @@ import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class MeatReleasingPage extends StatefulWidget {
-  const MeatReleasingPage({super.key});
+  final void Function(int moduleIndex, [String? tab])? onNavigate;
+  const MeatReleasingPage({super.key, this.onNavigate});
   @override
   State<MeatReleasingPage> createState() => _MeatReleasingPageState();
 }
@@ -596,7 +598,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             ),
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
+          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
+          const SizedBox(width: 6),
           IconButton(
             tooltip: 'Refresh',
             onPressed: () => _loadRequests(),

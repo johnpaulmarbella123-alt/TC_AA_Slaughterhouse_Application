@@ -321,6 +321,7 @@ class RegularDealersService {
         }
         await _saveLocalCache();
         _isLoaded = true;
+        await syncFromConfirmedProfiles();
         return;
       }
     } catch (e) {
@@ -344,6 +345,7 @@ class RegularDealersService {
           }
           await _saveLocalCache();
           _isLoaded = true;
+          await syncFromConfirmedProfiles();
           return;
         }
       }
@@ -711,20 +713,101 @@ class RegularDealersService {
 
   /// Checks if a customer already has a locked marking in the official regular_dealers registry
   Future<String?> getCustomerPermanentMarking({String? userId, String? customerName, String? requestedMarking}) async {
+    bool isAssigned(String m) {
+      final clean = m.trim().toUpperCase();
+      return clean.isNotEmpty && clean != 'PENDING';
+    }
+
     if (userId != null && userId.isNotEmpty) {
       final d = _dealers.firstWhere(
         (d) => d.userId == userId,
         orElse: () => RegularDealer(id: '', dealerNumber: 0, name: '', markings: '', category: ''),
       );
-      if (d.markings.isNotEmpty) return d.markings;
+      if (isAssigned(d.markings)) return d.markings;
     }
 
     if (customerName != null && customerName.isNotEmpty) {
       final d = findDealerByName(customerName, userId: userId);
-      if (d != null && d.markings.isNotEmpty) return d.markings;
+      if (d != null && isAssigned(d.markings)) return d.markings;
     }
 
     return null;
+  }
+
+  /// Enrolls any role-confirmed customers from `profiles` into the Meat Dealers Directory
+  /// immediately with a 'PENDING' marking until their first request is marked.
+  Future<int> syncFromConfirmedProfiles() async {
+    int added = 0;
+    bool changed = false;
+
+    try {
+      final rows = await supabase
+          .from('profiles')
+          .select('id, full_name, phone, dealer_category, role_confirmed, created_at')
+          .eq('role_confirmed', true);
+
+      for (final row in rows) {
+        final rawRole = (row['dealer_category'] ?? '').toString().trim().toLowerCase();
+        if (rawRole != 'barangay' && rawRole != 'market') continue;
+
+        final userId = (row['id'] ?? '').toString().trim();
+        final fullName = (row['full_name'] ?? '').toString().trim();
+        final phone = (row['phone'] ?? '').toString().trim();
+        final createdAt = row['created_at']?.toString();
+
+        final displayName = (fullName.isNotEmpty ? fullName : (phone.isNotEmpty ? phone : 'CUSTOMER')).toUpperCase();
+
+        final existingIdx = _dealers.indexWhere((d) {
+          if (userId.isNotEmpty && d.userId == userId) return true;
+          if (fullName.isNotEmpty && d.name.trim().toUpperCase() == displayName) return true;
+          if (phone.isNotEmpty && d.phone != null && d.phone!.trim() == phone) return true;
+          return false;
+        });
+
+        if (existingIdx != -1) {
+          final existing = _dealers[existingIdx];
+          final needsUserId = (existing.userId == null || existing.userId!.isEmpty) && userId.isNotEmpty;
+          final needsPhone = (existing.phone == null || existing.phone!.isEmpty) && phone.isNotEmpty;
+          final needsCategory = existing.category.isEmpty;
+          if (needsUserId || needsPhone || needsCategory) {
+            _dealers[existingIdx] = existing.copyWith(
+              userId: needsUserId ? userId : existing.userId,
+              phone: needsPhone ? phone : existing.phone,
+              category: needsCategory ? rawRole : existing.category,
+            );
+            changed = true;
+          }
+          continue;
+        }
+
+        final maxNumber = _dealers
+            .where((d) => d.category == rawRole)
+            .fold<int>(0, (max, d) => d.dealerNumber > max ? d.dealerNumber : max);
+
+        _dealers.add(RegularDealer(
+          id: 'dlr-${DateTime.now().millisecondsSinceEpoch}-$added',
+          dealerNumber: maxNumber + 1,
+          name: displayName,
+          markings: 'PENDING',
+          category: rawRole,
+          phone: phone.isNotEmpty ? phone : null,
+          userId: userId.isNotEmpty ? userId : null,
+          isActive: true,
+          createdAt: createdAt ?? DateTime.now().toIso8601String(),
+        ));
+        added++;
+        changed = true;
+      }
+
+      if (changed) {
+        await _saveLocalCache();
+        await _syncToSupabase();
+      }
+    } catch (e) {
+      debugPrint('syncFromConfirmedProfiles error: $e');
+    }
+
+    return added;
   }
 
   /// Logs transmission to NMIC in system_settings and nmic_transmissions
@@ -888,9 +971,15 @@ class RegularDealersService {
           rosterChanged = true;
         }
 
-        // Reconcile discrepant request marking ONLY if this dealer is already established
+        // Reconcile discrepant request marking ONLY if this dealer already has an assigned permanent marking.
+        // If the dealer is still 'PENDING', promote it to the request's assigned marking.
         final lockedMarking = existing.markings.trim().toUpperCase();
-        if (lockedMarking.isNotEmpty && marking != lockedMarking) {
+        final isPending = lockedMarking.isEmpty || lockedMarking == 'PENDING';
+        if (isPending && marking.isNotEmpty && marking != 'PENDING') {
+          existing = existing.copyWith(markings: marking);
+          _dealers[existingIdx] = existing;
+          rosterChanged = true;
+        } else if (!isPending && marking != lockedMarking) {
           req['marking'] = lockedMarking;
           final reqId = req['id'];
           if (reqId != null) {

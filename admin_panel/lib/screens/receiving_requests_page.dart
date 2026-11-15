@@ -13,9 +13,11 @@ import '../services/app_settings_service.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../widgets/staff_notification_bell.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
-  const ReceivingRequestsPage({super.key});
+  final void Function(int moduleIndex, [String? tab])? onNavigate;
+  const ReceivingRequestsPage({super.key, this.onNavigate});
 
   @override
   State<ReceivingRequestsPage> createState() => _ReceivingRequestsPageState();
@@ -589,6 +591,8 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
             ),
           ),
           const Spacer(),
+          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
