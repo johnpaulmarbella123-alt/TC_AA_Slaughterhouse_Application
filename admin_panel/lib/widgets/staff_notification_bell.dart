@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/staff_notification_service.dart';
+import '../services/notification_sound_service.dart';
 
 /// Header bell for Admin / Clerk / Inspector dashboards.
 /// Shows unread count and a dropdown list of staff notifications.
@@ -145,6 +146,25 @@ class _StaffNotificationBellState extends State<StaffNotificationBell> {
                       ),
                     ],
                     const Spacer(),
+                    ListenableBuilder(
+                      listenable: NotificationSoundService.instance,
+                      builder: (context, _) {
+                        final isMuted = NotificationSoundService.instance.isMuted;
+                        return IconButton(
+                          tooltip: isMuted ? 'Unmute notification sound' : 'Mute notification sound',
+                          onPressed: () => NotificationSoundService.instance.toggleMute(),
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                          icon: Icon(
+                            isMuted ? Icons.volume_off_outlined : Icons.volume_up_outlined,
+                            size: 18,
+                            color: isMuted ? const Color(0xFF94A3B8) : const Color(0xFF2D6A4F),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 4),
                     TextButton(
                       onPressed: unread > 0 ? () => _service.markAllRead() : null,
                       child: const Text('Mark all as read', style: TextStyle(fontSize: 12)),

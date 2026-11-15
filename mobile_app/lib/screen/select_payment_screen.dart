@@ -30,6 +30,18 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   // Only two payment options: 'Online' or 'Cash'
   String _selectedMethod = 'Online';
 
+  bool get _isMarketRequest {
+    final cat = (widget.request['dealer_category'] ?? '').toString().trim().toLowerCase();
+    if (cat == 'market') return true;
+    if (cat == 'barangay') return false;
+    final marketName = (widget.request['market_name'] ?? '').toString().trim();
+    final stallNo = (widget.request['market_stall_number'] ?? '').toString().trim();
+    return marketName.isNotEmpty || stallNo.isNotEmpty;
+  }
+
+  String get _cashMethodLabel =>
+      _isMarketRequest ? 'Cash Over-the-Counter' : 'Cash on Pickup';
+
   // PayMongo state & concurrency guard
   String? _paymongoLinkId;
   bool _isPolling = false;
@@ -509,14 +521,16 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                   color: Color(0xFF856404), size: 32),
             ),
             const SizedBox(height: 14),
-            const Text(
-              'Cash on Pickup Selected',
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            Text(
+              '$_cashMethodLabel Selected',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Please pay the exact amount at the slaughterhouse cashier on pickup day. Your payment will be confirmed upon cashier receipt.',
+              _isMarketRequest
+                  ? 'Please pay the exact amount at the slaughterhouse cashier before delivery. Your payment will be confirmed upon cashier receipt.'
+                  : 'Please pay the exact amount at the slaughterhouse cashier on pickup day. Your payment will be confirmed upon cashier receipt.',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
               textAlign: TextAlign.center,
             ),
@@ -795,13 +809,15 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'Cash on Pickup',
-                                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                                  Text(
+                                    _cashMethodLabel,
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Pay over-the-counter at slaughterhouse cashier',
+                                    _isMarketRequest
+                                        ? 'Pay over-the-counter at slaughterhouse cashier before delivery'
+                                        : 'Pay over-the-counter at slaughterhouse cashier',
                                     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                                   ),
                                 ],
@@ -845,7 +861,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                isOnline ? 'Online Payment Instructions:' : 'Cash on Pickup Terms:',
+                                isOnline ? 'Online Payment Instructions:' : '$_cashMethodLabel Terms:',
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold,
@@ -861,8 +877,18 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                             _infoBullet('Once authorized, return to this app — payment will confirm automatically and record your chosen payment method.', isOnline: true),
                           ] else ...[
                             _infoBullet('Payment is settled directly at the slaughterhouse cashier window.', isOnline: false),
-                            _infoBullet('Please bring the exact amount (\u20b1${total.toStringAsFixed(2)}) on your pickup date.', isOnline: false),
-                            _infoBullet('Present your receipt number (${widget.receiptNo}) to claim inspected meat.', isOnline: false),
+                            _infoBullet(
+                              _isMarketRequest
+                                  ? 'Please bring the exact amount (\u20b1${total.toStringAsFixed(2)}) before dispatch/delivery.'
+                                  : 'Please bring the exact amount (\u20b1${total.toStringAsFixed(2)}) on your pickup date.',
+                              isOnline: false,
+                            ),
+                            _infoBullet(
+                              _isMarketRequest
+                                  ? 'Present your receipt number (${widget.receiptNo}) to confirm payment for delivery.'
+                                  : 'Present your receipt number (${widget.receiptNo}) to claim inspected meat.',
+                              isOnline: false,
+                            ),
                           ],
                         ],
                       ),
@@ -926,7 +952,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                       ? null
                       : () => isOnline
                           ? _handleOnlinePayment()
-                          : _processPayment('Cash on Pickup'),
+                          : _processPayment(_cashMethodLabel),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF2D6A4F),
                     foregroundColor: Colors.white,
@@ -947,7 +973,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                       : Text(
                           isOnline
                               ? 'Proceed to Online Payment (\u20b1${total.toStringAsFixed(2)})'
-                              : 'Confirm Cash on Pickup',
+                              : 'Confirm $_cashMethodLabel',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,

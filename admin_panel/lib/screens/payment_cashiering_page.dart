@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:printing/printing.dart';
 import '../services/app_settings_service.dart';
 import '../services/notification_service.dart';
+import '../services/receipt_pdf_generator.dart';
 import '../services/staff_notification_service.dart';
 import '../widgets/staff_notification_bell.dart';
 
@@ -499,6 +501,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     }).toList();
   }
 
+  bool _isCashPendingStatus(String status) =>
+      status == 'Cash on Pick-up' || status == 'Cash Over-the-Counter';
+
   String _paymentStatus(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
     final payStatus = payment?['status']?.toString().trim().toLowerCase();
@@ -513,7 +518,11 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
       final m = payment['payment_method'].toString().trim().toLowerCase();
       if (!m.contains('gcash') && !m.contains('maya') && !m.contains('card') && !m.contains('grabpay') && !m.contains('online') && !m.contains('paymongo') && m.contains('cash')) {
-        return 'Cash on Pick-up';
+        final isMarket = req['dealer_category']?.toString().trim().toLowerCase() == 'market' ||
+            (req['market_name']?.toString().trim().isNotEmpty ?? false) ||
+            (req['market_stall_number']?.toString().trim().isNotEmpty ?? false) ||
+            m.contains('over-the-counter');
+        return isMarket ? 'Cash Over-the-Counter' : 'Cash on Pick-up';
       }
       return 'Awaiting Verification';
     }
@@ -1157,13 +1166,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                                   ),
                                 ),
-                                if (status == 'Awaiting Verification' || status == 'Cash on Pick-up') ...[
+                                if (status == 'Awaiting Verification' || _isCashPendingStatus(status)) ...[
                                   const SizedBox(width: 8),
                                   ElevatedButton.icon(
                                     onPressed: () => _verifyAndConfirmPayment(req),
                                     icon: const Icon(Icons.check_circle, size: 13, color: Colors.white),
                                     label: Text(
-                                      status == 'Cash on Pick-up' ? 'Confirm Payment' : 'Verify',
+                                      _isCashPendingStatus(status) ? 'Confirm Payment' : 'Verify',
                                       style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
                                     ),
                                     style: ElevatedButton.styleFrom(
@@ -1207,7 +1216,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     } else if (status == 'Awaiting Verification') {
       bg = const Color(0xFFEBF8FF);
       text = const Color(0xFF2B6CB0);
-    } else if (status == 'Cash on Pick-up') {
+    } else if (_isCashPendingStatus(status)) {
       bg = const Color(0xFFFEF3C7);
       text = const Color(0xFFB45309);
     } else if (status == 'Awaiting Payment') {
@@ -1250,6 +1259,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
     bool isCheckingPayMongo = false;
+    bool isPrintingReceipt = false;
     String? payMongoStatusResult;
     String? payMongoResultMsg;
     String resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'Online Payment';
@@ -1831,9 +1841,53 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                       ],
                     ],
                     OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(dialogCtx),
-                      icon: const Icon(Icons.print, size: 16),
-                      label: const Text('Print', style: TextStyle(fontSize: 13)),
+                      onPressed: isPrintingReceipt
+                          ? null
+                          : () async {
+                              setDialogState(() => isPrintingReceipt = true);
+                              try {
+                                final bytes = await ReceiptPdfGenerator.generate(
+                                  req: {
+                                    ...req,
+                                    'penalty_tracking': ?tracking,
+                                  },
+                                  fees: fees,
+                                  receiptNo: receiptNo,
+                                  refNo: refNo,
+                                  status: status,
+                                  method: method,
+                                  weight: weight,
+                                );
+                                await Printing.layoutPdf(
+                                  name: 'Payment_Receipt_$refNo.pdf',
+                                  onLayout: (_) async => bytes,
+                                );
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Error printing receipt: $e'),
+                                      backgroundColor: Colors.redAccent,
+                                    ),
+                                  );
+                                }
+                              } finally {
+                                if (ctx.mounted) {
+                                  setDialogState(() => isPrintingReceipt = false);
+                                }
+                              }
+                            },
+                      icon: isPrintingReceipt
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.print, size: 16),
+                      label: Text(
+                        isPrintingReceipt ? 'Printing...' : 'Print',
+                        style: const TextStyle(fontSize: 13),
+                      ),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: const Color(0xFF2D3748),
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),

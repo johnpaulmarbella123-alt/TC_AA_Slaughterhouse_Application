@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_settings_service.dart';
+import 'notification_sound_service.dart';
 
 /// A single staff bell notification (row of `staff_notifications`).
 class StaffNotification {
@@ -85,6 +86,8 @@ class StaffNotificationService extends ChangeNotifier {
   RealtimeChannel? _channel;
   Timer? _pollTimer;
   bool _started = false;
+  bool _initialLoadDone = false;
+  final Set<int> _seenIds = {};
   String _activeRole = '';
 
   String get _email {
@@ -114,6 +117,7 @@ class StaffNotificationService extends ChangeNotifier {
     if (_started) return;
     _started = true;
     _activeRole = AppSettingsService.instance.currentRole;
+    NotificationSoundService.instance.init();
     AppSettingsService.instance.addListener(_onSettingsChanged);
     _subscribe();
     refresh();
@@ -123,6 +127,8 @@ class StaffNotificationService extends ChangeNotifier {
   void stop() {
     if (!_started) return;
     _started = false;
+    _initialLoadDone = false;
+    _seenIds.clear();
     AppSettingsService.instance.removeListener(_onSettingsChanged);
     _pollTimer?.cancel();
     _pollTimer = null;
@@ -138,6 +144,8 @@ class StaffNotificationService extends ChangeNotifier {
     final role = AppSettingsService.instance.currentRole;
     if (role != _activeRole) {
       _activeRole = role;
+      _initialLoadDone = false;
+      _seenIds.clear();
       _items = [];
       notifyListeners();
       refresh();
@@ -169,10 +177,40 @@ class StaffNotificationService extends ChangeNotifier {
           .inFilter('target_role', roles)
           .order('created_at', ascending: false)
           .limit(_limit);
-      _items = (res as List)
+      final rawList = (res as List)
           .map((m) => StaffNotification.fromMap(Map<String, dynamic>.from(m)))
           .toList();
+
+      // Deduplicate in-memory so duplicate DB rows never show twice in the bell.
+      final seenKeys = <String>{};
+      final deduped = <StaffNotification>[];
+      for (final n in rawList) {
+        final key = n.requestId != null
+            ? 'req:${n.requestId}:${n.type}:${n.targetRole}'
+            : 'msg:${n.type}:${n.targetRole}:${n.title}:${n.message}';
+        if (seenKeys.add(key)) {
+          deduped.add(n);
+        }
+      }
+
+      // Play bell chime only when a brand-new unread notification arrives after initial load.
+      bool hasNewUnread = false;
+      for (final n in deduped) {
+        if (!_seenIds.contains(n.id)) {
+          if (_initialLoadDone && isUnread(n)) {
+            hasNewUnread = true;
+          }
+          _seenIds.add(n.id);
+        }
+      }
+      _initialLoadDone = true;
+
+      _items = deduped;
       notifyListeners();
+
+      if (hasNewUnread) {
+        NotificationSoundService.instance.playBellChime();
+      }
     } catch (e) {
       // Table may not exist yet (migration not applied) — fail quietly.
       debugPrint('StaffNotificationService refresh error: $e');
@@ -231,6 +269,39 @@ class StaffNotificationService extends ChangeNotifier {
   }) async {
     try {
       final supabase = Supabase.instance.client;
+
+      // Check for an existing notification by dedupKey or (request_id, type, target_role)
+      // so Dart calls and DB triggers never create duplicates.
+      if (dedupKey != null && dedupKey.isNotEmpty) {
+        try {
+          final existingByKey = await supabase
+              .from('staff_notifications')
+              .select('id')
+              .eq('dedup_key', dedupKey)
+              .limit(1)
+              .maybeSingle();
+          if (existingByKey != null) {
+            instance.refresh();
+            return true;
+          }
+        } catch (_) {}
+      }
+
+      if (requestId > 0) {
+        final existingByReq = await supabase
+            .from('staff_notifications')
+            .select('id')
+            .eq('request_id', requestId)
+            .eq('type', type)
+            .eq('target_role', targetRole)
+            .limit(1)
+            .maybeSingle();
+        if (existingByReq != null) {
+          instance.refresh();
+          return true;
+        }
+      }
+
       final row = <String, dynamic>{
         'target_role': targetRole,
         'type': type,
@@ -241,19 +312,16 @@ class StaffNotificationService extends ChangeNotifier {
         'read_by': <String>[],
         if (dedupKey != null && dedupKey.isNotEmpty) 'dedup_key': dedupKey,
       };
-      if (dedupKey != null && dedupKey.isNotEmpty) {
-        try {
-          await supabase
-              .from('staff_notifications')
-              .upsert(row, onConflict: 'dedup_key', ignoreDuplicates: true);
-        } catch (_) {
-          // Fallback if dedup_key column/index is not yet migrated
-          row.remove('dedup_key');
-          await supabase.from('staff_notifications').insert(row);
-        }
-      } else {
+
+      try {
         await supabase.from('staff_notifications').insert(row);
+      } catch (e) {
+        // Ignore unique-violation conflict (23505) if DB trigger inserted concurrently
+        if (!e.toString().contains('23505') && !e.toString().toLowerCase().contains('duplicate')) {
+          rethrow;
+        }
       }
+
       // Trigger instant UI refresh
       instance.refresh();
       return true;
