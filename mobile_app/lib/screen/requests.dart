@@ -41,6 +41,15 @@ const List<Map<String, String>> albayMunicipalities = [
   {"code": "050518000", "name": "Tiwi"},
 ];
 
+const List<Map<String, String>> firstDistrictAlbayMunicipalities = [
+  {"code": "050517000", "name": "City of Tabaco"},
+  {"code": "050501000", "name": "Bacacay"},
+  {"code": "050509000", "name": "Malilipot"},
+  {"code": "050510000", "name": "Malinao"},
+  {"code": "050516000", "name": "Santo Domingo"},
+  {"code": "050518000", "name": "Tiwi"},
+];
+
 const List<String> tabacoBarangays = [
   "Agnas", "Bacolod", "Bangkilingan", "Bantayan", "Baranghawon", "Basagan", "Basud (Pob.)",
   "Bogñabong", "Bombon (Pob.)", "Bonot", "San Isidro", "Buang", "Buhian", "Cabagñan",
@@ -75,6 +84,9 @@ class _RequestsContentState extends State<RequestsContent> {
   String _customerName = '';
   String _savedMarketName = '';
   String _savedStallNumber = '';
+  String _savedMunicipality = '';
+  String _savedBarangay = '';
+  bool _isLoadingBarangays = false;
   bool _isMarkingLocked = false;
   bool _isCustomerNameLocked = false;
   bool _isRegularDealer = false;
@@ -148,7 +160,7 @@ class _RequestsContentState extends State<RequestsContent> {
       try {
         final res = await supabase
             .from('profiles')
-            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category, role_confirmed, barangay, market_name, stall_number, role_document_url')
+            .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category, role_confirmed, municipality, barangay, market_name, stall_number, role_document_url')
             .eq('id', user.id)
             .maybeSingle();
         if (res != null) profile = Map<String, dynamic>.from(res);
@@ -156,7 +168,7 @@ class _RequestsContentState extends State<RequestsContent> {
         try {
           final res = await supabase
               .from('profiles')
-              .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category')
+              .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category, role_confirmed, barangay, market_name, stall_number, role_document_url')
               .eq('id', user.id)
               .maybeSingle();
           if (res != null) profile = Map<String, dynamic>.from(res);
@@ -164,11 +176,20 @@ class _RequestsContentState extends State<RequestsContent> {
           try {
             final res = await supabase
                 .from('profiles')
-                .select('display_name, address')
+                .select('display_name, address, assigned_marking, marking_locked, official_dealer_name, customer_type, dealer_category')
                 .eq('id', user.id)
                 .maybeSingle();
             if (res != null) profile = Map<String, dynamic>.from(res);
-          } catch (_) {}
+          } catch (_) {
+            try {
+              final res = await supabase
+                  .from('profiles')
+                  .select('display_name, address')
+                  .eq('id', user.id)
+                  .maybeSingle();
+              if (res != null) profile = Map<String, dynamic>.from(res);
+            } catch (_) {}
+          }
         }
       }
 
@@ -200,9 +221,29 @@ class _RequestsContentState extends State<RequestsContent> {
           resolvedRole ??= profCategory;
           hasAuthoritativeRoleLock = true;
         }
+        final metaMun = user.userMetadata?['municipality']?.toString().trim();
+        final profMun = profile['municipality']?.toString().trim();
+        final resolvedMun = (profMun != null && profMun.isNotEmpty) ? profMun : metaMun;
+        if (resolvedMun != null && resolvedMun.isNotEmpty) {
+          _savedMunicipality = resolvedMun;
+          selectedMunicipality ??= resolvedMun;
+          final matchedMun = albayMunicipalities.cast<Map<String, String>?>().firstWhere(
+                (m) => m?['name'] == selectedMunicipality,
+                orElse: () => null,
+              );
+          if (matchedMun != null) {
+            selectedMunicipalityCode ??= matchedMun['code'];
+          }
+        }
+        final metaBrgy = user.userMetadata?['barangay']?.toString().trim();
         final profBrgy = profile['barangay']?.toString().trim();
-        if (profBrgy != null && profBrgy.isNotEmpty) {
-          selectedBarangay ??= profBrgy;
+        final resolvedBrgy = (profBrgy != null && profBrgy.isNotEmpty) ? profBrgy : metaBrgy;
+        if (resolvedBrgy != null && resolvedBrgy.isNotEmpty) {
+          _savedBarangay = resolvedBrgy;
+          selectedBarangay ??= resolvedBrgy;
+        }
+        if (selectedMunicipalityCode != null && selectedMunicipalityCode!.isNotEmpty) {
+          unawaited(loadBarangays(selectedMunicipalityCode!, preserveSelection: true));
         }
         final metaMarket = user.userMetadata?['market_name']?.toString().trim();
         final profMarket = profile['market_name']?.toString().trim();
@@ -740,13 +781,27 @@ class _RequestsContentState extends State<RequestsContent> {
       selectedProvince = "Albay";
       selectedProvinceCode = "050500000";
       municipalities = List.from(albayMunicipalities);
-      selectedMunicipality = null;
-      selectedBarangay = null;
+      if (isBarangay && _savedMunicipality.isNotEmpty) {
+        selectedMunicipality = _savedMunicipality;
+        final matched = albayMunicipalities.cast<Map<String, String>?>().firstWhere(
+              (m) => m?['name'] == _savedMunicipality,
+              orElse: () => null,
+            );
+        selectedMunicipalityCode = matched?['code'];
+        selectedBarangay = _savedBarangay.isNotEmpty ? _savedBarangay : null;
+      } else {
+        selectedMunicipality = null;
+        selectedMunicipalityCode = null;
+        selectedBarangay = null;
+      }
       barangayCertificateUrl = null;
       businessPermitUrl = null;
       ownershipUrl = null;
       vetCertificateUrl = null;
     });
+    if (isBarangay && selectedMunicipalityCode != null && selectedMunicipalityCode!.isNotEmpty) {
+      unawaited(loadBarangays(selectedMunicipalityCode!, preserveSelection: true));
+    }
   }
 
   // Success popup styled like the "Request submitted successfully" card
@@ -1210,34 +1265,48 @@ class _RequestsContentState extends State<RequestsContent> {
     }
   }
 
-  Future<void> loadBarangays(String municipalityCode) async {
+  Future<void> loadBarangays(String municipalityCode, {bool preserveSelection = false}) async {
     // If Tabaco City or name matches, use instant preloaded barangays
     if (municipalityCode == "050517000" || selectedMunicipality == "City of Tabaco") {
       setState(() {
         barangays = tabacoBarangays.map((name) => {'name': name}).toList();
-        selectedBarangay = null;
+        _isLoadingBarangays = false;
+        if (!preserveSelection) selectedBarangay = null;
       });
       return;
     }
+
+    setState(() {
+      _isLoadingBarangays = true;
+      if (!preserveSelection) {
+        barangays = [];
+        selectedBarangay = null;
+      }
+    });
 
     try {
       final response = await http.get(
         Uri.parse(
           'https://psgc.gitlab.io/api/cities-municipalities/$municipalityCode/barangays/',
         ),
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {
         final list = jsonDecode(response.body);
         if (mounted && list is List) {
           setState(() {
             barangays = list;
-            selectedBarangay = null;
+            _isLoadingBarangays = false;
+            if (!preserveSelection) selectedBarangay = null;
           });
+          return;
         }
       }
     } catch (e) {
       debugPrint('Error loading barangays: $e');
+    }
+    if (mounted) {
+      setState(() => _isLoadingBarangays = false);
     }
   }
 
@@ -1380,7 +1449,10 @@ class _RequestsContentState extends State<RequestsContent> {
     setState(() {
       isBarangay = isChoosingBarangay;
       _isRoleLocked = true;
-      if (!isChoosingBarangay) {
+      if (isChoosingBarangay) {
+        _savedMunicipality = (selectedMunicipality ?? '').trim();
+        _savedBarangay = (selectedBarangay ?? '').trim();
+      } else {
         _savedMarketName = _marketNameController.text.trim();
         _savedStallNumber = _marketStallController.text.trim();
       }
@@ -1395,6 +1467,8 @@ class _RequestsContentState extends State<RequestsContent> {
             data: {
               'dealer_category': chosenRole,
               'role_confirmed': true,
+              if (isChoosingBarangay) 'municipality': _savedMunicipality,
+              if (isChoosingBarangay) 'barangay': _savedBarangay,
               if (!isChoosingBarangay) 'market_name': _savedMarketName,
               if (!isChoosingBarangay) 'stall_number': _savedStallNumber,
             },
@@ -1406,12 +1480,24 @@ class _RequestsContentState extends State<RequestsContent> {
         await supabase.from('profiles').update({
           'dealer_category': chosenRole,
           'role_confirmed': true,
+          'municipality': isChoosingBarangay ? _savedMunicipality : null,
           'barangay': isChoosingBarangay ? selectedBarangay : null,
           'market_name': !isChoosingBarangay ? _marketNameController.text.trim() : null,
           'stall_number': !isChoosingBarangay ? _marketStallController.text.trim() : null,
           'role_document_url': isChoosingBarangay ? barangayCertificateUrl : businessPermitUrl,
         }).eq('id', user.id);
-      } catch (_) {}
+      } catch (_) {
+        try {
+          await supabase.from('profiles').update({
+            'dealer_category': chosenRole,
+            'role_confirmed': true,
+            'barangay': isChoosingBarangay ? selectedBarangay : null,
+            'market_name': !isChoosingBarangay ? _marketNameController.text.trim() : null,
+            'stall_number': !isChoosingBarangay ? _marketStallController.text.trim() : null,
+            'role_document_url': isChoosingBarangay ? barangayCertificateUrl : businessPermitUrl,
+          }).eq('id', user.id);
+        } catch (_) {}
+      }
     }
 
     if (!mounted) return;
@@ -1535,27 +1621,71 @@ class _RequestsContentState extends State<RequestsContent> {
                       const SizedBox(height: 4),
                       Text(
                         isChoosingBarangay
-                            ? "Select your barangay and upload a valid Barangay Certificate to unlock this role."
+                            ? "Select your municipality and barangay, then upload a valid Barangay Certificate to unlock this role."
                             : "Enter your market name, stall number, and upload a valid Business Permit to unlock this role.",
                         style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
                       ),
                       const SizedBox(height: 12),
                       if (isChoosingBarangay) ...[
                         DropdownButtonFormField<String>(
-                          value: tabacoBarangays.contains(selectedBarangay) ? selectedBarangay : null,
+                          value: firstDistrictAlbayMunicipalities.any((m) => m['name'] == selectedMunicipality)
+                              ? selectedMunicipality
+                              : null,
                           isExpanded: true,
                           decoration: InputDecoration(
-                            labelText: "Barangay Name *",
+                            labelText: "City / Municipality *",
                             filled: true,
                             fillColor: Colors.white,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                          hint: const Text("Select Barangay"),
-                          items: tabacoBarangays
-                              .map((b) => DropdownMenuItem(value: b, child: Text(b, overflow: TextOverflow.ellipsis)))
+                          hint: const Text("Select City / Municipality"),
+                          items: firstDistrictAlbayMunicipalities
+                              .map((m) => DropdownMenuItem(
+                                    value: m['name'],
+                                    child: Text(m['name']!, overflow: TextOverflow.ellipsis),
+                                  ))
                               .toList(),
-                          onChanged: (val) => setState(() => selectedBarangay = val),
+                          onChanged: (val) {
+                            if (val == null) return;
+                            final selected = firstDistrictAlbayMunicipalities.firstWhere(
+                              (m) => m['name'] == val,
+                            );
+                            setState(() {
+                              selectedMunicipality = val;
+                              selectedMunicipalityCode = selected['code'];
+                              selectedBarangay = null;
+                            });
+                            loadBarangays(selected['code']!);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: barangays.any((b) => b['name'] == selectedBarangay)
+                              ? selectedBarangay
+                              : null,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: "Barangay Name *",
+                            filled: true,
+                            fillColor: selectedMunicipality == null ? Colors.grey.shade100 : Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          hint: Text(
+                            selectedMunicipality == null
+                                ? "Select Municipality first"
+                                : (_isLoadingBarangays ? "Loading barangays..." : "Select Barangay"),
+                          ),
+                          items: barangays
+                              .map((b) => DropdownMenuItem<String>(
+                                    value: b['name']?.toString(),
+                                    child: Text(b['name']?.toString() ?? '', overflow: TextOverflow.ellipsis),
+                                  ))
+                              .toList(),
+                          onChanged: selectedMunicipality == null || _isLoadingBarangays
+                              ? null
+                              : (val) => setState(() => selectedBarangay = val),
                         ),
                         const SizedBox(height: 12),
                         SizedBox(
@@ -1701,7 +1831,8 @@ class _RequestsContentState extends State<RequestsContent> {
 
                 Builder(
                   builder: (context) {
-                    final bool hasBarangayReqs = (selectedBarangay != null && selectedBarangay!.trim().isNotEmpty) &&
+                    final bool hasBarangayReqs = (selectedMunicipality != null && selectedMunicipality!.trim().isNotEmpty) &&
+                        (selectedBarangay != null && selectedBarangay!.trim().isNotEmpty) &&
                         barangayCertificateUrl != null;
                     final bool hasMarketReqs = _marketNameController.text.trim().isNotEmpty &&
                         _marketStallController.text.trim().isNotEmpty &&
@@ -1718,7 +1849,7 @@ class _RequestsContentState extends State<RequestsContent> {
                                   SnackBar(
                                     content: Text(
                                       isChoosingBarangay
-                                          ? "Please select your Barangay and upload a valid Barangay Certificate first."
+                                          ? "Please select your Municipality, Barangay, and upload a valid Barangay Certificate first."
                                           : "Please enter Market Name, Stall Number, and upload a valid Business Permit first.",
                                     ),
                                     backgroundColor: Colors.red.shade700,
@@ -2219,7 +2350,9 @@ class _RequestsContentState extends State<RequestsContent> {
 
                       // BARANGAY
                       DropdownButtonFormField<String>(
-                        value: selectedBarangay,
+                        value: barangays.any((b) => b['name'] == selectedBarangay)
+                            ? selectedBarangay
+                            : null,
                         isExpanded: true,
                         decoration: InputDecoration(
                           labelText: "Barangay",
