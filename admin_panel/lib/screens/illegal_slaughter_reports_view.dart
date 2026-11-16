@@ -1071,15 +1071,19 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
         debugPrint('Reports table update fallback: $e');
       }
 
-      // 2. Mark and update ALL notifications matching reference_no as read and updated
+      // 2. Mark and update ONLY admin/staff notifications matching reference_no as read and updated
       try {
-        await widget.supabase.from('notifications').update({
-          'is_read': true,
-          'data': {
-            ..._report,
-            ...updateData,
-          },
-        }).eq('reference_no', ref);
+        await widget.supabase
+            .from('notifications')
+            .update({
+              'is_read': true,
+              'data': {
+                ..._report,
+                ...updateData,
+              },
+            })
+            .eq('reference_no', ref)
+            .eq('type', 'admin_illegal_report');
       } catch (_) {}
 
       try {
@@ -1099,7 +1103,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
       try {
         dynamic targetUserId = userId;
         String? targetPhone = _report['contact_number']?.toString();
-        if ((targetUserId == null || targetPhone == null) && ref.isNotEmpty && ref != 'Report') {
+        if (!isAnon && (targetUserId == null || targetPhone == null) && ref.isNotEmpty && ref != 'Report') {
           try {
             final repRow = await widget.supabase
                 .from('reports')
@@ -1113,6 +1117,23 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
               if (targetPhone == null && repRow['contact_number'] != null) {
                 targetPhone = repRow['contact_number']?.toString();
               }
+            }
+          } catch (_) {}
+        }
+
+        // Fallback: recover user_id from the customer's report_filed notification if reports RLS/payload lacked it
+        if (!isAnon && targetUserId == null && ref.isNotEmpty && ref != 'Report') {
+          try {
+            final filedNotif = await widget.supabase
+                .from('notifications')
+                .select('user_id')
+                .eq('reference_no', ref)
+                .eq('type', 'report_filed')
+                .not('user_id', 'is', null)
+                .limit(1)
+                .maybeSingle();
+            if (filedNotif != null && filedNotif['user_id'] != null) {
+              targetUserId = filedNotif['user_id'];
             }
           } catch (_) {}
         }
@@ -1150,8 +1171,11 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
           'endorsed_to': ?endorsedTo,
         };
 
-        // Dispatch in-app notification (only to non-anonymous whistleblowers)
-        if (!isAnon && targetUserId != null) {
+        // Dispatch in-app notification only for Acknowledged and Report Compiled (skip Investigating),
+        // and only to non-anonymous whistleblowers with a resolved user_id
+        final shouldNotifyCustomer =
+            newStatus == 'Acknowledged' || newStatus == 'Report Compiled';
+        if (shouldNotifyCustomer && !isAnon && targetUserId != null) {
           await NotificationService.sendNotificationSafely(
             widget.supabase,
             userId: targetUserId,
@@ -1161,7 +1185,7 @@ class _ReportActionCenterModalState extends State<_ReportActionCenterModal> {
             referenceNo: ref,
             data: notifDataPayload,
           );
-        } else {
+        } else if (shouldNotifyCustomer && isAnon) {
           // If anonymous, write record with user_id: null so it is NEVER delivered to any user's personal in-app feed
           await widget.supabase.from('notifications').insert({
             'user_id': null,

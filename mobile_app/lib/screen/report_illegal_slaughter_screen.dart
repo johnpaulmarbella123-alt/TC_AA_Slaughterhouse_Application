@@ -785,6 +785,7 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
       final reportPayload = {
         'reference_no': refNo,
         'report_id': report['id'],
+        'user_id': _isAnonymous ? null : user.id,
         'location': _locationCtrl.text.trim(),
         'incident_date': isoDate,
         'violation_category': _selectedCategory,

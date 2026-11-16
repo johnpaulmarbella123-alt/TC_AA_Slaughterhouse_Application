@@ -3849,8 +3849,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                             DataCell(
                               Row(
                                 children: [
-                                  const Icon(Icons.pets, size: 14, color: Color(0xFF2D6A4F)),
-                                  const SizedBox(width: 4),
+                                  const _PigIcon(size: 16, color: Color(0xFF2D6A4F)),
+                                  const SizedBox(width: 5),
                                   Text('$heads heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                                 ],
                               ),
@@ -3971,4 +3971,92 @@ class _DonutChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _DonutChartPainter oldDelegate) {
     return oldDelegate.values != values || oldDelegate.colors != colors;
   }
+}
+
+class _PigIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _PigIcon({this.size = 16, this.color = const Color(0xFF2D6A4F)});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _PigIconPainter(color: color),
+    );
+  }
+}
+
+class _PigIconPainter extends CustomPainter {
+  final Color color;
+
+  _PigIconPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    final fillPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final cutoutPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    final strokePaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = w * 0.08;
+
+    // Left and right pig ears
+    final leftEar = Path()
+      ..moveTo(w * 0.14, h * 0.36)
+      ..lineTo(w * 0.12, h * 0.10)
+      ..lineTo(w * 0.36, h * 0.22)
+      ..close();
+    final rightEar = Path()
+      ..moveTo(w * 0.86, h * 0.36)
+      ..lineTo(w * 0.88, h * 0.10)
+      ..lineTo(w * 0.64, h * 0.22)
+      ..close();
+    canvas.drawPath(leftEar, fillPaint);
+    canvas.drawPath(rightEar, fillPaint);
+
+    // Pig head
+    final headRect = Rect.fromCenter(
+      center: Offset(w * 0.5, h * 0.56),
+      width: w * 0.78,
+      height: h * 0.68,
+    );
+    canvas.drawOval(headRect, fillPaint);
+
+    // Eyes
+    canvas.drawCircle(Offset(w * 0.34, h * 0.44), w * 0.055, cutoutPaint);
+    canvas.drawCircle(Offset(w * 0.66, h * 0.44), w * 0.055, cutoutPaint);
+
+    // Snout
+    final snoutRect = Rect.fromCenter(
+      center: Offset(w * 0.5, h * 0.65),
+      width: w * 0.44,
+      height: h * 0.28,
+    );
+    canvas.drawOval(snoutRect, cutoutPaint);
+    canvas.drawOval(snoutRect, strokePaint);
+
+    // Nostrils
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(w * 0.42, h * 0.65), width: w * 0.07, height: h * 0.11),
+      fillPaint,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: Offset(w * 0.58, h * 0.65), width: w * 0.07, height: h * 0.11),
+      fillPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _PigIconPainter oldDelegate) => oldDelegate.color != color;
 }
