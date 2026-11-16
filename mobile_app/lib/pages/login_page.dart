@@ -485,7 +485,13 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 10),
                     // Back Button
                     InkWell(
-                      onTap: () => Navigator.pop(context),
+                      onTap: () {
+                        if (Navigator.canPop(context)) {
+                          Navigator.pop(context);
+                        } else {
+                          Navigator.pushReplacementNamed(context, '/WELCOME');
+                        }
+                      },
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: const [

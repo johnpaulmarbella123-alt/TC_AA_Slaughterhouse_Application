@@ -10,7 +10,7 @@ class WelcomeScreen extends StatelessWidget {
       await prefs.setBool('has_seen_welcome', true);
     } catch (_) {}
     if (context.mounted) {
-      Navigator.pushReplacementNamed(context, '/LOGIN');
+      Navigator.pushNamed(context, '/LOGIN');
     }
   }
 
