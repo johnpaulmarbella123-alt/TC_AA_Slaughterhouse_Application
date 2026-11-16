@@ -2739,19 +2739,22 @@ class _SettingsPageState extends State<SettingsPage>
       try {
         final reqs = await client
             .from('requests')
-            .select('user_id, request_type, barangay, market_name, stall_number, marking_tag');
+            .select('user_id, request_type, municipality, barangay, market_name, market_stall_number, marking, customer_marking');
         for (final r in List<Map<String, dynamic>>.from(reqs)) {
           final uid = r['user_id']?.toString() ?? '';
           if (uid.isEmpty) continue;
           final entry = reqStats.putIfAbsent(uid, () => {'count': 0});
           entry['count'] = (entry['count'] as int) + 1;
           entry['request_type'] ??= r['request_type'];
+          entry['municipality'] ??= r['municipality'];
           entry['barangay'] ??= r['barangay'];
           entry['market_name'] ??= r['market_name'];
-          entry['stall_number'] ??= r['stall_number'];
-          entry['marking_tag'] ??= r['marking_tag'];
+          entry['stall_number'] ??= r['market_stall_number'];
+          entry['marking_tag'] ??= r['marking'] ?? r['customer_marking'];
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error loading customer request stats: $e');
+      }
 
       for (final p in List<Map<String, dynamic>>.from(profilesData)) {
         final role = (p['role'] ?? '').toString().toLowerCase().trim();

@@ -3806,22 +3806,22 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: isPendingMarking
-                                        ? const Color(0xFFFEF3C7)
+                                        ? Colors.grey.shade100
                                         : const Color(0xFFE6F9F0),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                       color: isPendingMarking
-                                          ? const Color(0xFFD97706).withValues(alpha: 0.4)
+                                          ? Colors.grey.shade300
                                           : const Color(0xFF2D6A4F).withValues(alpha: 0.4),
                                     ),
                                   ),
                                   child: Text(
-                                    isPendingMarking ? 'PENDING' : d.markings,
+                                    isPendingMarking ? '—' : d.markings,
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
                                       color: isPendingMarking
-                                          ? const Color(0xFFB45309)
+                                          ? Colors.grey.shade600
                                           : const Color(0xFF2D6A4F),
                                     ),
                                   ),

@@ -743,7 +743,7 @@ class RegularDealersService {
     try {
       final rows = await supabase
           .from('profiles')
-          .select('id, full_name, phone, dealer_category, role_confirmed, created_at')
+          .select('id, display_name, phone, dealer_category, role_confirmed, created_at')
           .eq('role_confirmed', true);
 
       for (final row in rows) {
@@ -751,7 +751,7 @@ class RegularDealersService {
         if (rawRole != 'barangay' && rawRole != 'market') continue;
 
         final userId = (row['id'] ?? '').toString().trim();
-        final fullName = (row['full_name'] ?? '').toString().trim();
+        final fullName = (row['display_name'] ?? '').toString().trim();
         final phone = (row['phone'] ?? '').toString().trim();
         final createdAt = row['created_at']?.toString();
 
@@ -979,6 +979,14 @@ class RegularDealersService {
           existing = existing.copyWith(markings: marking);
           _dealers[existingIdx] = existing;
           rosterChanged = true;
+          if (updatedUserId != null && updatedUserId.isNotEmpty) {
+            try {
+              await supabase.from('profiles').update({
+                'assigned_marking': marking,
+                'marking_locked': true,
+              }).eq('id', updatedUserId);
+            } catch (_) {}
+          }
         } else if (!isPending && marking != lockedMarking) {
           req['marking'] = lockedMarking;
           final reqId = req['id'];
