@@ -45,13 +45,6 @@ class ReceiptPdfGenerator {
     final weightStr = weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014';
     final cashierName = (payment?['cashier_name'] ?? 'Admin').toString();
 
-    final authName = (req['authorized_person_name'] ?? '').toString().trim();
-    final authContact = (req['authorized_person_contact'] ?? '').toString().trim();
-    final authRel = (req['authorized_person_relationship'] ?? '').toString().trim();
-    final authIdType = (req['authorized_person_id_type'] ?? '').toString().trim();
-    final authIdNum = (req['authorized_person_id_num'] ?? '').toString().trim();
-    final hasAuth = authName.isNotEmpty;
-
     String fmtAmt(num? val) => '$currency${(val ?? 0).toDouble().toStringAsFixed(2)}';
 
     final additionalFee = (fees['additional_fee'] as num?)?.toDouble() ?? 0.0;
@@ -176,42 +169,6 @@ class ReceiptPdfGenerator {
                 ),
                 pw.SizedBox(height: 6),
                 pw.Text('Cashier: $cashierName', style: const pw.TextStyle(fontSize: 11)),
-                if (isBarangay) ...[
-                  pw.SizedBox(height: 12),
-                  pw.Container(
-                    width: double.infinity,
-                    padding: const pw.EdgeInsets.all(10),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColor.fromHex('#F0FDF4'),
-                      borderRadius: pw.BorderRadius.circular(6),
-                      border: pw.Border.all(color: PdfColor.fromHex('#86EFAC')),
-                    ),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        pw.Text(
-                          'MEAT PICKUP AUTHORIZATION: GRANTED',
-                          style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#15803D')),
-                        ),
-                        pw.SizedBox(height: 4),
-                        if (hasAuth) ...[
-                          pw.Text(
-                            'Authorized Person for Pickup: $authName${authRel.isNotEmpty ? ' ($authRel)' : ''}',
-                            style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#1E293B')),
-                          ),
-                          if (authContact.isNotEmpty)
-                            pw.Text('Contact: $authContact', style: pw.TextStyle(fontSize: 9.5, color: PdfColor.fromHex('#475569'))),
-                          if (authIdType.isNotEmpty || authIdNum.isNotEmpty)
-                            pw.Text('Valid ID: $authIdType \u2014 $authIdNum', style: pw.TextStyle(fontSize: 9.5, color: PdfColor.fromHex('#475569'))),
-                        ] else
-                          pw.Text(
-                            'Authorized Person for Pickup: ${req['customer_name'] ?? 'Customer'} (Customer Direct)',
-                            style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#1E293B')),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
               ] else ...[
                 pw.Text(
                   'Payment Method: ${method != '\u2014' && method.isNotEmpty ? method : 'Pending'}',

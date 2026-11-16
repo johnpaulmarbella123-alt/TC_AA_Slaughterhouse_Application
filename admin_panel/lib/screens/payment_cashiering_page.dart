@@ -1516,61 +1516,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                   ),
                   const SizedBox(height: 8),
                   Text('Cashier: ${payment?['cashier_name'] ?? 'Admin'}', style: const TextStyle(fontSize: 13)),
-                  if (isBarangay) ...[
-                    const SizedBox(height: 14),
-                    Builder(
-                      builder: (_) {
-                        final authName = (req['authorized_person_name'] ?? '').toString().trim();
-                        final authContact = (req['authorized_person_contact'] ?? '').toString().trim();
-                        final authRel = (req['authorized_person_relationship'] ?? '').toString().trim();
-                        final authIdType = (req['authorized_person_id_type'] ?? '').toString().trim();
-                        final authIdNum = (req['authorized_person_id_num'] ?? '').toString().trim();
-                        final hasAuth = authName.isNotEmpty;
-                        return Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF0FDF4),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFF86EFAC)),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.verified_user, size: 16, color: Color(0xFF15803D)),
-                                  const SizedBox(width: 6),
-                                  const Expanded(
-                                    child: Text(
-                                      'MEAT PICKUP AUTHORIZATION: GRANTED',
-                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              if (hasAuth) ...[
-                                Text(
-                                  'Authorized Person for Pickup: $authName${authRel.isNotEmpty ? " ($authRel)" : ""}',
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-                                ),
-                                if (authContact.isNotEmpty)
-                                  Text('Contact: $authContact', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
-                                if (authIdType.isNotEmpty || authIdNum.isNotEmpty)
-                                  Text('Valid ID: $authIdType — $authIdNum', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
-                              ] else ...[
-                                Text(
-                                  'Authorized Person for Pickup: ${req['customer_name'] ?? 'Customer'} (Customer Direct)',
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-                                ),
-                              ],
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ],
                 ] else if (method != '—' && method.isNotEmpty) ...[
                   Container(
                     margin: const EdgeInsets.only(top: 8, bottom: 8),

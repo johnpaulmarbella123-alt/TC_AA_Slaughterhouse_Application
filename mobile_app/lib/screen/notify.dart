@@ -1400,6 +1400,23 @@ class _NotifyPageState extends State<NotifyPage> {
         actionColor: Color(0xFFC53030),
       );
     }
+    if (type == 'missed_schedule_warning' ||
+        type == 'missed_schedule_penalty' ||
+        t.contains('schedule notice') ||
+        t.contains('missed schedule')) {
+      final isPenalty = type == 'missed_schedule_penalty' || t.contains('penalty');
+      return _NotifStyle(
+        icon: Icons.event_busy,
+        iconColor: const Color(0xFFC0392B),
+        iconBg: const Color(0xFFFCEAEA),
+        imagePath: 'assets/images/schedule_notice_icon.png',
+        badge: isPenalty ? 'Missed Schedule +\u20b1500' : 'Schedule Notice',
+        badgeBg: const Color(0xFFFCEAEA),
+        badgeText: const Color(0xFFA32D2D),
+        actionLabel: 'View Details',
+        actionColor: const Color(0xFFC0392B),
+      );
+    }
     if (type == 'meat_pickup_reminder' || t.contains('pickup reminder') || t.contains('claim your meat') || t.contains('cold storage')) {
       return const _NotifStyle(
         icon: Icons.timer_outlined,

@@ -62,9 +62,9 @@ class MyApp extends StatelessWidget {
               ? '/'
               : '/dashboard',
           routes: {
-            '/': (context) => const HeroSection(),
-            '/login': (context) => const LoginPage(),
-            '/dashboard': (context) => const AdminShell(),
+            '/': (context) => const SelectionArea(child: HeroSection()),
+            '/login': (context) => const SelectionArea(child: LoginPage()),
+            '/dashboard': (context) => const SelectionArea(child: AdminShell()),
           },
         );
       },
