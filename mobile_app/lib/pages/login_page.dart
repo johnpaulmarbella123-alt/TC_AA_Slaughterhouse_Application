@@ -167,11 +167,6 @@ class _LoginScreenState extends State<LoginScreen> {
             isPasswordError: false,
             isUnverified: false,
           );
-        } else if (lower.contains('rate limit') || lower.contains('too many')) {
-          _showFacebookStyleLoginErrorDialog(
-            customTitle: 'Too Many Attempts',
-            customMessage: 'Too many login attempts. Please wait a minute and try again.',
-          );
         } else if (e is AuthException &&
             !e.message.toLowerCase().contains('invalid login credentials') &&
             !e.message.toLowerCase().contains('invalid_credentials') &&
