@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dashed_line.dart';
 import 'payment.dart' show kMintHeader;
 import 'select_payment_screen.dart';
+import '../utils/text_capitalization_formatters.dart';
 
 const kAccentGreen = Color(0xFF1BC47D);
 
@@ -257,11 +258,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
             (penaltyTracking?['overdue_payment_billed_on_receipt'] == true);
         final overduePenalty = isOverdue ? 100.0 : 0.0;
 
-        // Cold Storage â‚±150 penalty check (applies if Barangay pickup, notified ready for collection, and past 5:00 PM)
+        // Cold Storage ₱150 penalty check (applies if Barangay pickup, notified ready for collection, and past 5:00 PM)
         final notes = (requestData['release_notes'] ?? '').toString();
         bool isColdStorageOverdue = penaltyTracking?['cold_storage_billed_on_receipt'] == true ||
             penaltyTracking?['cold_storage_collected_at_release'] == true ||
-            notes.contains('Cold storage fee of â‚±150.00 collected') ||
+            notes.contains('Cold storage fee of ₱150.00 collected') ||
             notes.contains('Cold storage fee of \u20b1150.00 collected');
         if (!isColdStorageOverdue && isBarangay && requestData['status'] != 'released') {
           final hasPickupNotice = (penaltyTracking != null && penaltyTracking['pickup_notified_at'] != null) ||
@@ -298,7 +299,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         final coldStoragePenalty = isColdStorageOverdue ? 150.0 : 0.0;
         final isColdStorageSettled = (isPaid && penaltyTracking?['cold_storage_billed_on_receipt'] == true) ||
             penaltyTracking?['cold_storage_collected_at_release'] == true ||
-            notes.contains('Cold storage fee of â‚±150.00 collected') ||
+            notes.contains('Cold storage fee of ₱150.00 collected') ||
             notes.contains('Cold storage fee of \u20b1150.00 collected') ||
             requestData['status'] == 'released';
         final coldStorageUnpaidOnPaidOrder = isPaid && isColdStorageOverdue && !isColdStorageSettled;
@@ -572,7 +573,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
 
                       if (!isPaid && !isAwaitingVerification) ...[
                         const SizedBox(height: 4),
-                        Text("Due Date: ${DateFormat('M/dd/yyyy').format(dueDate)} â€¢ 5:00 PM",
+                        Text("Due Date: ${DateFormat('M/dd/yyyy').format(dueDate)} • 5:00 PM",
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
@@ -665,11 +666,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 const SizedBox(height: 14),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: Text(req['customer_name']?.toString() ?? 'â€”',
+                  child: Text(req['customer_name']?.toString() ?? '—',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                 ),
                 const SizedBox(height: 8),
-                _kv("Livestock:", req['livestock_type']?.toString() ?? 'â€”'),
+                _kv("Livestock:", req['livestock_type']?.toString() ?? '—'),
                 _kv("Count:", '${req['animal_count'] ?? 1} head(s)'),
                 if (weight > 0) _kv("Weight:", '${weight.toStringAsFixed(0)} kg'),
                 const SizedBox(height: 14),
@@ -762,10 +763,11 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   const SizedBox(height: 10),
                   _buildPostPaymentReferenceCard(),
                   const SizedBox(height: 10),
-                  if (!isBarangay) ...[
+                  if (isBarangay)
+                    _buildAuthorizedRepresentativeCard(req)
+                  else
                     _buildMarketDeliveryInfoCard(),
-                    const SizedBox(height: 12),
-                  ],
+                  const SizedBox(height: 12),
                   const Text("Thank you!", style: TextStyle(fontSize: 12)),
                   const Text("Tabaco City Slaughterhouse", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                 ],
@@ -839,7 +841,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     ),
                   ),
                 ] else ...[
-                  // Paid state â€” show success badge
+                  // Paid state — show success badge
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 10),
@@ -892,7 +894,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
 
       if (success == true) {
         if (mounted) {
-          // Submission complete â€” go directly back to the payment page
+          // Submission complete — go directly back to the payment page
           Navigator.pop(context, true);
           return;
         }
@@ -970,7 +972,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
       final p = DateTime.tryParse(paidAtStr.toString());
       if (p != null) paidAt = p.toLocal();
     }
-    final formattedPaidDate = DateFormat('MMMM d, yyyy â€¢ h:mm a').format(paidAt);
+    final formattedPaidDate = DateFormat('MMMM d, yyyy • h:mm a').format(paidAt);
 
     return Container(
       width: double.infinity,
@@ -1109,4 +1111,314 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
       ),
     );
   }
+
+  Widget _buildAuthorizedRepresentativeCard(Map<String, dynamic> req) {
+    final authName = (req['authorized_person_name'] ?? '').toString().trim();
+    final authContact = (req['authorized_person_contact'] ?? '').toString().trim();
+    final authIdType = (req['authorized_person_id_type'] ?? '').toString().trim();
+    final authIdNum = (req['authorized_person_id_num'] ?? '').toString().trim();
+    final authRel = (req['authorized_person_relationship'] ?? '').toString().trim();
+    final hasAuth = authName.isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF86EFAC)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.verified_user, size: 18, color: Color(0xFF16A34A)),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Meat Pickup Authorization',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF15803D),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: const Color(0xFFDCFCE7), borderRadius: BorderRadius.circular(4)),
+                child: const Text('Authorized', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (hasAuth) ...[
+            Text('Authorized Person for Pickup: $authName${authRel.isNotEmpty ? " ($authRel)" : ""}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            if (authContact.isNotEmpty)
+              Text('Contact: $authContact', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+            if (authIdType.isNotEmpty || authIdNum.isNotEmpty)
+              Text('Valid ID: $authIdType — $authIdNum', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => _showAuthorizedPersonSheet(context, req),
+              icon: const Icon(Icons.edit, size: 12),
+              label: const Text('Change Authorized Person', style: TextStyle(fontSize: 11)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF15803D),
+                side: const BorderSide(color: Color(0xFF86EFAC)),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                minimumSize: const Size(0, 30),
+              ),
+            ),
+          ] else ...[
+            Text('Authorized Person for Pickup: ${req['customer_name'] ?? 'You (Account Owner)'} (Customer Direct)', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text('Unable to pick up in person? Assign an authorized representative with valid ID to claim the carcass on your behalf.', style: TextStyle(fontSize: 10, color: Colors.grey.shade700)),
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () => _showAuthorizedPersonSheet(context, req),
+              icon: const Icon(Icons.person_add_alt_1, size: 13),
+              label: const Text('Assign Authorized Person', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF15803D),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                minimumSize: const Size(0, 32),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                elevation: 0,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _showAuthorizedPersonSheet(BuildContext context, Map<String, dynamic> req) {
+    final nameCtrl = TextEditingController(text: req['authorized_person_name']?.toString() ?? '');
+    final contactCtrl = TextEditingController(text: req['authorized_person_contact']?.toString() ?? '');
+    final idNumCtrl = TextEditingController(text: req['authorized_person_id_num']?.toString() ?? '');
+    String selectedIdType = (req['authorized_person_id_type']?.toString().isNotEmpty == true)
+        ? req['authorized_person_id_type'].toString()
+        : 'Philippine National ID (PhilSys)';
+    String selectedRelationship = (req['authorized_person_relationship']?.toString().isNotEmpty == true)
+        ? req['authorized_person_relationship'].toString()
+        : 'Spouse';
+
+    const idTypes = [
+      'Philippine National ID (PhilSys)',
+      'Driver\'s License',
+      'UMID',
+      'Passport',
+      'SSS / GSIS ID',
+      'Voter\'s ID',
+      'Postal ID',
+      'PRC ID',
+      'Barangay ID',
+      'Other Valid Government ID',
+    ];
+
+    const relationships = [
+      'Spouse',
+      'Sibling',
+      'Child / Parent',
+      'Relative',
+      'Driver / Transporter',
+      'Employee / Assistant',
+      'Other Authorized Person',
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.badge, color: Color(0xFF15803D), size: 20),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Assign Authorized Representative',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Provide details of the person authorized to pick up the carcass at the slaughterhouse. They must present this valid ID to the releasing clerk upon collection.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 16),
+                    _sheetLabel('Representative Full Name *'),
+                    TextField(
+                      controller: nameCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: const [WordsCapitalizationFormatter()],
+                      decoration: _sheetInputDecoration('e.g. Juan Dela Cruz'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    _sheetLabel('Contact / Mobile Number *'),
+                    TextField(
+                      controller: contactCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: _sheetInputDecoration('e.g. 09171234567'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(height: 12),
+                    _sheetLabel('Relationship to Customer *'),
+                    DropdownButtonFormField<String>(
+                      initialValue: relationships.contains(selectedRelationship) ? selectedRelationship : relationships.first,
+                      isExpanded: true,
+                      decoration: _sheetInputDecoration(''),
+                      items: relationships.map((r) => DropdownMenuItem(value: r, child: Text(r, style: const TextStyle(fontSize: 13)))).toList(),
+                      onChanged: (v) => setSheetState(() => selectedRelationship = v ?? 'Other'),
+                    ),
+                    const SizedBox(height: 12),
+                    _sheetLabel('Valid ID Type Presented *'),
+                    DropdownButtonFormField<String>(
+                      initialValue: idTypes.contains(selectedIdType) ? selectedIdType : idTypes.first,
+                      isExpanded: true,
+                      decoration: _sheetInputDecoration(''),
+                      items: idTypes.map((t) => DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 13)))).toList(),
+                      onChanged: (v) => setSheetState(() => selectedIdType = v ?? 'Valid ID'),
+                    ),
+                    const SizedBox(height: 12),
+                    _sheetLabel('Valid ID Number *'),
+                    TextField(
+                      controller: idNumCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: const [UpperCaseTextFormatter()],
+                      decoration: _sheetInputDecoration('Enter ID Card Number'),
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF15803D),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () async {
+                          final name = nameCtrl.text.trim();
+                          final contact = contactCtrl.text.trim();
+                          final idNum = idNumCtrl.text.trim();
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Please enter representative full name'), backgroundColor: Colors.orange),
+                            );
+                            return;
+                          }
+                          try {
+                            // 1. Try updating requests directly (if migration columns exist)
+                            try {
+                              await supabase.from('requests').update({
+                                'authorized_person_name': name,
+                                'authorized_person_contact': contact,
+                                'authorized_person_relationship': selectedRelationship,
+                                'authorized_person_id_type': selectedIdType,
+                                'authorized_person_id_num': idNum,
+                              }).eq('id', req['id']);
+                            } catch (_) {}
+
+                            // 2. Also persist to system_settings 'authorized_representatives' as universal fallback
+                            try {
+                              final existing = await supabase
+                                  .from('system_settings')
+                                  .select('value')
+                                  .eq('key', 'authorized_representatives')
+                                  .maybeSingle();
+                              Map<String, dynamic> currentMap = {};
+                              if (existing != null && existing['value'] is Map) {
+                                currentMap = Map<String, dynamic>.from(existing['value']);
+                              }
+                              currentMap[req['id'].toString()] = {
+                                'name': name,
+                                'contact': contact,
+                                'relationship': selectedRelationship,
+                                'id_type': selectedIdType,
+                                'id_num': idNum,
+                              };
+                              await supabase.from('system_settings').upsert({
+                                'key': 'authorized_representatives',
+                                'value': currentMap,
+                                'updated_at': DateTime.now().toIso8601String(),
+                              });
+                            } catch (_) {}
+
+                            if (!ctx.mounted) return;
+                            Navigator.pop(ctx);
+                            _loadReceiptData();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Row(children: [
+                                  Icon(Icons.check_circle, color: Colors.white, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Authorized representative saved for meat pickup!'),
+                                ]),
+                                backgroundColor: Color(0xFF15803D),
+                              ),
+                            );
+                          } catch (e) {
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error saving representative: $e'), backgroundColor: Colors.red),
+                            );
+                          }
+                        },
+                        child: const Text('Save & Confirm Authorization', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _sheetLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+  );
+
+  InputDecoration _sheetInputDecoration(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    filled: true,
+    fillColor: const Color(0xFFF8FAFC),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF15803D), width: 1.5)),
+  );
 }
