@@ -212,6 +212,26 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           }
         } catch (_) {}
 
+        // Also check if a meat_released_confirmed notification exists for this request (in case requests.status wasn't updated due to RLS)
+        if ((requestData['status'] ?? '').toString().trim().toLowerCase() != 'released') {
+          try {
+            final reqIdStr = requestData['id'].toString();
+            final relNotifs = await supabase
+                .from('notifications')
+                .select('type, data')
+                .eq('user_id', user.id)
+                .eq('type', 'meat_released_confirmed')
+                .limit(20);
+            for (final n in List<Map<String, dynamic>>.from(relNotifs)) {
+              final d = n['data'];
+              if (d is Map && d['request_id']?.toString() == reqIdStr) {
+                requestData['status'] = 'released';
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+
         // Calculate fees
         final weight = double.tryParse((requestData['carcass_weight'] ?? 0).toString()) ?? 0;
         final postMortemFee = weight * _kPostMortemRatePerKg;
@@ -763,11 +783,16 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   const SizedBox(height: 10),
                   _buildPostPaymentReferenceCard(),
                   const SizedBox(height: 10),
-                  if (isBarangay)
-                    _buildAuthorizedRepresentativeCard(req)
-                  else
+                  if (isBarangay) ...[
+                    if ((req['status'] ?? '').toString().trim().toLowerCase() != 'released' &&
+                        (req['released_at'] == null || req['released_at'].toString().trim().isEmpty)) ...[
+                      _buildAuthorizedRepresentativeCard(req),
+                      const SizedBox(height: 12),
+                    ],
+                  ] else ...[
                     _buildMarketDeliveryInfoCard(),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
                   const Text("Thank you!", style: TextStyle(fontSize: 12)),
                   const Text("Tabaco City Slaughterhouse", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                 ],
