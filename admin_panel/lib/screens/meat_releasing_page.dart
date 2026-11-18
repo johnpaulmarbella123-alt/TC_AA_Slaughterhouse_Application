@@ -32,7 +32,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     super.initState();
     _loadRequests();
     // Auto-poll every 3 seconds so paid orders appear automatically
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadRequests(silent: true);
     });
   }

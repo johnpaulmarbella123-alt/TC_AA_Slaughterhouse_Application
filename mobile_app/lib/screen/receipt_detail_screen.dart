@@ -86,9 +86,24 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         // Flatten slaughter_inspection
         final inspList = requestData['slaughter_inspection'];
         if (inspList is List && inspList.isNotEmpty) {
-          requestData['carcass_weight'] = (inspList.first as Map<String, dynamic>)['carcass_weight'];
+          final insp = inspList.first as Map<String, dynamic>;
+          requestData['carcass_weight'] = insp['carcass_weight'];
+          requestData['process_notes'] = insp['process_notes'] ?? requestData['process_notes'];
+          requestData['passed_count'] = insp['passed_count'] ?? requestData['passed_count'];
+          requestData['condemned_count'] = insp['condemned_count'] ?? requestData['condemned_count'];
         } else if (inspList is Map) {
           requestData['carcass_weight'] = inspList['carcass_weight'];
+          requestData['process_notes'] = inspList['process_notes'] ?? requestData['process_notes'];
+          requestData['passed_count'] = inspList['passed_count'] ?? requestData['passed_count'];
+          requestData['condemned_count'] = inspList['condemned_count'] ?? requestData['condemned_count'];
+        }
+        if (requestData['passed_count'] == null || requestData['condemned_count'] == null) {
+          final notes = (requestData['process_notes'] ?? '').toString();
+          final m = RegExp(r'\[PARTIAL_BATCH:\s*passed=(\d+),\s*condemned=(\d+)\]').firstMatch(notes);
+          if (m != null) {
+            requestData['passed_count'] = int.tryParse(m.group(1) ?? '');
+            requestData['condemned_count'] = int.tryParse(m.group(2) ?? '');
+          }
         }
 
         // Flatten payment
@@ -691,7 +706,19 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 ),
                 const SizedBox(height: 8),
                 _kv("Livestock:", req['livestock_type']?.toString() ?? '—'),
-                _kv("Count:", '${req['animal_count'] ?? 1} head(s)'),
+                Builder(builder: (_) {
+                  final totalCount =
+                      int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+                  final passedCount =
+                      int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
+                  final condemnedCount =
+                      int.tryParse((req['condemned_count'] ?? '').toString()) ??
+                          0;
+                  final countLabel = (passedCount > 0 && condemnedCount > 0)
+                      ? '$passedCount head${passedCount == 1 ? '' : 's'} (of $totalCount requested \u2014 $condemnedCount failed inspection)'
+                      : '$totalCount head(s)';
+                  return _kv("Count:", countLabel);
+                }),
                 if (weight > 0) _kv("Weight:", '${weight.toStringAsFixed(0)} kg'),
                 const SizedBox(height: 14),
                 const DashedLine(),

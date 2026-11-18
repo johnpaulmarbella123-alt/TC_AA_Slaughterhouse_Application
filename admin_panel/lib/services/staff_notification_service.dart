@@ -121,7 +121,7 @@ class StaffNotificationService extends ChangeNotifier {
     AppSettingsService.instance.addListener(_onSettingsChanged);
     _subscribe();
     refresh();
-    _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => refresh());
+    _pollTimer = Timer.periodic(const Duration(seconds: 25), (_) => refresh());
   }
 
   void stop() {

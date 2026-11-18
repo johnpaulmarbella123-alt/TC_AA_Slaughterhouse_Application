@@ -65,9 +65,8 @@ class _ProfileContentState extends State<ProfileContent> with WidgetsBindingObse
     widget.refreshTrigger?.addListener(_onRefreshTriggered);
     _subscribeRealtime();
 
-    // Auto-sync every 2 seconds so the summary updates automatically
-    // without requiring the user to refresh the page
-    _autoSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    // Auto-sync every 20 seconds as a fallback alongside Realtime channels
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null && mounted) {
         _loadAccountSummary(user.id, user.createdAt);

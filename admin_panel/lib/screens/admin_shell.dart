@@ -198,7 +198,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
     super.initState();
     _fetchBadgeCount();
     _badgeTimer =
-        Timer.periodic(const Duration(seconds: 12), (_) => _fetchBadgeCount());
+        Timer.periodic(const Duration(seconds: 25), (_) => _fetchBadgeCount());
 
     _animController = AnimationController(
       vsync: this,

@@ -31,7 +31,6 @@ class ReceiptPdfGenerator {
     );
 
     final isBarangay = req['request_type'] == 'barangay';
-    final typeLabel = isBarangay ? 'BARANGAY' : 'MARKET';
     final payment = req['payment'] as Map<String, dynamic>?;
     final tracking = req['penalty_tracking'] as Map<String, dynamic>?;
 
@@ -41,7 +40,20 @@ class ReceiptPdfGenerator {
 
     final customerName = (req['customer_name'] ?? '\u2014').toString();
     final livestockType = (req['livestock_type'] ?? '\u2014').toString();
-    final animalCount = (req['animal_count'] ?? 1).toString();
+    final totalCount = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    int passedCount = int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
+    int condemnedCount = int.tryParse((req['condemned_count'] ?? '').toString()) ?? 0;
+    if (passedCount == 0 && condemnedCount == 0) {
+      final notes = (req['process_notes'] ?? '').toString();
+      final m = RegExp(r'\[PARTIAL_BATCH:\s*passed=(\d+),\s*condemned=(\d+)\]').firstMatch(notes);
+      if (m != null) {
+        passedCount = int.tryParse(m.group(1) ?? '') ?? 0;
+        condemnedCount = int.tryParse(m.group(2) ?? '') ?? 0;
+      }
+    }
+    final animalCount = (passedCount > 0 && condemnedCount > 0)
+        ? '$passedCount head${passedCount == 1 ? '' : 's'} (of $totalCount requested \u2014 $condemnedCount failed inspection)'
+        : totalCount.toString();
     final weightStr = weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014';
     final cashierName = (payment?['cashier_name'] ?? 'Admin').toString();
 
@@ -65,14 +77,54 @@ class ReceiptPdfGenerator {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Title (matches dialog)
+              // Official Government Header (matches dialog)
               pw.Center(
-                child: pw.Text(
-                  'Payment  Receipt for "$typeLabel"',
-                  style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+                child: pw.Column(
+                  children: [
+                    pw.Text(
+                      'REPUBLIC OF THE PHILIPPINES \u2022 PROVINCE OF ALBAY',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        letterSpacing: 0.8,
+                        color: PdfColor.fromHex('#64748B'),
+                      ),
+                    ),
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      'CITY GOVERNMENT OF TABACO',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromHex('#0F172A'),
+                      ),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      'TABACO CITY "AA" SLAUGHTERHOUSE & MEAT INSPECTION OFFICE',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColor.fromHex('#0F6E56'),
+                      ),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      'NMIS Accredited Facility \u2022 City Veterinary Office',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 9.5,
+                        color: PdfColor.fromHex('#64748B'),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              pw.SizedBox(height: 18),
+              pw.SizedBox(height: 12),
+              pw.Divider(color: PdfColor.fromHex('#0F172A'), thickness: 1.0, height: 1),
+              pw.SizedBox(height: 16),
 
               // Receipt Info
               pw.Text('Receipt Number: $receiptNo', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),

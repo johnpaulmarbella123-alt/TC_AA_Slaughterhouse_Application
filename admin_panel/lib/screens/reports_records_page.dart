@@ -63,7 +63,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         if (mounted) setState(() => _nmicTransmissionsList = list);
       });
     });
-    _alertTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _alertTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _loadIllegalReportAlerts();
     });
   }
@@ -3475,33 +3475,66 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   return;
                 }
 
-                if (isEditing) {
-                  final updated = editDealer.copyWith(
-                    name: name.toUpperCase(),
-                    markings: marking.toUpperCase(),
-                    category: category,
-                    phone: phone.isNotEmpty ? phone : null,
-                    clearPhone: phone.isEmpty,
+                final cleanMarking = marking.toUpperCase().trim();
+                final existingWithMarking = dealersService.findDealerByMarking(cleanMarking);
+                if (existingWithMarking != null && (!isEditing || existingWithMarking.id != editDealer.id)) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Marking "$cleanMarking" is already assigned to ${existingWithMarking.name}. Please enter or auto-suggest a unique marking.'),
+                      backgroundColor: Colors.redAccent,
+                    ),
                   );
-                  await dealersService.updateDealer(updated);
-                } else {
-                  await dealersService.addDealerManually(
-                    name: name,
-                    markings: marking,
-                    category: category,
-                    phone: phone.isNotEmpty ? phone : null,
-                  );
+                  return;
                 }
 
-                if (mounted) setState(() {});
-                navigator.pop();
+                final cleanName = name.toUpperCase().trim();
+                final existingWithName = dealersService.findDealerByName(cleanName);
+                if (!isEditing && existingWithName != null && existingWithName.category == category) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Meat Dealer "$cleanName" is already registered under ${category.toUpperCase()} category (${existingWithName.markings}).'),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                  return;
+                }
 
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(isEditing ? 'Dealer updated successfully!' : 'Meat Dealer $name registered successfully!'),
-                    backgroundColor: const Color(0xFF2D6A4F),
-                  ),
-                );
+                try {
+                  if (isEditing) {
+                    final updated = editDealer.copyWith(
+                      name: cleanName,
+                      markings: cleanMarking,
+                      category: category,
+                      phone: phone.isNotEmpty ? phone : null,
+                      clearPhone: phone.isEmpty,
+                    );
+                    await dealersService.updateDealer(updated);
+                  } else {
+                    await dealersService.addDealerManually(
+                      name: cleanName,
+                      markings: cleanMarking,
+                      category: category,
+                      phone: phone.isNotEmpty ? phone : null,
+                    );
+                  }
+
+                  if (mounted) setState(() {});
+                  navigator.pop();
+
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(isEditing ? 'Dealer updated successfully!' : 'Meat Dealer $cleanName registered successfully!'),
+                      backgroundColor: const Color(0xFF2D6A4F),
+                    ),
+                  );
+                } catch (e) {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text('Registration error: $e'),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
               },
             ),
           ],
@@ -3535,14 +3568,29 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           children: [
             Text(
               'Are you sure you want to remove ${dealer.name} (${dealer.markings}) from the Meat Dealers Directory?',
-              style: const TextStyle(fontSize: 14, color: Color(0xFF2D3748)),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF2D3748), fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 10),
-            Text(
-              dealer.isNew
-                  ? 'This newly enrolled dealer will be permanently removed from the directory.'
-                  : 'This regular dealer will be removed from the directory listing.',
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.redAccent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Warning: Removing this dealer will delete their directory record and cascade-clear linked historical slaughter requests and payments.',
+                      style: TextStyle(fontSize: 11.5, color: Colors.red.shade900, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),

@@ -161,6 +161,17 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
     final vetFindings = _val('veterinary_findings',
         'Animal shows signs of illness. Not suitable for processing per NMIS standards.');
     final inspector = _val('inspector_name', 'Veterinary Inspector');
+    final condemnedCount =
+        int.tryParse((widget.data['condemned_count'] ?? '').toString()) ?? 0;
+    final passedCount =
+        int.tryParse((widget.data['passed_count'] ?? '').toString()) ?? 0;
+    final totalCount =
+        int.tryParse((widget.data['total_animal_count'] ?? '').toString()) ?? 0;
+    final confinementDays =
+        int.tryParse((widget.data['confinement_days'] ?? '').toString());
+    final resolvedTotal =
+        totalCount > 0 ? totalCount : (condemnedCount + passedCount);
+    final isPartialConfinement = condemnedCount > 0 && passedCount > 0;
 
     return Dialog(
       backgroundColor: Colors.white,
@@ -252,9 +263,48 @@ class _AntiMortemDialogState extends State<_AntiMortemDialog> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$livestockType failed the ante-mortem inspection',
+                      isPartialConfinement
+                          ? '$condemnedCount of $resolvedTotal $livestockType head(s) placed in Facility Confinement'
+                          : '$livestockType failed the ante-mortem inspection',
                       style: const TextStyle(fontSize: 11, color: Color(0xFF8B3A3A)),
                     ),
+                    if (isPartialConfinement) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE8B4B4)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              confinementDays != null
+                                  ? '• $condemnedCount head(s) placed in Facility Confinement ($confinementDays-day observation)'
+                                  : '• $condemnedCount head(s) placed in Facility Confinement',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF9B2C2C),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '• $passedCount healthy head(s) cleared and proceeding to slaughter',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF2F855A),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
 
                     // Veterinary findings

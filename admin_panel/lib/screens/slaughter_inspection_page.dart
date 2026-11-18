@@ -38,7 +38,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAnteMortemAlerts();
     });
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) {
         _loadRequests(silent: true);
         _checkAnteMortemAlerts();
@@ -146,6 +146,19 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           r['condemnation_reason'] = inspection['condemnation_reason'];
           r['veterinary_findings'] = inspection['veterinary_findings'];
           r['inspection_created_at'] = inspection['created_at'];
+          r['passed_count'] = inspection['passed_count'] ?? r['passed_count'];
+          r['condemned_count'] = inspection['condemned_count'] ?? r['condemned_count'];
+        }
+        if (r['passed_count'] == null || r['condemned_count'] == null) {
+          final notesStr = (r['process_notes'] ?? '').toString();
+          final partialMatch = RegExp(
+            r'\[PARTIAL BATCH:\s*(\d+)\s*Passed,\s*(\d+)\s*Condemned\]',
+            caseSensitive: false,
+          ).firstMatch(notesStr);
+          if (partialMatch != null) {
+            r['passed_count'] = int.tryParse(partialMatch.group(1) ?? '');
+            r['condemned_count'] = int.tryParse(partialMatch.group(2) ?? '');
+          }
         }
         if (trackingMap.containsKey(idStr) && trackingMap[idStr] is Map) {
           final t = trackingMap[idStr] as Map;
@@ -513,6 +526,24 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('${req['animal_count']} head(s) • ${req['livestock_type'] ?? ''}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        if (req['condemned_count'] != null &&
+                            (req['condemned_count'] as num) > 0 &&
+                            req['passed_count'] != null &&
+                            (req['passed_count'] as num) > 0) ...[
+                          const SizedBox(height: 3),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF7ED),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFFDBA74), width: 0.8),
+                            ),
+                            child: Text(
+                              '✓ ${req['passed_count']} Passed • ⚠ ${req['condemned_count']} Condemned',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFFC2410C)),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 3),
                         if (req['marking'] != null && req['marking'].toString().trim().isNotEmpty)
                           Container(
@@ -619,7 +650,58 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                           ? (isCondemnationAcknowledged
                               ? _buildBadge('Slip Received & Concluded', Colors.green, light: true)
                               : _buildBadge('Awaiting Slip Review', Colors.orange, light: true))
-                          : isAntiMortemFailed
+                          : (isAntiMortemFailed &&
+                                  (req['special_instruction'] ?? '').toString().contains('[CONFINED_FROM:'))
+                              ? Builder(builder: (_) {
+                                  final instr = (req['special_instruction'] ?? '').toString();
+                                  final m = RegExp(r'\[CONFINED_FROM:([^|\]]+)(?:\|days=(\d+))?\]').firstMatch(instr);
+                                  final parentRef = m?.group(1) ?? '';
+                                  final days = m?.group(2) ?? '1-2';
+                                  final headCount = req['animal_count'] ?? 1;
+                                  return GestureDetector(
+                                    onTap: () => _showClearConfinementDialog(req),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        _buildBadge(
+                                          customerResponse == 'confine'
+                                              ? 'Confine ($headCount head • ${days}d)'
+                                              : 'Awaiting Confine ($headCount • ${days}d)',
+                                          customerResponse == 'confine' ? Colors.blue : Colors.orange,
+                                          light: true,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          parentRef.isNotEmpty ? 'From $parentRef • Tap to manage' : 'Tap to manage',
+                                          style: TextStyle(fontSize: 9, color: Colors.blue.shade400),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                })
+                              : ((req['anti_mortem']?.toString() == 'Failed') &&
+                                  req['condemned_count'] != null &&
+                                  (req['condemned_count'] as num) > 0 &&
+                                  req['passed_count'] != null &&
+                                  (req['passed_count'] as num) > 0)
+                              ? GestureDetector(
+                                  onTap: () => _showClearConfinementDialog(req),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      _buildBadge(
+                                        customerResponse == 'confine'
+                                            ? 'Confine (${req['condemned_count']} head)'
+                                            : 'Awaiting Confine (${req['condemned_count']})',
+                                        customerResponse == 'confine' ? Colors.blue : Colors.orange,
+                                        light: true,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text('Tap to manage', style: TextStyle(fontSize: 9, color: Colors.blue.shade400)),
+                                    ],
+                                  ),
+                                )
+                              : isAntiMortemFailed
                               ? (customerResponse == null
                                   ? _buildBadge('Awaiting', Colors.orange, light: true)
                                   : customerResponse == 'confine'
@@ -1838,6 +1920,16 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
 
   bool _healthIssueDetected = false;
   final _condemnationCtrl = TextEditingController();
+  int _condemnedCount = 1;
+  int _confinementDays = 2;
+
+  int get _totalHeads => int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
+  bool get _hasHealthFailure => _antiMortem == 'Failed' || _postMortem == 'Failed' || _healthIssueDetected;
+  int get _effectivePassedCount {
+    if (!_hasHealthFailure) return _totalHeads;
+    return (_totalHeads - _condemnedCount).clamp(0, _totalHeads);
+  }
+  bool get _isPartialBatch => _totalHeads >= 2 && _hasHealthFailure && _condemnedCount > 0 && _effectivePassedCount > 0;
 
   bool _technicalError = false;
   final _delayReasonCtrl = TextEditingController();
@@ -1871,7 +1963,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   }
 
   void _checkAutoDetermination() {
-    final count = int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
+    final count = _effectivePassedCount > 0 ? _effectivePassedCount : _totalHeads;
     final type = widget.request['livestock_type']?.toString();
     final weight = double.tryParse(_carcassCtrl.text.trim());
 
@@ -1880,14 +1972,14 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       if (_processStage != 'Complete') {
         _processStage = 'Separate Facility (Weighing)';
       }
-    } else if (_antiMortem == 'Passed') {
+    } else if (_antiMortem == 'Passed' || _isPartialBatch) {
       if ((_processStage == 'Ante-Mortem' || _processStage == 'Anti-Mortem') || _processStage == 'Preparation') {
         _processStage = 'Stunning';
       }
     }
 
-    // 2. Only auto-mark Complete if weight is entered & within acceptable range AND Post-Mortem passes
-    if (weight != null && _isWeightInRange(weight, type, count) && _postMortem == 'Passed') {
+    // 2. Only auto-mark Complete if weight is entered & within acceptable range AND (Post-Mortem passes or partial batch has healthy heads)
+    if (weight != null && _isWeightInRange(weight, type, count) && (_postMortem == 'Passed' || _isPartialBatch)) {
       _processStage = 'Complete';
     } else if (_processStage == 'Complete' && (weight == null || !_isWeightInRange(weight, type, count))) {
       // Revert if weight is removed or not acceptable
@@ -1933,6 +2025,12 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     if (req['condemnation_reason'] != null) {
       _healthIssueDetected = true;
       _condemnationCtrl.text = req['condemnation_reason'].toString();
+    }
+    final existingCondemned = int.tryParse(req['condemned_count']?.toString() ?? '');
+    if (existingCondemned != null && existingCondemned >= 1 && existingCondemned <= _totalHeads) {
+      _condemnedCount = existingCondemned;
+    } else {
+      _condemnedCount = _totalHeads >= 2 ? 1 : _totalHeads;
     }
     if (req['delay_reason'] != null) {
       _delayReasonCtrl.text = req['delay_reason'].toString();
@@ -2054,14 +2152,57 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       final offenseLevel = isRepeatOffense ? (_customerPriorMissedCount + 1) : 1;
       final double computedPenaltyFee = _isMissedSchedule ? (isRepeatOffense ? 500.0 : 0.0) : 0.0;
 
+      final bool isPartialBatch = _isPartialBatch;
+      final int passedCount = _effectivePassedCount;
+      final int condemnedCount = _hasHealthFailure ? _condemnedCount.clamp(1, _totalHeads) : 0;
+
       String newStatus = widget.request['status'];
       String? notifTitle;
       String? notifMessage;
       String? notifType;
       Map<String, dynamic>? notifData;
 
-      // If anti-mortem failed, automatically place in confinement awaiting inspector evaluation
-      if (_antiMortem == 'Failed') {
+      // Partial batch: 2+ heads where some passed and some failed at Ante-Mortem or Post-Mortem
+      if (isPartialBatch) {
+        final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+        final reason = _condemnationCtrl.text.trim().isNotEmpty
+            ? _condemnationCtrl.text.trim()
+            : (_notesCtrl.text.trim().isNotEmpty
+                ? _notesCtrl.text.trim()
+                : 'Health issue detected on $condemnedCount of $_totalHeads head(s)');
+
+        if (_processStage == 'Complete') {
+          newStatus = 'releasable';
+          final weightStr = _carcassCtrl.text.trim();
+          final weightInfo = weightStr.isNotEmpty ? ' with a carcass weight of $weightStr kg' : '';
+          final isMarket = (widget.request['request_type'] ?? '').toString().toLowerCase() == 'market';
+          notifTitle = isMarket
+              ? 'Partial Batch Ready for Delivery ($passedCount of $_totalHeads Passed)'
+              : 'Partial Batch Ready for Collection ($passedCount of $_totalHeads Passed)';
+          notifMessage = isMarket
+              ? '$passedCount head(s) of $livestockType ($refNo) passed inspection$weightInfo and are ready for delivery ($condemnedCount head(s) condemned: $reason). Please settle payment via online payment or cashier.'
+              : '$passedCount head(s) of $livestockType ($refNo) passed inspection$weightInfo and are ready for collection ($condemnedCount head(s) condemned: $reason). Please settle payment at the cashier counter before pickup.';
+          notifType = 'slaughter_completed';
+          notifData = {
+            'request_id': reqId,
+            'livestock_type': livestockType,
+            'animal_count': passedCount,
+            'total_animal_count': _totalHeads,
+            'passed_count': passedCount,
+            'condemned_count': condemnedCount,
+            'carcass_weight': double.tryParse(_carcassCtrl.text),
+            'inspector_name': _inspectorCtrl.text,
+            'post_mortem': _postMortem,
+            'process_stage': _processStage,
+            'penalty_fee': computedPenaltyFee,
+            'is_warning_only': !isRepeatOffense,
+            'offense_level': offenseLevel,
+          };
+        } else {
+          newStatus = 'slaughter_started';
+        }
+      } else if (_antiMortem == 'Failed') {
         newStatus = 'anti_mortem_failed';
         _processStage = 'Ante-Mortem';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
@@ -2093,7 +2234,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           'is_delayed': true,
           'actual_date': DateTime.now().toLocal().toIso8601String().split('T')[0],
         };
-      } else if (_postMortem == 'Failed') {
+      } else if (!isPartialBatch && _postMortem == 'Failed') {
         newStatus = 'post_mortem_failed';
         _processStage = 'Post-Mortem Inspection'; // Optional: keep it descriptive
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
@@ -2111,7 +2252,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           'carcass_weight': _carcassCtrl.text,
           'process_notes': _notesCtrl.text,
         };
-      } else if (_processStage == 'Complete' && _postMortem != 'Failed') {
+      } else if (!isPartialBatch && _processStage == 'Complete' && _postMortem != 'Failed') {
         newStatus = 'releasable';
         final livestockType = widget.request['livestock_type'] ?? 'Livestock';
         final animalCount = widget.request['animal_count'] ?? 1;
@@ -2158,16 +2299,37 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         };
       }
 
-      await widget.supabase.from('requests').update({
+      final bool isImmediateSlaughterWalkIn = _antiMortem == 'Separate Facility' ||
+          (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
+          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      final bool isPartialAnteConfinement =
+          isPartialBatch && _antiMortem == 'Failed' && _postMortem != 'Failed' && !_healthIssueDetected;
+
+      final reqUpdatePayload = <String, dynamic>{
         'status': newStatus,
-        if (_antiMortem == 'Failed') ...{
+        if (_antiMortem == 'Failed' && !isPartialBatch) ...{
           'anti_mortem_response': 'confine',
           'anti_mortem_response_at': DateTime.now().toIso8601String(),
         } else if (notifyDelay) ...{
           'anti_mortem_response': null,
           'anti_mortem_response_at': null,
         },
-      }).eq('id', reqId);
+        if (isPartialAnteConfinement) ...{
+          'animal_count': passedCount,
+          'passed_count': passedCount,
+          'condemned_count': 0,
+        } else if (isPartialBatch) ...{
+          'passed_count': passedCount,
+          'condemned_count': condemnedCount,
+        },
+      };
+      try {
+        await widget.supabase.from('requests').update(reqUpdatePayload).eq('id', reqId);
+      } catch (_) {
+        reqUpdatePayload.remove('passed_count');
+        reqUpdatePayload.remove('condemned_count');
+        await widget.supabase.from('requests').update(reqUpdatePayload).eq('id', reqId);
+      }
 
       final nowStr = DateTime.now().toLocal().toIso8601String().split('T')[0];
 
@@ -2245,7 +2407,13 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       }
 
       final delayReason = _delayReasonCtrl.text.trim();
-      String processNotes = _notesCtrl.text.trim();
+      String processNotes = _notesCtrl.text.trim()
+          .replaceAll(RegExp(r'\[PARTIAL BATCH:[^\]]+\]\s*\|?\s*', caseSensitive: false), '')
+          .trim();
+      if (isPartialBatch) {
+        final partialTag = '[PARTIAL BATCH: $passedCount Passed, $condemnedCount Condemned]';
+        processNotes = processNotes.isEmpty ? partialTag : '$partialTag | $processNotes';
+      }
       if (_isMissedSchedule && !processNotes.contains('MISSED SCHEDULE')) {
         final missedTag = isRepeatOffense
             ? '[REPEAT OFFENSE (#$offenseLevel): MISSED SCHEDULE PENALTY ₱500.00 | Actual: $nowStr]'
@@ -2264,28 +2432,138 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       }
 
       final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
-      final inspectionData = {
+      final inspectionData = <String, dynamic>{
         'request_id': reqId,
-        'anti_mortem': _antiMortem,
+        'anti_mortem': isPartialAnteConfinement ? 'Passed' : _antiMortem,
         'process_stage': _processStage,
         'post_mortem': _postMortem,
         'carcass_weight': double.tryParse(_carcassCtrl.text),
         'inspector_name': _inspectorCtrl.text,
         'process_notes': processNotes,
-        'condemnation_reason': _healthIssueDetected ? _condemnationCtrl.text : null,
-        'veterinary_findings': _antiMortem == 'Failed' ? _notesCtrl.text : null,
+        'condemnation_reason': (_healthIssueDetected || (isPartialBatch && !isPartialAnteConfinement)) ? _condemnationCtrl.text : null,
+        'veterinary_findings': (_antiMortem == 'Failed' && !isPartialAnteConfinement) ? _notesCtrl.text : null,
+        if (isPartialAnteConfinement) ...{
+          'passed_count': passedCount,
+          'condemned_count': 0,
+        } else if (isPartialBatch) ...{
+          'passed_count': passedCount,
+          'condemned_count': condemnedCount,
+        },
       };
 
-      if (existing != null) {
-        await widget.supabase.from('slaughter_inspection').update(inspectionData).eq('request_id', reqId);
-      } else {
-        await widget.supabase.from('slaughter_inspection').insert(inspectionData);
+      Future<void> saveInspection(Map<String, dynamic> payload) async {
+        if (existing != null) {
+          await widget.supabase.from('slaughter_inspection').update(payload).eq('request_id', reqId);
+        } else {
+          await widget.supabase.from('slaughter_inspection').insert(payload);
+        }
+      }
+
+      try {
+        await saveInspection(inspectionData);
+      } catch (_) {
+        inspectionData.remove('passed_count');
+        inspectionData.remove('condemned_count');
+        await saveInspection(inspectionData);
       }
 
       // Safely dispatch customer notification without blocking the update (suppressed for on-site immediate slaughter walk-ins)
-      final bool isImmediateSlaughterWalkIn = _antiMortem == 'Separate Facility' ||
-          (widget.request['anti_mortem']?.toString() == 'Separate Facility') ||
-          (widget.request['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+      if (!isImmediateSlaughterWalkIn && isPartialAnteConfinement) {
+        final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final vetFindings = _notesCtrl.text.trim().isNotEmpty
+            ? _notesCtrl.text.trim()
+            : 'Health issue detected during ante-mortem inspection';
+        final parentRefNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+
+        dynamic confinedReqId = reqId;
+        String? childRefNo;
+        try {
+          final childReq = await widget.supabase.from('requests').insert({
+            'user_id': userId,
+            'request_type': widget.request['request_type'],
+            'customer_name': widget.request['customer_name'],
+            'livestock_type': livestockType,
+            'animal_count': condemnedCount,
+            'province': widget.request['province'],
+            'municipality': widget.request['municipality'],
+            'barangay': widget.request['barangay'],
+            'address': widget.request['address'],
+            'market_stall_number': widget.request['market_stall_number'],
+            'market_name': widget.request['market_name'],
+            'preferred_date': widget.request['preferred_date'],
+            'marking': widget.request['marking'],
+            'special_instruction': '[CONFINED_FROM:$parentRefNo|days=$_confinementDays] $vetFindings',
+            'barangay_certificate': widget.request['barangay_certificate'],
+            'business_permit': widget.request['business_permit'],
+            'proof_of_ownership': widget.request['proof_of_ownership'],
+            'vet_certificate': widget.request['vet_certificate'],
+            'status': 'anti_mortem_failed',
+          }).select().single();
+
+          confinedReqId = childReq['id'];
+          childRefNo = 'MI-${DateTime.now().year}-${confinedReqId.toString().padLeft(3, '0')}';
+
+          await widget.supabase.from('slaughter_inspection').insert({
+            'request_id': confinedReqId,
+            'anti_mortem': 'Failed',
+            'process_stage': 'Confinement (${_confinementDays}d)',
+            'post_mortem': 'Pending',
+            'inspector_name': _inspectorCtrl.text,
+            'veterinary_findings': vetFindings,
+            'process_notes': 'Split from $parentRefNo for $_confinementDays-day confinement. $vetFindings',
+          });
+        } catch (e) {
+          debugPrint('Split confinement request error: $e');
+        }
+
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: '$livestockType — Partial Confinement ($condemnedCount of $_totalHeads Confined)',
+          message:
+              'Ante-mortem inspection placed $condemnedCount of $_totalHeads head(s) in $_confinementDays-day facility confinement ($vetFindings). $passedCount healthy head(s) are proceeding to slaughter & dispatch.',
+          type: 'anti_mortem_failed',
+          data: {
+            'request_id': confinedReqId,
+            'livestock_type': livestockType,
+            'veterinary_findings': vetFindings,
+            'inspector_name': _inspectorCtrl.text,
+            'animal_count': condemnedCount,
+            'total_animal_count': _totalHeads,
+            'passed_count': passedCount,
+            'condemned_count': condemnedCount,
+            'confinement_days': _confinementDays,
+            'parent_ref': parentRefNo,
+            'child_ref': ?childRefNo,
+            'is_partial_confinement': true,
+          },
+        );
+      } else if (!isImmediateSlaughterWalkIn && isPartialBatch) {
+        final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+        final reason = _condemnationCtrl.text.trim().isNotEmpty
+            ? _condemnationCtrl.text.trim()
+            : (_notesCtrl.text.trim().isNotEmpty ? _notesCtrl.text.trim() : 'Health issue detected');
+        await NotificationService.sendNotificationSafely(
+          widget.supabase,
+          userId: userId,
+          title: '$livestockType — Partial Condemnation ($condemnedCount of $_totalHeads Condemned)',
+          message:
+              'Health issue detected on $condemnedCount of $_totalHeads head(s) ($reason). $passedCount healthy head(s) continue to processing. Please review the condemnation slip for the affected head(s).',
+          type: 'post_mortem_failed',
+          data: {
+            'request_id': reqId,
+            'customer_name': widget.request['customer_name'],
+            'livestock_type': livestockType,
+            'condemnation_reason': reason,
+            'inspector_name': _inspectorCtrl.text,
+            'animal_count': _totalHeads,
+            'passed_count': passedCount,
+            'condemned_count': condemnedCount,
+            'carcass_weight': _carcassCtrl.text,
+            'process_notes': processNotes,
+          },
+        );
+      }
       if (!isImmediateSlaughterWalkIn && notifTitle != null && notifMessage != null && notifType != null) {
         await NotificationService.sendNotificationSafely(
           widget.supabase,
@@ -2380,15 +2658,22 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: const Text('Process updated successfully'), backgroundColor: Colors.green.shade600),
         );
-        // Auto-show Condemnation Slip if post-mortem failed
+        // Auto-show Condemnation Slip only when post-mortem failed or health issue condemnation checkbox is checked
         if (_postMortem == 'Failed' || _healthIssueDetected) {
           final ctx = context;
+          final slipReq = {
+            ...widget.request,
+            if (isPartialBatch) ...{
+              'passed_count': passedCount,
+              'condemned_count': condemnedCount,
+            },
+          };
           Future.delayed(const Duration(milliseconds: 300), () {
             if (ctx.mounted) {
               showDialog(
                 context: ctx,
                 builder: (_) => _CondemnationSlipDialog(
-                  request: widget.request,
+                  request: slipReq,
                   condemnationReason: _condemnationCtrl.text,
                   inspectorName: _inspectorCtrl.text,
                   carcassWeight: _carcassCtrl.text,
@@ -2667,7 +2952,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                         const SizedBox(height: 6),
                         Builder(
                           builder: (context) {
-                            final count = int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
+                            final count = _effectivePassedCount > 0 ? _effectivePassedCount : _totalHeads;
                             final type = widget.request['livestock_type']?.toString() ?? 'Livestock';
                             final range = _getAcceptableWeightRange(type, count);
                             final w = double.tryParse(_carcassCtrl.text.trim());
@@ -2768,6 +3053,136 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               ),
               const SizedBox(height: 24),
 
+              if (_totalHeads >= 2 && _hasHealthFailure) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7ED),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFB923C)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.splitscreen_outlined, size: 18, color: Color(0xFFC2410C)),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Batch Health Issue Breakdown (2+ Heads)',
+                              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _effectivePassedCount > 0
+                            ? (_antiMortem == 'Failed' && _postMortem != 'Failed' && !_healthIssueDetected
+                                ? '$_effectivePassedCount healthy head(s) will proceed to immediate slaughter & dispatch; $_condemnedCount affected head(s) will be split into a $_confinementDays-day confinement record.'
+                                : '$_effectivePassedCount healthy head(s) will proceed to weighing, MIC, and payment; $_condemnedCount affected head(s) will receive a Condemnation Slip.')
+                            : 'All $_totalHeads head(s) are marked failed/condemned.',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF9A3412), height: 1.35),
+                      ),
+                      if (_antiMortem == 'Failed' && _postMortem != 'Failed' && !_healthIssueDetected && _effectivePassedCount > 0) ...[
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            const Text(
+                              'Confinement Period:',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF7C2D12)),
+                            ),
+                            const SizedBox(width: 8),
+                            ChoiceChip(
+                              label: const Text('1 Day', style: TextStyle(fontSize: 11.5)),
+                              selected: _confinementDays == 1,
+                              selectedColor: const Color(0xFFFED7AA),
+                              onSelected: (_) => setState(() => _confinementDays = 1),
+                            ),
+                            const SizedBox(width: 6),
+                            ChoiceChip(
+                              label: const Text('2 Days', style: TextStyle(fontSize: 11.5)),
+                              selected: _confinementDays == 2,
+                              selectedColor: const Color(0xFFFED7AA),
+                              onSelected: (_) => setState(() => _confinementDays = 2),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Affected / Failed Heads', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF7C2D12))),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFFDBA74)),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      isExpanded: true,
+                                      value: _condemnedCount.clamp(1, _totalHeads),
+                                      items: List.generate(_totalHeads, (i) => i + 1)
+                                          .map((n) => DropdownMenuItem(value: n, child: Text('$n of $_totalHeads head(s)')))
+                                          .toList(),
+                                      onChanged: (val) {
+                                        if (val != null) {
+                                          setState(() {
+                                            _condemnedCount = val;
+                                            _checkAutoDetermination();
+                                          });
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: _effectivePassedCount > 0 ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _effectivePassedCount > 0 ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('Healthy / Passed Heads', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '$_effectivePassedCount head(s)',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: _effectivePassedCount > 0 ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               // Health Issue / Condemnation
               Row(
                 children: [
@@ -3135,8 +3550,12 @@ class _MICDialogState extends State<_MICDialog> {
   Future<void> _printAndProcessMIC() async {
     setState(() => _isPrinting = true);
     try {
+      final passedCount = int.tryParse(widget.request['passed_count']?.toString() ?? '');
+      final micRequest = (passedCount != null && passedCount > 0)
+          ? {...widget.request, 'animal_count': passedCount}
+          : widget.request;
       final pdfBytes = await InspectionDocumentsPdfGenerator.generateMIC(
-        request: widget.request,
+        request: micRequest,
       );
       final reqId = widget.request['id'];
       final certNo = 'MIC-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
@@ -3346,8 +3765,15 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
   Future<void> _printAndProcessCondemnationSlip() async {
     setState(() => _isPrinting = true);
     try {
+      final condemnedCount = int.tryParse(widget.request['condemned_count']?.toString() ?? '');
+      final passedCount = int.tryParse(widget.request['passed_count']?.toString() ?? '');
+      final isPartialBatch = condemnedCount != null && condemnedCount > 0 && passedCount != null && passedCount > 0;
+      final slipRequest = isPartialBatch
+          ? {...widget.request, 'animal_count': condemnedCount}
+          : widget.request;
+
       final pdfBytes = await InspectionDocumentsPdfGenerator.generateCondemnationSlip(
-        request: widget.request,
+        request: slipRequest,
         condemnationReason: widget.condemnationReason,
         inspectorName: widget.inspectorName,
         carcassWeight: widget.carcassWeight,
@@ -3361,25 +3787,27 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
         onLayout: (format) async => pdfBytes,
       );
 
-      // 2. Automatically update database status to condemned and concluded
-      await widget.supabase.from('requests').update({
-        'status': 'condemned',
-      }).eq('id', reqId);
+      // 2. Automatically update database status to condemned and concluded (only if entire batch is condemned)
+      if (!isPartialBatch) {
+        await widget.supabase.from('requests').update({
+          'status': 'condemned',
+        }).eq('id', reqId);
 
-      final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
-      if (existing != null) {
-        await widget.supabase.from('slaughter_inspection').update({
-          'post_mortem': 'Failed',
-          'process_stage': 'Post-Mortem Inspection',
-          'condemnation_reason': widget.condemnationReason,
-        }).eq('request_id', reqId);
-      } else {
-        await widget.supabase.from('slaughter_inspection').insert({
-          'request_id': reqId,
-          'post_mortem': 'Failed',
-          'process_stage': 'Post-Mortem Inspection',
-          'condemnation_reason': widget.condemnationReason,
-        });
+        final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+        if (existing != null) {
+          await widget.supabase.from('slaughter_inspection').update({
+            'post_mortem': 'Failed',
+            'process_stage': 'Post-Mortem Inspection',
+            'condemnation_reason': widget.condemnationReason,
+          }).eq('request_id', reqId);
+        } else {
+          await widget.supabase.from('slaughter_inspection').insert({
+            'request_id': reqId,
+            'post_mortem': 'Failed',
+            'process_stage': 'Post-Mortem Inspection',
+            'condemnation_reason': widget.condemnationReason,
+          });
+        }
       }
 
       // 3. Notify customer safely

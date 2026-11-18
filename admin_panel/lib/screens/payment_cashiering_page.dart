@@ -35,7 +35,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     super.initState();
     _loadRequests();
     // Auto-poll every 3 seconds so payments made on mobile reflect immediately
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadRequests(silent: true);
     });
   }
@@ -104,17 +104,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           }
         }
         // Flatten slaughter_inspection
-        final inspectionList = r['slaughter_inspection'];
-        if (inspectionList is List && inspectionList.isNotEmpty) {
-          final insp = inspectionList.first as Map<String, dynamic>;
-          r['carcass_weight'] = insp['carcass_weight'];
-          r['inspector_name'] = insp['inspector_name'];
-          r['process_notes'] = insp['process_notes'];
-        } else if (inspectionList is Map) {
-          r['carcass_weight'] = inspectionList['carcass_weight'];
-          r['inspector_name'] = inspectionList['inspector_name'];
-          r['process_notes'] = inspectionList['process_notes'];
-        }
+        _applyInspectionFields(r, r['slaughter_inspection']);
         // Flatten payments
         final paymentsList = r['payments'];
         if (paymentsList is List && paymentsList.isNotEmpty) {
@@ -140,6 +130,52 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       debugPrint('PaymentCashiering load error: $e');
       if (mounted && !silent) setState(() => _isLoading = false);
     }
+  }
+
+  static void _applyInspectionFields(Map<String, dynamic> target, dynamic inspection) {
+    Map<String, dynamic>? insp;
+    if (inspection is List && inspection.isNotEmpty && inspection.first is Map) {
+      insp = Map<String, dynamic>.from(inspection.first as Map);
+    } else if (inspection is Map) {
+      insp = Map<String, dynamic>.from(inspection);
+    }
+    if (insp != null) {
+      target['carcass_weight'] = insp['carcass_weight'];
+      target['inspector_name'] = insp['inspector_name'];
+      target['process_notes'] = insp['process_notes'];
+      target['passed_count'] = insp['passed_count'] ?? target['passed_count'];
+      target['condemned_count'] = insp['condemned_count'] ?? target['condemned_count'];
+    }
+    if (target['passed_count'] == null || target['condemned_count'] == null) {
+      final notes = (target['process_notes'] ?? '').toString();
+      final partialMatch = RegExp(
+        r'\[PARTIAL_BATCH:\s*passed=(\d+),\s*condemned=(\d+)\]',
+      ).firstMatch(notes);
+      if (partialMatch != null) {
+        target['passed_count'] = int.tryParse(partialMatch.group(1) ?? '');
+        target['condemned_count'] = int.tryParse(partialMatch.group(2) ?? '');
+      }
+    }
+  }
+
+  static String _formatReceiptCount(Map<String, dynamic> req) {
+    final total = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    final passed = int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
+    final condemned = int.tryParse((req['condemned_count'] ?? '').toString()) ?? 0;
+    if (passed > 0 && condemned > 0) {
+      return '$passed head${passed == 1 ? '' : 's'} (of $total requested \u2014 $condemned failed inspection)';
+    }
+    return '$total';
+  }
+
+  static String _formatTableCount(Map<String, dynamic> req) {
+    final total = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    final passed = int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
+    final condemned = int.tryParse((req['condemned_count'] ?? '').toString()) ?? 0;
+    if (passed > 0 && condemned > 0) {
+      return '$passed of $total head(s)';
+    }
+    return '$total head(s)';
   }
 
   String _refNo(Map<String, dynamic> req) =>
@@ -1120,7 +1156,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                               mainAxisAlignment: MainAxisAlignment.center,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('${req['animal_count'] ?? 1} head(s)', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                                Text(_formatTableCount(req), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                                 Text('${req['livestock_type'] ?? ''}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                               ],
                             )),
@@ -1246,7 +1282,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   void _showReceiptDialog(Map<String, dynamic> req) {
     final fees = _calcFees(req);
     final isBarangay = req['request_type'] == 'barangay';
-    final typeLabel = isBarangay ? 'BARANGAY' : 'MARKET';
     final receiptNo = _receiptNo(req);
     final refNo = _refNo(req);
     final status = _paymentStatus(req);
@@ -1285,14 +1320,58 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Title
-                Center(
-                  child: Text(
-                    'Payment  Receipt for "$typeLabel"',
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                // Official Government Header
+                const Center(
+                  child: Column(
+                    children: [
+                      Text(
+                        'REPUBLIC OF THE PHILIPPINES • PROVINCE OF ALBAY',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 1.0,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                      SizedBox(height: 4),
+                      Text(
+                        'CITY GOVERNMENT OF TABACO',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'TABACO CITY "AA" SLAUGHTERHOUSE & MEAT INSPECTION OFFICE',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                          color: Color(0xFF0F6E56),
+                        ),
+                      ),
+                      SizedBox(height: 3),
+                      Text(
+                        'NMIS Accredited Facility • City Veterinary Office',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w400,
+                          color: Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
+                const Divider(color: Color(0xFF0F172A), thickness: 1.2, height: 1),
+                const SizedBox(height: 18),
 
                 // Receipt Info
                 Text('Receipt Number: $receiptNo', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
@@ -1442,7 +1521,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                 // Livestock Info
                 const Text('LIVESTOCK INFORMATION:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                 Text('Animal Type: ${req['livestock_type'] ?? '\u2014'}', style: const TextStyle(fontSize: 13)),
-                Text('Count: ${req['animal_count'] ?? 1}', style: const TextStyle(fontSize: 13)),
+                Text('Count: ${_formatReceiptCount(req)}', style: const TextStyle(fontSize: 13)),
                 Text('Weight: ${weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014'}', style: const TextStyle(fontSize: 13)),
                 const SizedBox(height: 16),
 
@@ -2002,17 +2081,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       }
 
       // Flatten inspection data (can be Map or List)
-      final inspection = data['slaughter_inspection'];
-      if (inspection is Map) {
-        data['carcass_weight'] = inspection['carcass_weight'];
-        data['inspector_name'] = inspection['inspector_name'];
-        data['process_notes'] = inspection['process_notes'];
-      } else if (inspection is List && inspection.isNotEmpty) {
-        final first = inspection.first as Map;
-        data['carcass_weight'] = first['carcass_weight'];
-        data['inspector_name'] = first['inspector_name'];
-        data['process_notes'] = first['process_notes'];
-      }
+      _PaymentCashieringPageState._applyInspectionFields(data, data['slaughter_inspection']);
 
       // Populate penalty tracking for requested ID
       final reqIdStr = data['id'].toString();

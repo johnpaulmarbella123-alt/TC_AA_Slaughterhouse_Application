@@ -229,9 +229,21 @@ class LivestockFeeService extends ChangeNotifier {
     });
   }
 
+  Future<void>? _authInFlight;
+  DateTime? _lastAuthAttemptAt;
+
   Future<void> _ensureAuth() async {
     final client = Supabase.instance.client;
-    if (client.auth.currentSession == null) {
+    if (client.auth.currentSession != null) return;
+
+    if (_authInFlight != null) return _authInFlight;
+    if (_lastAuthAttemptAt != null &&
+        DateTime.now().difference(_lastAuthAttemptAt!) < const Duration(seconds: 60)) {
+      return;
+    }
+
+    _authInFlight = () async {
+      _lastAuthAttemptAt = DateTime.now();
       try {
         await client.auth.signInWithPassword(
           email: 'public.viewer@tabaco.gov.ph',
@@ -240,6 +252,11 @@ class LivestockFeeService extends ChangeNotifier {
       } catch (e) {
         debugPrint('LivestockFeeService viewer auth note: $e');
       }
+    }();
+    try {
+      await _authInFlight;
+    } finally {
+      _authInFlight = null;
     }
   }
 

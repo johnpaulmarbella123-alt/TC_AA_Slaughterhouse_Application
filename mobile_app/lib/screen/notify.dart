@@ -42,7 +42,7 @@ class _NotifyPageState extends State<NotifyPage> {
     _loadNotifications();
     _loadActiveRequest();
     _subscribeRealtime();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) {
         _loadNotifications();
         _loadActiveRequest();

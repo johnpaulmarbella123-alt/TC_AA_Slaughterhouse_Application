@@ -80,7 +80,7 @@ class _DashboardPageState extends State<DashboardPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAnteMortemAlerts();
     });
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _loadAllDashboardData(silent: true);
       _checkAnteMortemAlerts();
     });

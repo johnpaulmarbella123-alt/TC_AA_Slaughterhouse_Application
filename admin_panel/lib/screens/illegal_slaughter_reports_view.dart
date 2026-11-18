@@ -33,7 +33,7 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
     super.initState();
     _loadReports();
     // Auto-poll every 4 seconds to sync updates in real-time
-    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadReports(silent: true);
     });
   }

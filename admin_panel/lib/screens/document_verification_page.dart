@@ -38,7 +38,7 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
     _loadRequests();
     _subscribeRealtime();
     // Auto-poll every 3 seconds so approved requests appear automatically
-    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _loadRequests(silent: true);
     });
   }

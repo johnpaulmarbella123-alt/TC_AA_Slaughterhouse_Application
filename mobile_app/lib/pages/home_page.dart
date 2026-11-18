@@ -37,6 +37,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final ValueNotifier<int> _paymentRefreshTrigger = ValueNotifier<int>(0);
   final ValueNotifier<int> _profileRefreshTrigger = ValueNotifier<int>(0);
 
+  /// Holds a pre-selected livestock type when booking directly from the Home Services section.
+  final ValueNotifier<String?> _preselectedLivestockNotifier = ValueNotifier<String?>(null);
+
   /// Realtime channel for notification changes.
   RealtimeChannel? _notifChannel;
 
@@ -68,7 +71,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     // Fast polling fallback (every 4 seconds) to ensure new notifications
     // and account deactivation status update immediately.
-    _notifPollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _notifPollingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _fetchUnreadCount();
       _checkAccountStillActive();
     });
@@ -121,6 +124,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _notifyRefreshTrigger.dispose();
     _paymentRefreshTrigger.dispose();
     _profileRefreshTrigger.dispose();
+    _preselectedLivestockNotifier.dispose();
     super.dispose();
   }
 
@@ -327,6 +331,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void request() => _onBottomNavTap(1);
+  void _bookLivestock(String animalOrKey) {
+    _preselectedLivestockNotifier.value = _mapToDropdownOption(animalOrKey);
+    _onBottomNavTap(1);
+  }
+
+  String _mapToDropdownOption(String animalOrKey) {
+    final lower = animalOrKey.toLowerCase().trim();
+    if (lower.contains('cow') || lower.contains('cattle')) {
+      return 'Cow/Cattle';
+    } else if (lower.contains('hog') || lower.contains('pig')) {
+      return 'Pig/Hog';
+    } else if (lower.contains('carabao')) {
+      return 'Carabao';
+    } else if (lower.contains('goat')) {
+      return 'Goat';
+    } else if (lower.contains('sheep')) {
+      return 'Sheep';
+    }
+    return animalOrKey;
+  }
+
   void notify() => _onBottomNavTap(2);
   void payment() => _onBottomNavTap(3);
   void profile() => _onBottomNavTap(4);
@@ -437,7 +462,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Unvisited tabs are empty SizedBox placeholders (zero cost).
     final allTabs = <Widget>[
       _buildHomeContent(),                           // 0: Home
-      const RequestsContent(),                       // 1: Requests
+      RequestsContent(                               // 1: Requests
+        preselectedLivestockNotifier: _preselectedLivestockNotifier,
+      ),
       NotifyPage(                                    // 2: Notify
         onNavigateToTab: _onBottomNavTap,
         refreshTrigger: _notifyRefreshTrigger,
@@ -1287,7 +1314,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: ElevatedButton.icon(
                         onPressed: () {
                           Navigator.pop(ctx);
-                          request();
+                          _bookLivestock(animalKey);
                         },
                         icon: const Icon(Icons.send, size: 17, color: Colors.white),
                         label: Text(

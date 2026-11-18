@@ -394,71 +394,100 @@ class AppSettingsService extends ChangeNotifier {
     await _saveFeesToPrefs();
   }
 
-  Future<void> _ensureAdminAuth() async {
+  Future<void>? _authInFlight;
+  DateTime? _lastAuthAttemptAt;
+
+  Future<void> _ensureAdminAuth({bool force = false}) async {
     final client = Supabase.instance.client;
     final session = client.auth.currentSession;
     final isExpired = session?.isExpired ?? true;
 
-    if (session == null || isExpired) {
-      // 1. If we have an existing session that is simply expired, try refreshing first
-      if (session != null && isExpired) {
-        try {
-          final refreshed = await client.auth.refreshSession();
-          if (refreshed.session != null) {
-            debugPrint('AppSettingsService: Active session refreshed.');
-            return;
-          }
-        } catch (_) {}
-      }
+    if (session != null && !isExpired) return;
 
-      // 2. Collect candidate credentials (active staff override first, then prefs, staff_accounts, and primary default)
-      final List<Map<String, String>> candidates = [];
-      if (hasActiveStaffSession && _activeStaffOverrideEmail != null) {
-        for (final s in _staffAccounts) {
-          if (s.email.trim().toLowerCase() == _activeStaffOverrideEmail!.trim().toLowerCase() &&
-              (s.password?.isNotEmpty ?? false)) {
-            candidates.add({'email': s.email.trim(), 'password': s.password!});
-          }
-        }
+    // Coalesce concurrent callers into a single in-flight auth attempt
+    if (_authInFlight != null) {
+      return _authInFlight;
+    }
+
+    // Prevent polling loops from hammering /auth/v1/token on repeated failures
+    if (!force && _lastAuthAttemptAt != null) {
+      final elapsed = DateTime.now().difference(_lastAuthAttemptAt!);
+      if (elapsed < const Duration(seconds: 30)) {
+        return;
       }
+    }
+
+    _authInFlight = _performAdminAuth(session, isExpired);
+    try {
+      await _authInFlight;
+    } finally {
+      _authInFlight = null;
+    }
+  }
+
+  Future<void> _performAdminAuth(Session? session, bool isExpired) async {
+    _lastAuthAttemptAt = DateTime.now();
+    final client = Supabase.instance.client;
+
+    // 1. If we have an existing session that is simply expired, try refreshing first
+    if (session != null && isExpired) {
       try {
-        final prefs = await SharedPreferences.getInstance();
-        final savedEmail = prefs.getString('admin_auth_email')?.trim() ?? '';
-        final savedPass = prefs.getString('admin_auth_password') ?? '';
-        if (savedEmail.isNotEmpty && savedPass.isNotEmpty) {
-          candidates.add({'email': savedEmail, 'password': savedPass});
+        final refreshed = await client.auth.refreshSession();
+        if (refreshed.session != null) {
+          debugPrint('AppSettingsService: Active session refreshed.');
+          return;
         }
       } catch (_) {}
+    }
 
+    // 2. Collect candidate credentials (active staff override first, then prefs, staff_accounts, and primary default)
+    final List<Map<String, String>> candidates = [];
+    if (hasActiveStaffSession && _activeStaffOverrideEmail != null) {
       for (final s in _staffAccounts) {
-        if (StaffAccount.normalizeRole(s.role) == 'Admin' &&
-            s.email.trim().isNotEmpty &&
-            s.email.toLowerCase() != 'admin.mendoza@tabaco.gov.ph' &&
-            s.email.toLowerCase() != 'admin@tabaco.gov.ph' &&
+        if (s.email.trim().toLowerCase() == _activeStaffOverrideEmail!.trim().toLowerCase() &&
             (s.password?.isNotEmpty ?? false)) {
           candidates.add({'email': s.email.trim(), 'password': s.password!});
         }
       }
-
-      // Guarantee primary admin credentials are always attempted
-      candidates.add({'email': 'tcaaslaughterhouse@gmail.com', 'password': 'admin123'});
-
-      for (final cred in candidates) {
-        try {
-          final res = await client.auth.signInWithPassword(
-            email: cred['email']!,
-            password: cred['password']!,
-          );
-          if (res.session != null) {
-            debugPrint('AppSettingsService: Background Admin RLS session authenticated (${cred['email']}).');
-            return;
-          }
-        } catch (_) {}
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedEmail = prefs.getString('admin_auth_email')?.trim() ?? '';
+      final savedPass = prefs.getString('admin_auth_password') ?? '';
+      if (savedEmail.isNotEmpty && savedPass.isNotEmpty) {
+        candidates.add({'email': savedEmail, 'password': savedPass});
       }
+    } catch (_) {}
+
+    for (final s in _staffAccounts) {
+      if (StaffAccount.normalizeRole(s.role) == 'Admin' &&
+          s.email.trim().isNotEmpty &&
+          s.email.toLowerCase() != 'admin.mendoza@tabaco.gov.ph' &&
+          s.email.toLowerCase() != 'admin@tabaco.gov.ph' &&
+          (s.password?.isNotEmpty ?? false)) {
+        candidates.add({'email': s.email.trim(), 'password': s.password!});
+      }
+    }
+
+    // Guarantee primary admin credentials are always attempted
+    candidates.add({'email': 'tcaaslaughterhouse@gmail.com', 'password': 'admin123'});
+
+    for (final cred in candidates) {
+      try {
+        final res = await client.auth.signInWithPassword(
+          email: cred['email']!,
+          password: cred['password']!,
+        );
+        if (res.session != null) {
+          debugPrint('AppSettingsService: Background Admin RLS session authenticated (${cred['email']}).');
+          return;
+        }
+      } catch (_) {}
     }
   }
 
-  Future<void> ensureAdminAuthSession() => _ensureAdminAuth();
+  Future<void> ensureAdminAuthSession({bool force = false}) =>
+      _ensureAdminAuth(force: force);
 
   Future<void> reloadFromSupabase() async {
     try {

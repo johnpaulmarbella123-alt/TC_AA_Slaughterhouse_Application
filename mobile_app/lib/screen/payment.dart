@@ -29,8 +29,8 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
     _subscribeRealtime();
     widget.refreshTrigger?.addListener(_onRefreshTriggered);
 
-    // Auto-sync every 2 seconds in the background so transactions update automatically
-    _autoSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    // Auto-sync every 15 seconds as a fallback alongside Realtime channels
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _loadPayments(silent: true);
     });
   }

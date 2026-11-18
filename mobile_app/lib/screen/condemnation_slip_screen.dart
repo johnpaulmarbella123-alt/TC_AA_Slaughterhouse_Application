@@ -241,10 +241,21 @@ class _CondemnationSlipScreenState extends State<CondemnationSlipScreen> {
                       ),
                       Padding(
                         padding: const EdgeInsets.all(6.0),
-                        child: Text(
-                          "${_val('animal_count', '1')} head(s)${_val('carcass_weight').isNotEmpty ? '\n${_val('carcass_weight')} kg' : ''}",
-                          style: const TextStyle(fontSize: 9),
-                          textAlign: TextAlign.center,
+                        child: Builder(
+                          builder: (_) {
+                            final totalCount = _val('animal_count', '1');
+                            final condemnedCount = _val('condemned_count');
+                            final passedCount = _val('passed_count');
+                            final qtyText = (condemnedCount.isNotEmpty && passedCount.isNotEmpty)
+                                ? '$condemnedCount of $totalCount head(s) Condemned\n($passedCount Passed)'
+                                : '$totalCount head(s)';
+                            final weightText = _val('carcass_weight').isNotEmpty ? '\n${_val('carcass_weight')} kg' : '';
+                            return Text(
+                              '$qtyText$weightText',
+                              style: const TextStyle(fontSize: 9),
+                              textAlign: TextAlign.center,
+                            );
+                          },
                         ),
                       ),
                       Padding(

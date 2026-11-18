@@ -14,7 +14,9 @@ import '../services/document_verifier.dart';
 import '../utils/text_capitalization_formatters.dart';
 
 class RequestsContent extends StatefulWidget {
-  const RequestsContent({super.key});
+  final ValueNotifier<String?>? preselectedLivestockNotifier;
+
+  const RequestsContent({super.key, this.preselectedLivestockNotifier});
 
   @override
   State<RequestsContent> createState() => _RequestsContentState();
@@ -123,10 +125,66 @@ class _RequestsContentState extends State<RequestsContent> {
     loadMunicipalities(selectedProvinceCode!);
     _loadCustomerProfile();
 
+    if (widget.preselectedLivestockNotifier?.value != null) {
+      selectedLivestock = widget.preselectedLivestockNotifier!.value;
+      _showPreselectedLivestockToast(selectedLivestock!);
+    }
+    widget.preselectedLivestockNotifier?.addListener(_handleLivestockPreselection);
+
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       if (data.session?.user != null) {
         _loadCustomerProfile();
       }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant RequestsContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.preselectedLivestockNotifier != widget.preselectedLivestockNotifier) {
+      oldWidget.preselectedLivestockNotifier?.removeListener(_handleLivestockPreselection);
+      widget.preselectedLivestockNotifier?.addListener(_handleLivestockPreselection);
+      if (widget.preselectedLivestockNotifier?.value != null) {
+        _handleLivestockPreselection();
+      }
+    }
+  }
+
+  void _handleLivestockPreselection() {
+    final target = widget.preselectedLivestockNotifier?.value;
+    if (target != null && mounted) {
+      setState(() {
+        selectedLivestock = target;
+      });
+      _showPreselectedLivestockToast(target);
+    }
+  }
+
+  void _showPreselectedLivestockToast(String livestock) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Pre-selected $livestock based on your booking selection.',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF1E855A),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      widget.preselectedLivestockNotifier?.value = null;
     });
   }
 
@@ -419,6 +477,7 @@ class _RequestsContentState extends State<RequestsContent> {
 
   @override
   void dispose() {
+    widget.preselectedLivestockNotifier?.removeListener(_handleLivestockPreselection);
     _authSubscription?.cancel();
     _customerNameController.dispose();
     _animalCountController.dispose();

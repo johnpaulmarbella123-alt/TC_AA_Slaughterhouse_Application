@@ -1032,7 +1032,7 @@ class RegularDealersService {
     return newlyAdded;
   }
 
-  /// Manually registers a new dealer from the admin panel
+  /// Manually registers a new dealer from the admin panel and persists to public.regular_dealers
   Future<RegularDealer> addDealerManually({
     required String name,
     required String markings,
@@ -1040,19 +1040,57 @@ class RegularDealersService {
     String? phone,
   }) async {
     final cleanCategory = category.toLowerCase().contains('market') ? 'market' : 'barangay';
+    final cleanName = name.trim().toUpperCase();
+    final cleanMarking = markings.trim().toUpperCase();
+    final cleanPhone = phone?.trim();
+
+    // Check duplicate marking in memory
+    final existingMarking = findDealerByMarking(cleanMarking);
+    if (existingMarking != null) {
+      throw Exception('Marking "$cleanMarking" is already assigned to ${existingMarking.name}.');
+    }
+
     final maxNumber = _dealers
         .where((d) => d.category == cleanCategory)
         .fold<int>(0, (max, d) => d.dealerNumber > max ? d.dealerNumber : max);
+    final nextNumber = maxNumber + 1;
+
+    String? generatedId;
+    String createdAt = DateTime.now().toIso8601String();
+
+    // 1. Insert directly into public.regular_dealers table in Supabase
+    try {
+      final insertData = <String, dynamic>{
+        'dealer_number': nextNumber,
+        'name': cleanName,
+        'markings': cleanMarking,
+        'category': cleanCategory,
+        'is_active': true,
+      };
+      if (cleanPhone != null && cleanPhone.isNotEmpty) {
+        insertData['phone'] = cleanPhone;
+      }
+
+      final res = await supabase.from('regular_dealers').insert(insertData).select().single();
+      if (res['id'] != null) {
+        generatedId = res['id'].toString();
+      }
+      if (res['created_at'] != null) {
+        createdAt = res['created_at'].toString();
+      }
+    } catch (e) {
+      debugPrint('Error inserting into regular_dealers table: $e');
+    }
 
     final newDealer = RegularDealer(
-      id: 'dlr-${DateTime.now().millisecondsSinceEpoch}',
-      dealerNumber: maxNumber + 1,
-      name: name.trim().toUpperCase(),
-      markings: markings.trim().toUpperCase(),
+      id: generatedId ?? 'dlr-${DateTime.now().millisecondsSinceEpoch}',
+      dealerNumber: nextNumber,
+      name: cleanName,
+      markings: cleanMarking,
       category: cleanCategory,
-      phone: phone?.trim(),
+      phone: cleanPhone,
       isActive: true,
-      createdAt: DateTime.now().toIso8601String(),
+      createdAt: createdAt,
     );
 
     _dealers.add(newDealer);
@@ -1069,10 +1107,24 @@ class RegularDealersService {
       final cleanUpdated = updated.copyWith(
         name: updated.name.trim().toUpperCase(),
         markings: updated.markings.trim().toUpperCase(),
+        phone: updated.phone?.trim(),
       );
       _dealers[idx] = cleanUpdated;
       await _saveLocalCache();
       await _syncToSupabase();
+
+      // Update public.regular_dealers table
+      try {
+        await supabase.from('regular_dealers').update({
+          'name': cleanUpdated.name,
+          'markings': cleanUpdated.markings,
+          'category': cleanUpdated.category,
+          'phone': cleanUpdated.phone,
+          'is_active': cleanUpdated.isActive,
+        }).eq('id', cleanUpdated.id);
+      } catch (e) {
+        debugPrint('Error updating regular_dealers table: $e');
+      }
 
       final newMark = cleanUpdated.markings;
       final uId = cleanUpdated.userId;
@@ -1099,15 +1151,59 @@ class RegularDealersService {
     }
   }
 
-  /// Deletes a dealer from the active roster and persists removal to local cache & Supabase
+  /// Deletes a dealer from active roster, regular_dealers table, and cascade-cleans associated requests
   Future<void> deleteDealer(String id) async {
+    final target = _dealers.firstWhere(
+      (d) => d.id == id,
+      orElse: () => RegularDealer(
+        id: id,
+        dealerNumber: 0,
+        name: '',
+        markings: '',
+        category: 'barangay',
+      ),
+    );
+
     _dealers.removeWhere((d) => d.id == id);
     await _saveLocalCache();
     await _syncToSupabase();
 
+    // 1. Delete from public.regular_dealers table
     try {
       await supabase.from('regular_dealers').delete().eq('id', id);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Error deleting from regular_dealers table: $e');
+    }
+
+    // 2. Cascade delete historical requests and linked payments
+    if (target.name.isNotEmpty) {
+      try {
+        final userId = target.userId;
+        if (userId != null && userId.isNotEmpty) {
+          final userRequests = await supabase.from('requests').select('id').eq('user_id', userId);
+          final reqIds = (userRequests as List).map((r) => r['id'].toString()).toList();
+          if (reqIds.isNotEmpty) {
+            await supabase.from('payments').delete().inFilter('request_id', reqIds);
+          }
+          await supabase.from('requests').delete().eq('user_id', userId);
+        } else {
+          final matchingRequests = await supabase
+              .from('requests')
+              .select('id')
+              .or('customer_name.ilike.${target.name},marking.eq.${target.markings}');
+          final reqIds = (matchingRequests as List).map((r) => r['id'].toString()).toList();
+          if (reqIds.isNotEmpty) {
+            await supabase.from('payments').delete().inFilter('request_id', reqIds);
+          }
+          await supabase
+              .from('requests')
+              .delete()
+              .or('customer_name.ilike.${target.name},marking.eq.${target.markings}');
+        }
+      } catch (e) {
+        debugPrint('Error cascade-deleting dealer requests: $e');
+      }
+    }
   }
 
   /// Sends an email with PDF attachment via Resend REST API
