@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:intl/intl.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -449,7 +450,7 @@ class _SettingsPageState extends State<SettingsPage>
                 Tab(icon: Icon(Icons.person_outline, size: 20), text: 'My Profile'),
                 Tab(icon: Icon(Icons.palette_outlined, size: 20), text: 'Appearance'),
                 Tab(icon: Icon(Icons.people_outline, size: 20), text: 'Customer Accounts'),
-                Tab(icon: Icon(Icons.rate_review_outlined, size: 20), text: 'Customer Reviews'),
+                Tab(icon: Icon(Icons.rate_review_outlined, size: 20), text: 'Customer Feedback'),
               ],
             ),
           ),
@@ -2905,12 +2906,29 @@ class _SettingsPageState extends State<SettingsPage>
     if (confirmed != true) return;
 
     try {
-      await Supabase.instance.client.from('profiles').delete().eq('id', id);
+      try {
+        await Supabase.instance.client.rpc(
+          'admin_delete_customer_account',
+          params: {'target_user_id': id},
+        );
+      } catch (rpcErr) {
+        debugPrint('admin_delete_customer_account RPC fallback: $rpcErr');
+        await Supabase.instance.client.from('profiles').delete().eq('id', id);
+      }
+
+      AuditLogService.instance.log(
+        action: 'customer_deleted',
+        module: 'Settings',
+        targetId: id,
+        targetRef: (customer['phone'] ?? customer['email'] ?? name).toString(),
+        details: {'customer_name': name},
+      );
+
       await _loadCustomerAccounts();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$name deleted permanently.'),
+            content: Text('$name deleted permanently from Admin & Supabase Auth.'),
             backgroundColor: const Color(0xFFDC2626),
           ),
         );
@@ -3270,7 +3288,7 @@ class _SettingsPageState extends State<SettingsPage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Customer Reviews & In-App Feedback',
+                      'Customer Feedback',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,

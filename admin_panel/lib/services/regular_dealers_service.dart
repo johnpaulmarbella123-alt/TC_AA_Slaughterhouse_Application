@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'audit_log_service.dart';
 
 class RegularDealer {
   final String id;
@@ -1096,6 +1097,13 @@ class RegularDealersService {
     _dealers.add(newDealer);
     await _saveLocalCache();
     await _syncToSupabase();
+    AuditLogService.instance.log(
+      action: 'dealer_added',
+      module: 'Meat Dealers',
+      targetId: newDealer.id,
+      targetRef: newDealer.markings,
+      details: {'name': newDealer.name, 'category': newDealer.category},
+    );
     return newDealer;
   }
 
@@ -1112,6 +1120,13 @@ class RegularDealersService {
       _dealers[idx] = cleanUpdated;
       await _saveLocalCache();
       await _syncToSupabase();
+      AuditLogService.instance.log(
+        action: 'dealer_updated',
+        module: 'Meat Dealers',
+        targetId: cleanUpdated.id,
+        targetRef: cleanUpdated.markings,
+        details: {'name': cleanUpdated.name, 'category': cleanUpdated.category},
+      );
 
       // Update public.regular_dealers table
       try {
@@ -1167,6 +1182,13 @@ class RegularDealersService {
     _dealers.removeWhere((d) => d.id == id);
     await _saveLocalCache();
     await _syncToSupabase();
+    AuditLogService.instance.log(
+      action: 'dealer_deleted',
+      module: 'Meat Dealers',
+      targetId: id,
+      targetRef: target.markings,
+      details: {'name': target.name, 'category': target.category},
+    );
 
     // 1. Delete from public.regular_dealers table
     try {

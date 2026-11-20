@@ -226,6 +226,10 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     final String feeStr = '₱${totalAmount.toStringAsFixed(2)}';
     final bool isPaid = req['status'] == 'paid' || (_payment != null && _payment!['status'] == 'paid');
 
+    final String statusLower = (req['status'] ?? '').toString().toLowerCase();
+    final bool canCancel = ['pending', 'pending_intake', 'approved'].contains(statusLower);
+    final bool isCancelled = statusLower == 'cancelled';
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
@@ -283,6 +287,47 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
           ),
 
           const SizedBox(height: 16),
+
+          if (isCancelled) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF2F2),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFCA5A5)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.cancel_outlined, color: Color(0xFFDC2626), size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Request Cancelled',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF991B1B),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          (req['cancellation_reason'] ?? '').toString().trim().isNotEmpty
+                              ? 'Reason: ${req['cancellation_reason']}'
+                              : 'This slaughter request was cancelled before animal arrival.',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           if ((req['status'] ?? '').toString().toLowerCase() == 'condemned' ||
               (req['status'] ?? '').toString().toLowerCase() == 'post_mortem_failed') ...[
@@ -701,10 +746,184 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
               ],
             ),
           ),
+
+          if (canCancel) ...[
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => _showCancelRequestDialog(req, refNo),
+              icon: const Icon(Icons.cancel_outlined, size: 18, color: Color(0xFFDC2626)),
+              label: const Text(
+                'Cancel Request',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFDC2626),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
         ],
       ),
     );
+  }
+
+  Future<void> _showCancelRequestDialog(Map<String, dynamic> req, String refNo) async {
+    final reasons = [
+      'Changed schedule',
+      'Mistaken booking details',
+      'No longer slaughtering',
+      'Other',
+    ];
+    String selectedReason = reasons.first;
+    final customController = TextEditingController();
+    bool isSubmitting = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Row(
+            children: [
+              Icon(Icons.cancel_outlined, color: Color(0xFFDC2626), size: 22),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Cancel Slaughter Request?',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'You are about to cancel $refNo. This action cannot be undone.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Reason for cancellation:',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: reasons.map((reason) {
+                    final selected = selectedReason == reason;
+                    return ChoiceChip(
+                      label: Text(reason, style: const TextStyle(fontSize: 12)),
+                      selected: selected,
+                      selectedColor: const Color(0xFFFEE2E2),
+                      onSelected: (_) => setDialogState(() => selectedReason = reason),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: customController,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    hintText: selectedReason == 'Other'
+                        ? 'Please specify your reason...'
+                        : 'Optional additional notes...',
+                    hintStyle: const TextStyle(fontSize: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    contentPadding: const EdgeInsets.all(10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+              child: const Text('Keep Request', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
+                      final extra = customController.text.trim();
+                      final finalReason = selectedReason == 'Other'
+                          ? (extra.isNotEmpty ? extra : 'Cancelled by customer')
+                          : (extra.isNotEmpty ? '$selectedReason — $extra' : selectedReason);
+
+                      setDialogState(() => isSubmitting = true);
+                      try {
+                        final reqId = req['id'];
+                        final nowIso = DateTime.now().toUtc().toIso8601String();
+                        await supabase.from('requests').update({
+                          'status': 'cancelled',
+                          'cancellation_reason': finalReason,
+                          'cancelled_at': nowIso,
+                        }).eq('id', reqId);
+
+                        // Notify staff via staff_notifications bell
+                        try {
+                          final customerName = (req['customer_name'] ?? 'Customer').toString();
+                          await supabase.from('staff_notifications').insert({
+                            'type': 'request_cancelled',
+                            'title': 'Request Cancelled by Customer',
+                            'message': '$customerName cancelled $refNo. Reason: $finalReason',
+                            'reference_no': refNo,
+                            'request_id': reqId,
+                            'is_read': false,
+                          });
+                        } catch (notifErr) {
+                          debugPrint('Staff cancellation notification skipped: $notifErr');
+                        }
+
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('$refNo has been cancelled.'),
+                              backgroundColor: const Color(0xFF2D6A4F),
+                            ),
+                          );
+                          await _loadRequestDetails();
+                        }
+                      } catch (e) {
+                        setDialogState(() => isSubmitting = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Could not cancel request: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFDC2626),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: isSubmitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Text('Confirm Cancel', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+    customController.dispose();
   }
 
   Widget _buildProcessTimeline() {

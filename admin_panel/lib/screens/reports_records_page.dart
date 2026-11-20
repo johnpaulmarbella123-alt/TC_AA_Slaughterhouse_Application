@@ -9,6 +9,9 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'illegal_slaughter_reports_view.dart';
+import 'audit_logs_tab.dart';
+import '../services/app_settings_service.dart';
+import '../services/csv_export_helper.dart';
 import '../services/report_pdf_generator.dart';
 import '../services/regular_dealers_service.dart';
 import '../services/nmic_report_pdf_generator.dart';
@@ -29,12 +32,13 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   List<Map<String, dynamic>> _allRequests = [];
 
   // Filter state
-  String _reportType = 'Daily Report'; // 'Daily Report', 'Weekly Report', 'Monthly Report'
+  String _reportType = 'Daily Report'; // 'Daily Report', 'Weekly Report', 'Monthly Report', 'Custom Range'
   late String _activeTab;
 
-  // Selected date reference for Daily / Weekly / Monthly
+  // Selected date reference for Daily / Weekly / Monthly / Custom Range
   DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   DateTime? _selectedDate = DateTime.now();
+  DateTimeRange? _customDateRange;
 
   // Real-time alert polling state for Illegal Slaughter Reports
   Timer? _alertTimer;
@@ -305,7 +309,14 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
   DateTimeRange _getActiveDateRange() {
     final base = _activeDate();
-    if (_reportType == 'Daily Report') {
+    if (_reportType == 'Custom Range' && _customDateRange != null) {
+      final s = _customDateRange!.start;
+      final e = _customDateRange!.end;
+      return DateTimeRange(
+        start: DateTime(s.year, s.month, s.day, 0, 0, 0),
+        end: DateTime(e.year, e.month, e.day, 23, 59, 59, 999),
+      );
+    } else if (_reportType == 'Daily Report') {
       final start = DateTime(base.year, base.month, base.day, 0, 0, 0);
       final end = DateTime(base.year, base.month, base.day, 23, 59, 59, 999);
       return DateTimeRange(start: start, end: end);
@@ -324,13 +335,51 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
   String _getActivePeriodLabel() {
     final base = _activeDate();
-    if (_reportType == 'Daily Report') {
+    if (_reportType == 'Custom Range' && _customDateRange != null) {
+      return '${DateFormat('MMM d, yyyy').format(_customDateRange!.start)} – ${DateFormat('MMM d, yyyy').format(_customDateRange!.end)}';
+    } else if (_reportType == 'Daily Report') {
       return DateFormat('EEEE, MMMM d, yyyy').format(base);
     } else if (_reportType == 'Weekly Report') {
       final range = _getActiveDateRange();
       return 'Week of ${DateFormat('MMM d').format(range.start)} – ${DateFormat('MMM d, yyyy').format(range.end)}';
     } else {
       return DateFormat('MMMM yyyy').format(base);
+    }
+  }
+
+  Future<void> _pickCustomDateRange() async {
+    final now = DateTime.now();
+    final initial = _customDateRange ??
+        DateTimeRange(
+          start: DateTime(now.year, now.month, 1),
+          end: now,
+        );
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      initialDateRange: initial,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFF2D6A4F),
+              onPrimary: Colors.white,
+              surface: Colors.white,
+              onSurface: Color(0xFF1A202C),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _customDateRange = picked;
+        _reportType = 'Custom Range';
+        _selectedDate = picked.start;
+        _calendarMonth = DateTime(picked.start.year, picked.start.month);
+      });
     }
   }
 
@@ -449,6 +498,84 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     await _exportReportBySection('all', 'Complete_Report');
   }
 
+  Future<void> _exportReportAsCsv(String section, String filePrefix) async {
+    try {
+      final periodReqs = _getRequestsInActivePeriod();
+      List<Map<String, dynamic>> targetReqs;
+      if (section == 'production') {
+        targetReqs = periodReqs.where(_isProcessed).toList();
+      } else if (section == 'health_issues') {
+        targetReqs = periodReqs.where(_isHealthIssue).toList();
+      } else if (section == 'uninspected') {
+        targetReqs = periodReqs.where(_isUninspected).toList();
+      } else {
+        targetReqs = periodReqs;
+      }
+
+      final headers = [
+        'Date',
+        'Reference No',
+        'Customer Name',
+        'Barangay / Origin',
+        'Species',
+        'Head Count',
+        'Carcass Weight (kg)',
+        'Status',
+        'Ante-Mortem',
+        'Post-Mortem',
+        'Payment Method',
+        'Total Fee (PHP)',
+      ];
+
+      final rows = targetReqs.map((r) {
+        final dt = _getRequestDate(r);
+        final dateStr = dt != null ? DateFormat('yyyy-MM-dd').format(dt) : '';
+        final refNo = (r['reference_no'] ?? 'REQ-${r['id']}').toString();
+        final pay = r['payment'] is Map ? r['payment'] as Map : null;
+        final method = (pay?['payment_method'] ?? r['payment_method'] ?? '').toString();
+        return [
+          dateStr,
+          refNo,
+          r['customer_name'] ?? '',
+          r['barangay'] ?? r['address'] ?? '',
+          r['livestock_type'] ?? '',
+          r['animal_count'] ?? 1,
+          r['carcass_weight'] ?? '',
+          r['status'] ?? '',
+          r['anti_mortem'] ?? '',
+          r['post_mortem'] ?? '',
+          method,
+          _calcRequestFee(r).toStringAsFixed(2),
+        ];
+      }).toList();
+
+      final range = _getActiveDateRange();
+      final rangeTag =
+          '${DateFormat('yyyyMMdd').format(range.start)}_${DateFormat('yyyyMMdd').format(range.end)}';
+      final ok = await downloadCsvFile(
+        filename: 'TCAA_${filePrefix}_$rangeTag.csv',
+        headers: headers,
+        rows: rows,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ok
+                ? 'Exported ${targetReqs.length} records to CSV (Excel-ready).'
+                : 'Failed to export CSV.'),
+            backgroundColor: ok ? const Color(0xFF2D6A4F) : Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('CSV export error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   void _showExportOptionsDialog() {
     showDialog(
       context: context,
@@ -520,6 +647,28 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               onTap: () {
                 Navigator.pop(ctx);
                 _exportReportBySection('uninspected', 'Uninspected_Report');
+              },
+            ),
+            const Divider(height: 20),
+            _buildExportOptionTile(
+              icon: Icons.table_view_outlined,
+              color: const Color(0xFF0F766E),
+              title: 'Export Complete Report as CSV (Excel)',
+              subtitle: 'Spreadsheet-ready CSV for LGU Treasury & accounting',
+              onTap: () {
+                Navigator.pop(ctx);
+                _exportReportAsCsv('all', 'Complete_Report');
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildExportOptionTile(
+              icon: Icons.grid_on_outlined,
+              color: const Color(0xFF15803D),
+              title: 'Export Production Records as CSV (Excel)',
+              subtitle: 'Passed & slaughtered livestock with carcass weights & fees',
+              onTap: () {
+                Navigator.pop(ctx);
+                _exportReportAsCsv('production', 'Production_Report');
               },
             ),
           ],
@@ -738,6 +887,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                             _buildCustomerHistoricalRecordsTab(),
                           ] else if (_activeTab == 'Meat Dealers Directory') ...[
                             _buildMeatDealersDirectoryTab(),
+                          ] else if (_activeTab == 'Audit Logs' && AppSettingsService.instance.isAdmin) ...[
+                            AuditLogsTab(activeDateRange: _getActiveDateRange()),
                           ] else ...[
                             _buildReportIllegalSection(),
                           ],
@@ -816,8 +967,14 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             children: [
               _dropdownChip(
                 value: _reportType,
-                items: ['Daily Report', 'Weekly Report', 'Monthly Report'],
-                onChanged: (v) => setState(() => _reportType = v),
+                items: ['Daily Report', 'Weekly Report', 'Monthly Report', 'Custom Range'],
+                onChanged: (v) {
+                  if (v == 'Custom Range') {
+                    _pickCustomDateRange();
+                  } else {
+                    setState(() => _reportType = v);
+                  }
+                },
               ),
               const SizedBox(width: 14),
               // Timeframe Navigation Buttons
@@ -831,17 +988,22 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.chevron_left, size: 20),
-                      onPressed: _prevPeriod,
-                      splashRadius: 18,
-                      tooltip: 'Previous period',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    ),
+                    if (_reportType != 'Custom Range')
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left, size: 20),
+                        onPressed: _prevPeriod,
+                        splashRadius: 18,
+                        tooltip: 'Previous period',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
                     const SizedBox(width: 6),
                     InkWell(
                       onTap: () async {
+                        if (_reportType == 'Custom Range') {
+                          await _pickCustomDateRange();
+                          return;
+                        }
                         final picked = await showDatePicker(
                           context: context,
                           initialDate: _activeDate(),
@@ -875,14 +1037,15 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    IconButton(
-                      icon: const Icon(Icons.chevron_right, size: 20),
-                      onPressed: _nextPeriod,
-                      splashRadius: 18,
-                      tooltip: 'Next period',
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                    ),
+                    if (_reportType != 'Custom Range')
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right, size: 20),
+                        onPressed: _nextPeriod,
+                        splashRadius: 18,
+                        tooltip: 'Next period',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
                   ],
                 ),
               ),
@@ -1077,6 +1240,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           _tabButton('Customer Records', _activeTab == 'Customer Records'),
           const SizedBox(width: 8),
           _tabButton('Meat Dealers Directory', _activeTab == 'Meat Dealers Directory'),
+          if (AppSettingsService.instance.isAdmin) ...[
+            const SizedBox(width: 8),
+            _tabButton('Audit Logs', _activeTab == 'Audit Logs'),
+          ],
           const SizedBox(width: 8),
           _tabButton(
             'Report Illegal',

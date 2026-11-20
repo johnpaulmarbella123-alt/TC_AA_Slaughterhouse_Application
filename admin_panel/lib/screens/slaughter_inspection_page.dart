@@ -9,6 +9,7 @@ import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 
@@ -2466,6 +2467,21 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         inspectionData.remove('condemned_count');
         await saveInspection(inspectionData);
       }
+
+      AuditLogService.instance.log(
+        action: 'inspection_saved',
+        module: 'Slaughter & Inspection',
+        targetId: reqId?.toString(),
+        targetRef: (widget.request['reference_no'] ?? 'REQ-$reqId').toString(),
+        details: {
+          'customer': widget.request['customer_name'] ?? '',
+          'ante_mortem': inspectionData['anti_mortem'] ?? '',
+          'post_mortem': inspectionData['post_mortem'] ?? '',
+          'process_stage': inspectionData['process_stage'] ?? '',
+          if (inspectionData['carcass_weight'] != null)
+            'carcass_weight': inspectionData['carcass_weight'],
+        },
+      );
 
       // Safely dispatch customer notification without blocking the update (suppressed for on-site immediate slaughter walk-ins)
       if (!isImmediateSlaughterWalkIn && isPartialAnteConfinement) {

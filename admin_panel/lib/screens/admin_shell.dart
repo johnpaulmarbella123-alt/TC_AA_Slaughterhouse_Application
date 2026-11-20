@@ -95,6 +95,9 @@ class _AdminShellState extends State<AdminShell> {
       } else if (index == 7 && tabArg == 'customers') {
         _settingsInitialTab = 5;
         _settingsNavVersion++;
+      } else if (index == 7 && tabArg == 'feedback') {
+        _settingsInitialTab = 6;
+        _settingsNavVersion++;
       } else if (index == 7) {
         _settingsNavVersion++;
       }

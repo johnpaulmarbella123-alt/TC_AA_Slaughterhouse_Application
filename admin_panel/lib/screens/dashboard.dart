@@ -1167,13 +1167,17 @@ class _DashboardPageState extends State<DashboardPage> {
           subtitleColor: const Color(0xFF0D9488),
         );
 
-        final card4 = _buildKpiCard(
-          iconWidget: const Icon(Icons.star_rounded, size: 20, color: Color(0xFF15803D)),
-          iconBgColor: const Color(0xFFDCFCE7),
-          title: 'Satisfaction Rate',
-          value: '${_satisfactionRate.toStringAsFixed(0)}%',
-          subtitleText: 'Customer feedback',
-          subtitleColor: const Color(0xFF16A34A),
+        final card4 = InkWell(
+          onTap: () => widget.onNavigate?.call(7, 'feedback'),
+          borderRadius: BorderRadius.circular(16),
+          child: _buildKpiCard(
+            iconWidget: const Icon(Icons.star_rounded, size: 20, color: Color(0xFF15803D)),
+            iconBgColor: const Color(0xFFDCFCE7),
+            title: 'Satisfaction Rate',
+            value: '${_satisfactionRate.toStringAsFixed(0)}%',
+            subtitleText: 'View customer feedback →',
+            subtitleColor: const Color(0xFF16A34A),
+          ),
         );
 
         if (isWide) {

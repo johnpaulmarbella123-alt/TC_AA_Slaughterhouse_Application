@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/receipt_pdf_generator.dart';
 import '../services/staff_notification_service.dart';
@@ -2204,6 +2205,18 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       }
 
       await widget.supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+
+      AuditLogService.instance.log(
+        action: 'payment_verified',
+        module: 'Payment & Cashiering',
+        targetId: reqId?.toString(),
+        targetRef: refNo,
+        details: {
+          'customer': req['customer_name'] ?? '',
+          'method': paymentData['payment_method'],
+          'total_amount': _fees['total'],
+        },
+      );
 
       final staffCust = req['customer_name']?.toString().trim();
       final staffCustLabel = (staffCust != null && staffCust.isNotEmpty) ? staffCust : 'Customer';

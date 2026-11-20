@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'audit_log_service.dart';
 
 // ═══════════════════════════════════════════════════════════
 //  MODEL: ANIMAL FEE SCHEDULE
@@ -673,6 +674,13 @@ class AppSettingsService extends ChangeNotifier {
     _staffAccounts.add(staff);
     notifyListeners();
     await _saveStaffToPrefs();
+    AuditLogService.instance.log(
+      action: 'staff_created',
+      module: 'Staff & Roles',
+      targetId: staff.id,
+      targetRef: staff.email,
+      details: {'full_name': staff.fullName, 'role': staff.role},
+    );
   }
 
   Future<void> toggleStaffStatus(String id) async {
@@ -681,15 +689,32 @@ class AppSettingsService extends ChangeNotifier {
       _staffAccounts[idx].isActive = !_staffAccounts[idx].isActive;
       notifyListeners();
       await _saveStaffToPrefs();
+      final s = _staffAccounts[idx];
+      AuditLogService.instance.log(
+        action: s.isActive ? 'staff_activated' : 'staff_deactivated',
+        module: 'Staff & Roles',
+        targetId: s.id,
+        targetRef: s.email,
+        details: {'full_name': s.fullName, 'role': s.role},
+      );
     }
   }
 
   Future<void> updateStaffRole(String id, String newRole) async {
     final idx = _staffAccounts.indexWhere((s) => s.id == id);
     if (idx != -1) {
+      final oldRole = _staffAccounts[idx].role;
       _staffAccounts[idx].role = StaffAccount.normalizeRole(newRole);
       notifyListeners();
       await _saveStaffToPrefs();
+      final s = _staffAccounts[idx];
+      AuditLogService.instance.log(
+        action: 'staff_role_updated',
+        module: 'Staff & Roles',
+        targetId: s.id,
+        targetRef: s.email,
+        details: {'from': oldRole, 'to': s.role},
+      );
     }
   }
 
@@ -699,13 +724,32 @@ class AppSettingsService extends ChangeNotifier {
       _staffAccounts[idx].password = newPassword;
       notifyListeners();
       await _saveStaffToPrefs();
+      final s = _staffAccounts[idx];
+      AuditLogService.instance.log(
+        action: 'staff_password_reset',
+        module: 'Staff & Roles',
+        targetId: s.id,
+        targetRef: s.email,
+        details: {'full_name': s.fullName, 'role': s.role},
+      );
     }
   }
 
   Future<void> deleteStaffAccount(String id) async {
+    final idx = _staffAccounts.indexWhere((s) => s.id == id);
+    final removed = idx != -1 ? _staffAccounts[idx] : null;
     _staffAccounts.removeWhere((s) => s.id == id);
     notifyListeners();
     await _saveStaffToPrefs();
+    if (removed != null) {
+      AuditLogService.instance.log(
+        action: 'staff_deleted',
+        module: 'Staff & Roles',
+        targetId: removed.id,
+        targetRef: removed.email,
+        details: {'full_name': removed.fullName, 'role': removed.role},
+      );
+    }
   }
 
   Future<void> removeStaffAccountWhere(bool Function(StaffAccount) test) async {

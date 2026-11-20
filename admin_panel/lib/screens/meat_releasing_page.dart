@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 
@@ -423,6 +424,19 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         debugPrint('Extended columns not present in requests table, falling back to base schema: $err');
         await supabase.from('requests').update(baseUpdateData).eq('id', reqId);
       }
+
+      AuditLogService.instance.log(
+        action: 'meat_released',
+        module: 'Meat Releasing',
+        targetId: reqId?.toString(),
+        targetRef: _refNo(req),
+        details: {
+          'customer': req['customer_name'] ?? '',
+          'claimant': claimantName,
+          'release_type': releaseType,
+          'released_by': releasedBy,
+        },
+      );
 
       // If the ₱150.00 Cold Storage fee was collected upon handover (e.g., for an online-paid / GCash order),
       // persist 'cold_storage_collected_at_release' in system_settings and update payments so the receipt reflects ₱150.00 paid & 0 balance.

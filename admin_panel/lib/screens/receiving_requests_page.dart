@@ -10,6 +10,7 @@ import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -399,6 +400,17 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           })
           .eq('id', request['id']);
 
+      AuditLogService.instance.log(
+        action: 'request_approved',
+        module: 'Receiving',
+        targetId: request['id']?.toString(),
+        targetRef: (request['reference_no'] ?? 'REQ-${request['id']}').toString(),
+        details: {
+          'customer': request['customer_name'] ?? '',
+          'marking': existingMarking,
+        },
+      );
+
       // 2. Format the preferred date for the notification message
       String dateStr = 'your requested date';
       if (request['preferred_date'] != null) {
@@ -469,6 +481,16 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           .from('requests')
           .update({'status': 'rejected'})
           .eq('id', request['id']);
+
+      AuditLogService.instance.log(
+        action: 'request_rejected',
+        module: 'Receiving',
+        targetId: request['id']?.toString(),
+        targetRef: (request['reference_no'] ?? 'REQ-${request['id']}').toString(),
+        details: {
+          'customer': request['customer_name'] ?? '',
+        },
+      );
 
       // 2. Send notification to customer safely
       await NotificationService.sendNotificationSafely(

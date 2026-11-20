@@ -107,7 +107,7 @@ class TermsAndConditionsDialog extends StatelessWidget {
                         border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.3)),
                       ),
                       child: const Text(
-                        'Welcome to the official Operation Management Application for the AA Slaughterhouse of Tabaco City ("System", "Application"). This digital platform is operated by the Local Government Unit (LGU) of Tabaco City in coordination with the City Veterinary Office (CVO) and in strict accordance with the National Meat Inspection Service (NMIS).\n\nBy creating an account, tapping "Sign Up", or using this Application, you ("User", "Client", "Dealer", "Farmer", or "Whistleblower") certify that you have read, understood, and unconditionally agree to be bound by the following Terms and Conditions, as well as the accompanying Data Privacy Statement.',
+                        'Welcome to the official Operation Management Application for the AA Slaughterhouse of Tabaco City ("System", "Application"). This digital platform is operated by the Local Government Unit (LGU) of Tabaco City in coordination with the City Veterinary Office (CVO) and in strict accordance with the National Meat Inspection Service (NMIS).\n\nBy creating an account, tapping "Sign Up", or using this Application, you ("User", "Client", "Dealer", or "Farmer") certify that you have read, understood, and unconditionally agree to be bound by the following Terms and Conditions, as well as the accompanying Data Privacy Statement.',
                         style: TextStyle(fontSize: 12.5, color: Color(0xFF166534), height: 1.5),
                       ),
                     ),
@@ -154,22 +154,16 @@ class TermsAndConditionsDialog extends StatelessWidget {
                     const SizedBox(height: 16),
 
                     // Section 7
-                    _buildSectionHeader('7. ILLEGAL SLAUGHTER ("HOT MEAT") WHISTLEBLOWER DISCLOSURES'),
-                    _buildParagraph('7.1. Good-Faith Civic Reporting: The application provides a civic whistleblower channel enabling citizens to report clandestine backyard slaughtering and illegal meat distribution ("karne kontrabando").'),
-                    _buildParagraph('7.2. Truthfulness and Malicious Claims: Reports must be made in good faith with factual narratives, valid GPS coordinates, and honest photographic evidence. Intentionally filing malicious, fabricated, or libelous claims against innocent competitors or neighbors is strictly prohibited and subjects the sender to civil and criminal liability under the Cybercrime Prevention Act of 2012 (R.A. 10175).'),
+                    _buildSectionHeader('7. DATA PRIVACY AND PROTECTION (R.A. 10173)'),
+                    _buildParagraph('7.1. Data Collection: The System collects personal information (name, address, mobile number, email) and official documents solely for regulatory compliance, booking execution, cashiering, and identity verification.'),
+                    _buildParagraph('7.2. Data Confidentiality: All personal data is encrypted in transit (TLS 1.3) and stored securely using Supabase database infrastructure adhering to ISO/IEC 27001 standards. Data will never be sold, leased, or distributed to unauthorized third parties.'),
+                    _buildParagraph('7.3. Regulatory Data Sharing: You acknowledge that statutory inspection logs, health certificates, and carcass records are submitted to the National Meat Inspection Service (NMIS) and Tabaco City LGU for official public health auditing.'),
                     const SizedBox(height: 16),
 
                     // Section 8
-                    _buildSectionHeader('8. DATA PRIVACY AND PROTECTION (R.A. 10173)'),
-                    _buildParagraph('8.1. Data Collection: The System collects personal information (name, address, mobile number, email, GPS location for reports) and official documents solely for regulatory compliance, booking execution, cashiering, and identity verification.'),
-                    _buildParagraph('8.2. Data Confidentiality: All personal data is encrypted in transit (TLS 1.3) and stored securely using Supabase database infrastructure adhering to ISO/IEC 27001 standards. Data will never be sold, leased, or distributed to unauthorized third parties.'),
-                    _buildParagraph('8.3. Regulatory Data Sharing: You acknowledge that statutory inspection logs, health certificates, and carcass records are submitted to the National Meat Inspection Service (NMIS) and Tabaco City LGU for official public health auditing.'),
-                    const SizedBox(height: 16),
-
-                    // Section 9
-                    _buildSectionHeader('9. DISCLAIMER OF WARRANTIES AND LIMITATION OF LIABILITY'),
-                    _buildParagraph('9.1. The System is provided on an "as-is" and "as-available" basis. While the proponents and slaughterhouse administration endeavor to ensure 99.5% uptime, uninterrupted availability is not warranted during unforeseen telecom outages, cloud server disruptions, or natural disasters.'),
-                    _buildParagraph('9.2. Slaughterhouse administrators reserve the right to suspend or terminate accounts that breach these terms, manipulate data, or violate veterinary health laws.'),
+                    _buildSectionHeader('8. DISCLAIMER OF WARRANTIES AND LIMITATION OF LIABILITY'),
+                    _buildParagraph('8.1. The System is provided on an "as-is" and "as-available" basis. While the proponents and slaughterhouse administration endeavor to ensure 99.5% uptime, uninterrupted availability is not warranted during unforeseen telecom outages, cloud server disruptions, or natural disasters.'),
+                    _buildParagraph('8.2. Slaughterhouse administrators reserve the right to suspend or terminate accounts that breach these terms, manipulate data, or violate veterinary health laws.'),
                   ],
                 ),
               ),

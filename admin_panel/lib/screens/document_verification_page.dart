@@ -9,6 +9,7 @@ import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 
@@ -611,6 +612,16 @@ class _VerifyDocumentsDialogState extends State<_VerifyDocumentsDialog> {
       final refNo = 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}';
       final notes = _notesCtrl.text.trim();
       await widget.supabase.from('requests').update({'status': 'doc_verified'}).eq('id', req['id']);
+      AuditLogService.instance.log(
+        action: 'documents_verified',
+        module: 'Document Verification',
+        targetId: req['id']?.toString(),
+        targetRef: refNo,
+        details: {
+          'customer': req['customer_name'] ?? '',
+          if (notes.isNotEmpty) 'notes': notes,
+        },
+      );
       final userId = req['user_id'];
       final baseMsg =
           'Your documents for request $refNo have been verified. Your request is now proceeding to the next stage.';
