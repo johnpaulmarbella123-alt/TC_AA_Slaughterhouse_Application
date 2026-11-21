@@ -23,79 +23,77 @@ This chapter presents the completed architectural implementation, functional mod
 
 This section presents and explains the empirical results gathered from the stakeholder interviews, on-site operational observations, and workflow analyses conducted at the Tabaco City "AA" Slaughterhouse in Zone 5 San Carlos, Tabaco City, Albay. The discussion focuses on identifying the critical data elements and information requirements necessary for designing and developing the decoupled enterprise system across its three primary architectural sub-domains.
 
-### A. Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements
+### A. Sub-Domain A: Intake Booking, Per-Head Lot Details, Lairage Queueing, and Permit Information Requirements
 
-The operational data presented in Table 1 outlines the essential information requirements needed by the system to support remote livestock reservations, holding corral capacity management, statutory permit attachment, and physical gate verification. These requirements ensure that receiving officers can triage incoming bookings rapidly, enforce humane holding pen quotas, and prevent diseased or uncertified animals from entering the abattoir grounds.
-	
-	The Customer & Origin Data Requirements category captures the personnel and ownership parameters necessary to establish animal origin traceability. This includes the customer's legal name, contact number, origin farm barangay address, and commercial dealer accreditation credentials. The Livestock & Document Parameters category captures species classification, live head counts, estimated weights, and high-resolution photo captures of statutory documents, including the Veterinary Health Certificate (VHC) and Livestock Shipping Permit. The Queue & Lairage Allocation Data category manages lairage capacity limits, allocating incoming animals to either the Barangay Queue (local consumption) or Market Queue (commercial distribution) while recording verification timestamps upon arrival.
+The operational data presented in Table 1 outlines the essential information requirements needed by the developed system to support remote mobile reservations, walk-in counter intake, per-head animal tracking (`animals_in_lot`), holding corral capacity management, statutory permit attachment, and physical gate verification. These requirements ensure that receiving clerks can triage incoming bookings rapidly, assign physical ear-tags and permanent dealer markings, enforce humane holding pen quotas, and prevent diseased or uncertified animals from entering the abattoir grounds.
 
-#### Table 1. Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements
+The Customer & Origin Data Requirements category captures the personnel, dealership, and ownership parameters necessary to establish animal origin traceability. This includes the customer's legal name, contact number, municipality and barangay origin address, permanent dealer marking tag, and account role (`client`). The Per-Head Livestock & Document Parameters category captures species classification, individual animal lot entries submitted via the mobile **Animals in Lot** builder (color, barangay/municipality origin, optional sex, and optional live weight), total head count (`animal_count`), and photo captures of statutory permits verified with on-device OCR—including the Veterinary Health Certificate (VHC), Livestock Shipping Permit, Business Permit, and Barangay Proof of Ownership. The Queue, Ear-Tagging & Lairage Allocation Data category manages daily capacity limits, partitions requests into Barangay vs. Market queues, records Clerk/Admin-assigned physical **Ear-Tag #** identifiers per head upon receiving approval, and tracks customer self-cancellations (`cancelled` status with reason and timestamp) prior to animal arrival.
 
-| Customer & Origin Data Requirements | Livestock & Document Parameters | Queue & Lairage Allocation Data |
+#### Table 1. Sub-Domain A: Intake Booking, Per-Head Lot Details, Lairage Queueing, and Permit Information Requirements
+
+| Customer & Origin Data Requirements | Per-Head Livestock & Document Parameters | Queue, Ear-Tagging & Lairage Allocation Data |
 | :--- | :--- | :--- |
-| Customer / Dealer Full Legal Name | Livestock Species (`Hog`, `Cattle`, `Carabao`, `Goat`) | Preferred Slaughter Date & Time Slot |
-| Contact Telephone Number & Verified Account Badge | Live Head Count (Units) | Intake Request Category (`Barangay` vs `Market`) |
-| Farm Origin Address & Barangay Location | Estimated / Actual Live Animal Weight (kg) | Assigned Holding Corral / Lairage Pen ID |
-| Registered Meat Dealer Accreditation ID | Veterinary Health Certificate (VHC) Image URL | Intake Triage Status (`pending`, `approved`, `cancelled`) |
-| PSGC Philippine Geographic Code | Livestock Shipping Permit (SP) Image URL | Gate Document Verification Timestamp |
-| Client Account Role (`client` in profiles) | Barangay Origin Clearance Image URL | Document Verification Officer ID & Signature |
+| Customer / Dealer Full Legal Name | Livestock Species (`Pig/Hog`, `Cattle`, `Carabao`, `Goat`, `Sheep`) | Preferred Slaughter Date & Daily Capacity Quota |
+| Contact Telephone Number & OTP-Verified Account | Per-Head Animals in Lot (`animals_in_lot`: Color, Origin, Sex, Live Wt) | Intake Request Category (`Barangay` vs. `Market`) |
+| Farm Origin Address (Province, Municipality, Barangay) | Total Head Count (`animal_count`) & Summed Live Weight (kg) | Staff-Assigned Physical Ear-Tag # per Head (`Auto #1` / Tag ID) |
+| Permanent Regular Dealer Marking Tag (`marking`) | Veterinary Health Certificate (VHC) Image URL & OCR Check | Request Status (`pending`, `approved`, `doc_verified`, `cancelled`) |
+| Market Name & Stall Number (Market Dealers) | Livestock Shipping Permit / Business Permit Image URL | Customer Self-Cancellation Reason & Timestamp (`cancelled_at`) |
+| Client Account Role (`client` in `profiles`) | Barangay Clearance & Proof of Ownership Image URL | Document Verification Notes & Staff Notification Trigger |
 
 ---
 
 ### B. Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements
 
-	Table 2 outlines the operational data structures governing clinical ante-mortem evaluation, slaughter processing line stages, post-mortem pathology examination, carcass weighing, and statutory condemnation notice generation. These parameters ensure that clinical diagnoses are immutably captured, preventing the commercial distribution of unwholesome or uninspected meat products.
-	
-	The Ante-Mortem Clinical Data Requirements category captures live animal health conditions, body temperature, behavioral gait, and disease symptoms in the holding corrals. If an animal is diagnosed as unfit, an official condemnation reason is logged. The Process Stage & Pathology Parameters category tracks real-time progress across slaughter line stations (stunning, bleeding, scalding, evisceration) and records visceral organ examinations. The Carcass & Legal Certification Data category records certified net dressed weights from calibrated overhead scales, generates official digital Meat Inspection Certificates (MIC), and archives legal Condemnation Slips (`CS-YYYY-XXX`) for incinerated carcasses under Republic Act No. 9296.
+Table 2 outlines the operational data structures governing clinical ante-mortem evaluation, per-head ear-tag verification, slaughter processing line stages, post-mortem pathology examination, carcass weighing, and statutory condemnation notice generation. These parameters ensure that clinical diagnoses are accurately captured, preventing the commercial distribution of unwholesome or uninspected meat products.
 
-	#### Table 2. Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements
+The Ante-Mortem Clinical Data Requirements category captures live animal health conditions, physical ear-tag cross-checks against the received `animals_in_lot` roster, quarantine confinement routing, and Separate Facility emergency slaughter flags for non-infectious DOA cases. The Process Stage & Pathology Parameters category tracks real-time progress across slaughter line stations, supports partial batch outcomes (`passed_count` vs. `condemned_count`), and logs visceral organ examinations. The Carcass & Legal Certification Data category records certified net dressed carcass weights, generates official digital Meat Inspection Certificates (MIC), and archives legal Condemnation Slips (`CS-YYYY-XXX`) for condemned meat under Republic Act No. 9296.
+
+#### Table 2. Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements
 
 | Ante-Mortem Clinical Data Requirements | Process Stage & Pathology Parameters | Carcass & Legal Certification Data |
 | :--- | :--- | :--- |
-| Ante-Mortem Status (`Passed`, `Suspect`, `Failed`) | Slaughter Stage (`Stun`, `Bleed`, `Scald`, `Eviscerate`) | Net Dressed Carcass Weight (kg) |
-| Clinical Symptom Observations (Fever, Lesions) | Post-Mortem Status (`Passed`, `Condemned`, `Retained`) | Meat Inspection Certificate (MIC) Reference ID |
-| Quarantine / Isolation Bay Assignment | Pathological Diagnosis (e.g. *Septicemia*, *Swine Fever*) | Certifying NMIS Meat Inspector Full Name |
-| Ante-Mortem Examination Timestamp | Condemnation Severity (`Partial` vs `Total`) | Inspector Professional Accreditation Number |
-| Examining Veterinarian ID & License Number | Affected Organs Log (Liver, Lungs, Kidneys, Viscera) | Digital Condemnation Slip Number (`CS-YYYY-XXX`) |
-| Animal Health Rejection Reason Code | Seizure & Incineration Disposal Confirmation | Inspection Completion Timestamp |
+| Ante-Mortem Status (`Passed`, `Suspect`, `Failed`, `Separate Facility`) | Slaughter Process Stage (`Ante-Mortem` &rarr; `Slaughtering` &rarr; `Post-Mortem`) | Net Dressed Carcass Weight (kg) |
+| Per-Head Ear-Tag #, Color, Sex & Origin Verification Roster | Post-Mortem Status (`Passed`, `Partial Condemnation`, `Condemned`) | Meat Inspection Certificate (MIC) Reference ID |
+| Confinement / Quarantine Routing & Confinement Duration (Days) | Partial Batch Tally (`passed_count` & `condemned_count`) | Certifying NMIS Meat Inspector Full Name |
+| Clinical Symptom Observations & Veterinary Findings | Pathological Diagnosis & Affected Organs Log | Digital Condemnation Slip Number (`CS-YYYY-XXX`) |
+| Separate Facility Non-Infectious Emergency Cause | Seizure & Disposal Confirmation Notes | Inspection Completion Timestamp |
 
 ---
 
-### C. Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements
+### C. Sub-Domain C: Municipal Cashiering, PayMongo Checkout, Audit Trail, and Statutory Reports Information Requirements
 
-	To support municipal fiscal accountability, automated tariff computation, and statutory compliance, it is essential to define the data structures governing the cashiering console and the PayMongo payment gateway integration. Table 3 outlines the information requirements gathered from cashier interviews and dealer surveys to ensure accurate tariff billing, cashless e-wallet reconciliation, and daily reporting.
-	
-	The Municipal Tariff & Billing Requirements category encompasses the dynamic fee parameters established by Tabaco City revenue ordinances, evaluating base facility fees, veterinary inspection dues, holding corral rates, and variable post-mortem fees based on certified carcass weight. The PayMongo Gateway & Receipt Parameters category manages digital payment sessions, webhook signatures, payment references, and official receipt numbers (`RCP-YYYY-XXX`). The Dispatch, Whistleblower & Reporting Data category captures scannable gate pass release timestamps, delivery vehicle plate numbers, GPS coordinates and photo evidence for illegal slaughter whistleblower tips, and aggregate data payloads for NMIS legal-size Daily Production Reports.
+To support municipal fiscal accountability, automated tariff computation, tamper-evident auditing, and statutory compliance, Table 3 outlines the data structures governing the cashiering console, PayMongo online payment integration, meat releasing, immutable staff audit logs, customer feedback, and official reporting.
 
-#### Table 3. Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements
+The Municipal Tariff & Billing Requirements category encompasses the dynamic fee parameters established by Tabaco City revenue ordinances—evaluating base facility fees, veterinary inspection dues, holding corral charges, variable post-mortem fees based on certified carcass weight, delivery van fees for Market requests, and cold-storage/late-pickup penalties. The PayMongo Checkout & Receipt Parameters category manages online checkout sessions (GCash, Maya, Cards, GrabPay), Cash Over-the-Counter / Cash on Pickup verification by clerks, transaction references, and official receipt numbers (`RCP-YYYY-XXX`). The Releasing, Audit Trail & Reporting Data category captures meat release timestamps and authorized representative handoff records, immutable Admin-only Staff Audit Logs (`audit_logs`), customer satisfaction ratings and comments (`reviews`), Illegal Slaughter Report submissions (`reports`), and daily, weekly, monthly, or custom date-range payloads for legal-size NMIS PDF reports and Excel-ready CSV exports.
 
-| Municipal Tariff & Billing Requirements | PayMongo Gateway & Receipt Parameters | Dispatch, Whistleblower & Reporting Data |
+#### Table 3. Sub-Domain C: Municipal Cashiering, PayMongo Checkout, Audit Trail, and Statutory Reports Information Requirements
+
+| Municipal Tariff & Billing Requirements | PayMongo Checkout & Receipt Parameters | Releasing, Audit Trail & Reporting Data |
 | :--- | :--- | :--- |
-| Veterinary Health Certificate Fee (₱50.00) | Payment Settlement Channel (`Cash` vs `GCash`) | Gate Pass Release Clearance Status (`completed`) |
-| Permit to Slaughter Fee (₱60.00) | PayMongo Link ID & Checkout Session URL | Physical Meat Dispatch Timestamp (`released_at`) |
-| Slaughterhouse Facility Fee (₱60.00) | PayMongo Webhook Signature & Status (`paid`) | Recipient / Delivery Van Vehicle Plate Number |
-| Holding Corral Fee (₱40.00) | Transaction Authorization Reference Code | Whistleblower Report Incident Type & Description |
-| Ante-Mortem Inspection Fee (₱40.00) | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) | Whistleblower GPS Geolocation & Photo URL |
-| Post-Mortem Rate (₱5.00 × Carcass Weight kg) | Cash Tendered Amount & Change Due (Cashier) | Whistleblower Case Status (`Under Investigation`) |
-| Delivery Van Fee (₱60.00, Market requests only) | Shift Closing Balance & Cash Drawer Reconciliation | Daily Legal Production PDF Report Data Payload |
+| Veterinary Health Certificate Fee (₱50.00) | Payment Channel (`Cash` vs. `PayMongo Online: GCash/Maya/Card/GrabPay`) | Meat Release Status (`released`), Timestamp (`released_at`) & Clerk ID |
+| Permit to Slaughter Fee (₱60.00) | PayMongo Checkout Session ID (`cs_...`) & Checkout URL | Authorized Representative / Claimant Name & Delivery Driver Details |
+| Slaughterhouse Facility Fee (₱60.00) | Payment Verification Status (`pending` &rarr; `paid` via Clerk Confirmation) | Immutable Staff Audit Logs (`audit_logs`: Actor, Role, Module, Action, Timestamp) |
+| Holding Corral Fee (₱40.00) | Transaction Reference Code & Detected Payment Method | Custom Date Range PDF & Excel-Ready CSV Export Payloads |
+| Ante-Mortem Inspection Fee (₱40.00) | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) & Printable PDF | Customer Feedback Ratings (1–5★) & Comments (`reviews`) |
+| Post-Mortem Rate (₱5.00 × Carcass Weight kg) | Total Fee, Balance (`0.00` when settled) & Cashier Audit Record | Illegal Slaughter Report Details, Location, Photo Evidence & Case Status (`reports`) |
+| Delivery Van Fee (₱60.00, Market) & Cold Storage Fee (₱150.00) | Automated Customer Receipt & Staff Bell Notifications | Legal-Size NMIS Daily Production PDF & Resend Email Transmittal Log (`nmic_transmissions`) |
 
 ---
 
-## Features of the Proposed System
+## Features of the Developed System
 
-The proposed Operation Management Application for AA Slaughterhouse of Tabaco City encompasses a comprehensive suite of 16 integrated digital interfaces designed to streamline abattoir retail operations, veterinary inspection triage, multi-tender payment processing, warehouse dispatch, and administrative auditing.
+The developed Operation Management Application for AA Slaughterhouse of Tabaco City encompasses an integrated suite of web and mobile interfaces designed to streamline abattoir intake, per-head ear-tag tracking, veterinary inspection triage, multi-tender payment processing, meat releasing, statutory reporting, and tamper-evident administrative auditing.
 
-Figure 3 illustrates the **Staff Authentication & Role-Based Access Gateway**, which serves as the secure perimeter for all internal operations. Built using Supabase GoTrue Auth, the gateway authenticates personnel and assigns session tokens bound to five distinct operational roles: `admin`, `inspector`, `receiving`, `cashier`, and `client`. The interface implements form validation with instant error feedback, preventing invalid submissions and mitigating brute-force risks through rate-limited session handling.
+Figure 3 illustrates the **Staff Authentication & Role-Based Access Gateway**, which serves as the secure perimeter for all internal operations. Built using Supabase Auth and synchronized with `public.profiles` and `system_settings`, the gateway authenticates personnel and enforces strict Role-Based Access Control (RBAC) across the facility's three official staff roles—**Admin**, **Clerk**, and **Inspector**—while mobile customers authenticate separately into the Flutter customer portal. Only the **Admin** role has access to System Settings, Staff Account Management (create, reset password, deactivate, delete), Customer Account Management, and the immutable **Audit Logs** trail.
 
 ```mermaid
 graph TD
     subgraph Figure 3: Staff Authentication & Role-Based Access Gateway
-        Login["Staff Login Form<br/>(Email, Encrypted Password, OTP)"] --> AuthEngine["Supabase GoTrue Engine<br/>(Validates JWT & Argon2 Hash)"]
-        AuthEngine --> RoleCheck{"Check profiles.role"}
-        RoleCheck -- "role = admin" --> MasterDash["Executive Admin Dashboard & Reports"]
-        RoleCheck -- "role = inspector" --> InspModule["Slaughter & Inspection Station"]
-        RoleCheck -- "role = cashier" --> CashModule["Payment & Cashiering Workspace"]
-        RoleCheck -- "role = receiving" --> RecModule["Intake Triage & Permit Verification"]
+        Login["Staff Login Form<br/>(Email & Encrypted Password)"] --> AuthEngine["Supabase Auth & RBAC Engine<br/>(Validates JWT & Staff Role)"]
+        AuthEngine --> RoleCheck{"Check Assigned Staff Role"}
+        RoleCheck -- "role = Admin" --> MasterDash["Full Admin Portal: Dashboard, All Modules,<br/>Reports & Audit Logs, Settings & Staff Control"]
+        RoleCheck -- "role = Clerk" --> ClerkModule["Clerk Workspace: Receiving & Ear-Tagging,<br/>Document Verification, Cashiering & Releasing"]
+        RoleCheck -- "role = Inspector" --> InspModule["Inspector Workspace: Ante-Mortem,<br/>Slaughter Line, Post-Mortem & Condemnation"]
     end
 ```
 

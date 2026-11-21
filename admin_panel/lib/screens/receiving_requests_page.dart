@@ -11,6 +11,7 @@ import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
+import '../widgets/animals_in_lot_editor.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -109,18 +110,26 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
       // can claim walk-in orders by Reference # or Marking Tag despite `requests` RLS.
       await _syncWalkInBridge(allRequests);
 
-      final approved = allRequests.where((r) => r['status'] == 'approved').toList();
-      final pendingAll = allRequests.where((r) => r['status'] == 'pending').toList();
+      final approved = allRequests.where((r) {
+        final st = (r['status'] ?? '').toString().trim().toLowerCase();
+        return st == 'approved';
+      }).toList();
+      final pendingAll = allRequests.where((r) {
+        final st = (r['status'] ?? '').toString().trim().toLowerCase();
+        return st == 'pending' || st == 'pending_intake';
+      }).toList();
 
       if (mounted) {
         setState(() {
           _allRequests = List<Map<String, dynamic>>.from(allRequests);
           _approvedRequests = List<Map<String, dynamic>>.from(approved);
-          _pendingBarangay = List<Map<String, dynamic>>.from(
-            pendingAll.where((r) => r['request_type'] == 'barangay'),
-          );
           _pendingMarket = List<Map<String, dynamic>>.from(
-            pendingAll.where((r) => r['request_type'] == 'market'),
+            pendingAll.where((r) =>
+                (r['request_type'] ?? '').toString().trim().toLowerCase() == 'market'),
+          );
+          _pendingBarangay = List<Map<String, dynamic>>.from(
+            pendingAll.where((r) =>
+                (r['request_type'] ?? '').toString().trim().toLowerCase() != 'market'),
           );
 
           // If the user hasn't manually selected a tab, automatically focus
@@ -391,14 +400,105 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         );
       }
 
-      // 1. Update request status and locked marking
-      await supabase
-          .from('requests')
-          .update({
-            'status': 'approved',
-            'marking': existingMarking,
-          })
-          .eq('id', request['id']);
+      // 1a. Allow Admin/Clerk to assign Ear-Tag # per head upon approval (auto-defaults to Auto #1, #2, ...)
+      final fallbackOrigin = [
+        request['barangay']?.toString().trim() ?? '',
+        request['municipality']?.toString().trim() ?? '',
+      ].where((s) => s.isNotEmpty).join(', ');
+      final approvalLot = AnimalLotItem.parseList(
+        request['animals_in_lot'],
+        fallbackCount: (request['animal_count'] as num?)?.toInt() ?? 1,
+        fallbackOrigin: fallbackOrigin.isNotEmpty ? fallbackOrigin : 'Tabaco City',
+      );
+
+      if (!mounted) return;
+      final assignedLot = await showDialog<List<AnimalLotItem>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) {
+          List<AnimalLotItem> editableLot = List<AnimalLotItem>.from(approvalLot);
+          return StatefulBuilder(
+            builder: (ctx, setDlgState) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              title: Text(
+                'Assign Ear-Tags & Approve (${editableLot.length} ${editableLot.length == 1 ? 'head' : 'heads'})',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              content: SizedBox(
+                width: 540,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Customer: $customerName • Marking: $existingMarking',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Customer livestock details are pre-filled below. Attach the physical Ear-Tag # for each head (leave blank to auto-assign Auto #1, Auto #2, etc.).',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 12),
+                      AnimalsInLotEditor(
+                        items: editableLot,
+                        defaultOrigin: fallbackOrigin.isNotEmpty ? fallbackOrigin : 'Tabaco City',
+                        tagOnlyMode: true,
+                        onChanged: (updated) => setDlgState(() => editableLot = updated),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, null),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, editableLot),
+                  icon: const Icon(Icons.check, size: 16),
+                  label: const Text('Confirm & Approve'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0F5132),
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (assignedLot == null) return; // User cancelled approval
+      final serializedLot = List.generate(
+        assignedLot.length,
+        (i) => assignedLot[i].toJson(i),
+      );
+
+      // 1. Update request status, locked marking, animal_count, and ear-tagged animals_in_lot
+      try {
+        await supabase
+            .from('requests')
+            .update({
+              'status': 'approved',
+              'marking': existingMarking,
+              'animal_count': assignedLot.length,
+              'animals_in_lot': serializedLot,
+            })
+            .eq('id', request['id']);
+      } catch (colErr) {
+        debugPrint('Retrying approve without animals_in_lot fallback: $colErr');
+        await supabase
+            .from('requests')
+            .update({
+              'status': 'approved',
+              'marking': existingMarking,
+              'animal_count': assignedLot.length,
+            })
+            .eq('id', request['id']);
+      }
 
       AuditLogService.instance.log(
         action: 'request_approved',
@@ -876,7 +976,15 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
     final refNo = _buildRefNo(req);
     final isMarketReq = req['request_type'] == 'market';
     final nameCtrl = TextEditingController(text: (req['customer_name'] ?? '').toString());
-    final countCtrl = TextEditingController(text: (req['animal_count'] ?? 1).toString());
+    final editFallbackOrigin = [
+      req['barangay']?.toString().trim() ?? '',
+      req['municipality']?.toString().trim() ?? '',
+    ].where((s) => s.isNotEmpty).join(', ');
+    List<AnimalLotItem> editLotItems = AnimalLotItem.parseList(
+      req['animals_in_lot'],
+      fallbackCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+      fallbackOrigin: editFallbackOrigin.isNotEmpty ? editFallbackOrigin : 'Tabaco City',
+    );
     final markingCtrl = TextEditingController(
       text: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
     );
@@ -910,7 +1018,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
             ],
           ),
           content: SizedBox(
-            width: 440,
+            width: 540,
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -942,33 +1050,21 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     },
                   ),
                   const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: countCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Animal Count (Heads)',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: markingCtrl,
-                          textCapitalization: TextCapitalization.characters,
-                          inputFormatters: const [UpperCaseTextFormatter()],
-                          decoration: const InputDecoration(
-                            labelText: 'Marking Tag',
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
+                  TextField(
+                    controller: markingCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: const [UpperCaseTextFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'Marking Tag',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  AnimalsInLotEditor(
+                    items: editLotItems,
+                    defaultOrigin: editFallbackOrigin.isNotEmpty ? editFallbackOrigin : 'Tabaco City',
+                    onChanged: (updated) => setDialogState(() => editLotItems = updated),
                   ),
                   const SizedBox(height: 12),
                   if (isMarketReq) ...[
@@ -1034,20 +1130,31 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
             ),
             ElevatedButton(
               onPressed: () async {
-                final newCount = int.tryParse(countCtrl.text.trim()) ?? 1;
+                final newCount = editLotItems.length;
                 final newMarking = markingCtrl.text.trim().toUpperCase();
+                final serializedLot = List.generate(
+                  editLotItems.length,
+                  (i) => editLotItems[i].toJson(i),
+                );
                 Navigator.pop(ctx);
                 try {
-                  await supabase.from('requests').update({
+                  final payload = <String, dynamic>{
                     'customer_name': nameCtrl.text.trim(),
                     'livestock_type': selectedLivestock,
                     'animal_count': newCount,
+                    'animals_in_lot': serializedLot,
                     'marking': newMarking,
                     if (isMarketReq) 'market_name': marketNameCtrl.text.trim(),
                     if (isMarketReq) 'market_stall_number': marketStallCtrl.text.trim(),
                     'preferred_date': dateCtrl.text.trim(),
                     'special_instruction': noteCtrl.text.trim(),
-                  }).eq('id', req['id']);
+                  };
+                  try {
+                    await supabase.from('requests').update(payload).eq('id', req['id']);
+                  } catch (_) {
+                    payload.remove('animals_in_lot');
+                    await supabase.from('requests').update(payload).eq('id', req['id']);
+                  }
 
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -1795,6 +1902,9 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   final _customerNameCtrl = TextEditingController();
   final _contactNumberCtrl = TextEditingController();
   final _animalCountCtrl = TextEditingController();
+  List<AnimalLotItem> _walkInLot = [
+    AnimalLotItem(headNo: 1, origin: 'Tabaco City'),
+  ];
   final _markingCtrl = TextEditingController();
   final _marketNameCtrl = TextEditingController();
   final _marketStallCtrl = TextEditingController();
@@ -2089,7 +2199,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   Future<void> _saveRecord() async {
     if (_customerNameCtrl.text.trim().isEmpty ||
         _selectedAnimalType == null ||
-        _animalCountCtrl.text.trim().isEmpty) {
+        _walkInLot.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill in all required fields')),
       );
@@ -2175,12 +2285,17 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       }
 
       final contactStr = _contactNumberCtrl.text.trim();
+      final walkInLotJson = List.generate(
+        _walkInLot.length,
+        (i) => _walkInLot[i].toJson(i),
+      );
       final basePayload = <String, dynamic>{
         'user_id': ?matchedUserId,
         'request_type': _isBarangay ? 'barangay' : 'market',
         'customer_name': _customerNameCtrl.text.trim(),
         'livestock_type': _selectedAnimalType,
-        'animal_count': int.tryParse(_animalCountCtrl.text.trim()) ?? 0,
+        'animal_count': _walkInLot.length,
+        'animals_in_lot': walkInLotJson,
         'province': _isBarangay ? _selectedProvince : null,
         'municipality': _isBarangay ? _selectedMunicipality : null,
         'barangay': _isBarangay ? _selectedBarangay : null,
@@ -2287,7 +2402,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
             customerName: _customerNameCtrl.text.trim(),
             contactNumber: contactStr,
             livestockType: _selectedAnimalType ?? 'Hog',
-            animalCount: _animalCountCtrl.text.trim(),
+            animalCount: '${_walkInLot.length}',
             requestType: _isBarangay ? 'Barangay' : 'Market',
             destinationOrOrigin: destOrOrigin,
             isLinkedToAccount: matchedUserId != null,
@@ -2379,42 +2494,25 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               ),
               const SizedBox(height: 16),
 
-              // ── Animal Type / Count / Weight ──
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildLabel('Animal Type'),
-                        const SizedBox(height: 6),
-                        DropdownButtonFormField<String>(
-                          initialValue: _selectedAnimalType,
-                          hint: const Text('Select Type', style: TextStyle(fontSize: 13)),
-                          decoration: _dropdownDecoration(),
-                          items: _animalTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                          onChanged: (v) => setState(() => _selectedAnimalType = v),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildLabel('Animal Count'),
-                        const SizedBox(height: 6),
-                        _buildTextField(
-                          _animalCountCtrl,
-                          'e.g. 5',
-                          keyboardType: TextInputType.number,
-                          focusNode: _animalCountFocus,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              // ── Animal Type ──
+              _buildLabel('Animal Type'),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedAnimalType,
+                hint: const Text('Select Type', style: TextStyle(fontSize: 13)),
+                decoration: _dropdownDecoration(),
+                items: _animalTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                onChanged: (v) => setState(() => _selectedAnimalType = v),
+              ),
+              const SizedBox(height: 16),
+
+              // ── Animals in Lot (Per-Head with Ear-Tag #) ──
+              AnimalsInLotEditor(
+                items: _walkInLot,
+                defaultOrigin: _selectedBarangay != null && _selectedMunicipality != null
+                    ? '$_selectedBarangay, $_selectedMunicipality'
+                    : (_selectedMunicipality ?? 'Tabaco City'),
+                onChanged: (updated) => setState(() => _walkInLot = updated),
               ),
               const SizedBox(height: 16),
 

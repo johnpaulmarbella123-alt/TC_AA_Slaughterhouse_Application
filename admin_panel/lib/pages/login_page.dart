@@ -1,9 +1,7 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/app_settings_service.dart';
-import '../widgets/terms_and_conditions_dialog.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -17,7 +15,8 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
-  bool _keepMeLoggedIn = false;
+  String? _errorMessage;
+  final bool _keepMeLoggedIn = true;
   final _supabase = Supabase.instance.client;
 
   @override
@@ -36,7 +35,10 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
       // 1. Load latest staff accounts & roles from Supabase
@@ -230,260 +232,258 @@ class _LoginPageState extends State<LoginPage> {
     String message = 'Incorrect email or password. Please check your credentials and try again.',
   }) {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          elevation: 10,
-          backgroundColor: Colors.white,
-          child: Container(
-            width: 400,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.error_outline_rounded,
-                    color: Color(0xFFDC2626),
-                    size: 42,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  message,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.45,
-                    color: Color(0xFF475569),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D6A4F),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'OK',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    setState(() => _errorMessage = message);
   }
 
   void _showError(String message) {
-    _showLoginErrorDialog(title: 'Login Notice', message: message);
-  }
-
-  void _showForgotPasswordDialog() {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (ctx) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          elevation: 10,
-          backgroundColor: Colors.white,
-          child: Container(
-            width: 440,
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE0F2FE),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.lock_person_outlined,
-                    color: Color(0xFF0284C7),
-                    size: 40,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Password Reset & Recovery',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1E293B),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'For municipal regulatory compliance and security, administrative accounts do not allow public self-service password resets.\n\nPlease contact the City Veterinary Office IT Administrator or the System Database Administrator to request an authorized credential reset.\n\nOnce logged in, administrators can securely update their personal password at any time in Settings → My Profile.',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    height: 1.5,
-                    color: Color(0xFF475569),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D6A4F),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                    ),
-                    child: const Text(
-                      'Understood',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    setState(() => _errorMessage = message);
   }
 
   @override
   Widget build(BuildContext context) {
+    final canPop = Navigator.of(context).canPop();
+
     return Scaffold(
       body: Stack(
         children: [
-          // Background Image
+          // Full-screen Slaughterhouse Building Background
           Positioned.fill(
             child: Image.asset('assets/images/BG.jpeg', fit: BoxFit.cover),
           ),
-          // Dark Overlay
+          // Light Neutral 15% Dark Tint Overlay (crisp photo, no blur)
           Positioned.fill(
-            child: Container(color: Colors.black.withValues(alpha: 0.45)),
+            child: Container(color: Colors.black.withValues(alpha: 0.15)),
           ),
-          // Header
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildHeader(),
-          ),
-          // Main Content
+          // Centered Official Municipal Login Card
           Positioned.fill(
             child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40.0),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 1.0, sigmaY: 1.0),
-                    child: Container(
-                      width: 1000,
-                      height: 600,
-                      decoration: BoxDecoration(
-                        color: const Color(0xCC1E2828).withValues(alpha: 0.75), 
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                      ),
-                      child: Stack(
-                        children: [
-                          // Back button
-                          Positioned(
-                            top: 20,
-                            left: 20,
-                            child: IconButton(
-                              icon: const Icon(Icons.arrow_back, color: Colors.white70),
-                              onPressed: () => Navigator.pop(context),
-                            ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 448),
+                  child: Material(
+                    color: Colors.white,
+                    elevation: 20,
+                    shadowColor: Colors.black.withValues(alpha: 0.35),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: const BorderSide(color: Colors.white, width: 0.5),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // ── Slaughterhouse Green Header Banner ──
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF0F5132),
                           ),
-                          Row(
+                          child: Stack(
+                            alignment: Alignment.center,
                             children: [
-                              // Left Side - Welcome text
-                              Expanded(
-                                flex: 1,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(60.0),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
+                              if (canPop)
+                                Positioned(
+                                  top: -8,
+                                  left: -8,
+                                  child: IconButton(
+                                    icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 20),
+                                    tooltip: 'Back',
+                                    onPressed: () => Navigator.of(context).pop(),
+                                  ),
+                                ),
+                              Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 80,
+                                    height: 80,
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.20),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipOval(
+                                      child: Image.asset(
+                                        'assets/images/logo1.png',
+                                        fit: BoxFit.contain,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'REPUBLIC OF THE PHILIPPINES • PROVINCE OF ALBAY',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Color(0xFFCBD5E1),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      letterSpacing: 1.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'City of Tabaco',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  const Text(
+                                    'AA Slaughterhouse Management System',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Color(0xFFA7F3D0),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // ── Clean White Form Body ──
+                        Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (_errorMessage != null) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFEF2F2),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFFFECACA)),
+                                  ),
+                                  child: Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Text(
-                                        'Welcome Tabaco City Slaughterhouse',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 32,
-                                          fontWeight: FontWeight.w300,
-                                        ),
+                                      const Icon(
+                                        Icons.error_outline_rounded,
+                                        color: Color(0xFFB91C1C),
+                                        size: 20,
                                       ),
-                                      const SizedBox(height: 30),
-                                      Text(
-                                        'To the official Slaughterhouse Management Portal. This secure platform allows staff and authorized personnel to manage and monitor slaughter operations efficiently.',
-                                        style: TextStyle(
-                                          color: Colors.white.withValues(alpha: 0.9),
-                                          fontSize: 16,
-                                          height: 1.5,
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          _errorMessage!,
+                                          style: const TextStyle(
+                                            color: Color(0xFFB91C1C),
+                                            fontSize: 14,
+                                            height: 1.4,
+                                          ),
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
+                                const SizedBox(height: 16),
+                              ],
+                              _buildTextField(
+                                controller: _usernameController,
+                                label: 'Staff Email',
+                                hintText: 'tcaaslaughterhouse@gmail.com',
+                                keyboardType: TextInputType.emailAddress,
+                                onChanged: (_) {
+                                  if (_errorMessage != null) {
+                                    setState(() => _errorMessage = null);
+                                  }
+                                },
                               ),
-                              // Divider
-                              Container(
-                                width: 1,
-                                height: 400,
-                                color: Colors.white.withValues(alpha: 0.2),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                controller: _passwordController,
+                                label: 'Password',
+                                hintText: 'Enter your password',
+                                isPassword: true,
+                                obscureText: _obscurePassword,
+                                onToggleObscure: () {
+                                  setState(() => _obscurePassword = !_obscurePassword);
+                                },
+                                onChanged: (_) {
+                                  if (_errorMessage != null) {
+                                    setState(() => _errorMessage = null);
+                                  }
+                                },
+                                onSubmitted: (_) {
+                                  if (!_isLoading) _handleLogin();
+                                },
                               ),
-                              // Right Side - Form
-                              Expanded(
-                                flex: 1,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(60.0),
-                                  child: _buildLoginForm(),
+                              const SizedBox(height: 16),
+                              Opacity(
+                                opacity: _isLoading ? 0.60 : 1.0,
+                                child: SizedBox(
+                                  height: 48,
+                                  child: ElevatedButton(
+                                    onPressed: _isLoading ? null : _handleLogin,
+                                    style: ButtonStyle(
+                                      backgroundColor: WidgetStateProperty.resolveWith((states) {
+                                        if (states.contains(WidgetState.hovered) ||
+                                            states.contains(WidgetState.pressed)) {
+                                          return const Color(0xFF0B3D26);
+                                        }
+                                        return const Color(0xFF0F5132);
+                                      }),
+                                      foregroundColor: const WidgetStatePropertyAll(Colors.white),
+                                      elevation: const WidgetStatePropertyAll(0),
+                                      shape: WidgetStatePropertyAll(
+                                        RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                    ),
+                                    child: _isLoading
+                                        ? const SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                              strokeWidth: 2.2,
+                                            ),
+                                          )
+                                        : const Text(
+                                            'Sign In to Abattoir System',
+                                            style: TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Role-based access enforced server-side (Admin, Clerk, Inspector).',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    color: Color(0xFF64748B),
+                                    fontSize: 12,
+                                    height: 1.4,
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -495,189 +495,77 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  Widget _buildLoginForm() {
-    return Center(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'Welcome',
-              style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w300),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'City Slaughterhouse Management Portal',
-              style: TextStyle(color: Colors.white70, fontSize: 14.5, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(height: 24),
-            _buildTextField(
-              controller: _usernameController,
-              label: 'Email / Username',
-            ),
-            const SizedBox(height: 16),
-            _buildTextField(
-              controller: _passwordController,
-              label: 'Password',
-              isPassword: true,
-              obscureText: _obscurePassword,
-              onToggleObscure: () {
-                setState(() => _obscurePassword = !_obscurePassword);
-              },
-            ),
-            const SizedBox(height: 14),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: Checkbox(
-                        value: _keepMeLoggedIn,
-                        onChanged: (value) {
-                          setState(() => _keepMeLoggedIn = value ?? false);
-                        },
-                        fillColor: WidgetStateProperty.resolveWith((states) {
-                          if (states.contains(WidgetState.selected)) {
-                            return const Color(0xFF2D6A4F);
-                          }
-                          return Colors.transparent;
-                        }),
-                        side: const BorderSide(color: Colors.white70),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Text('Keep me logged in', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                  ],
-                ),
-                TextButton(
-                  onPressed: _showForgotPasswordDialog,
-                  child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 13)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 220,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _handleLogin,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: _isLoading
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('Sign In', style: TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Authorized personnel only. Access is automatically governed by your assigned staff role.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white60, fontSize: 11.5),
-            ),
-            const SizedBox(height: 18),
-            Center(
-              child: InkWell(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => const TermsAndConditionsDialog(),
-                  );
-                },
-                child: const Text(
-                  'Terms & Conditions and User Agreement',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
+    required String hintText,
+    TextInputType? keyboardType,
     bool isPassword = false,
     bool obscureText = false,
     VoidCallback? onToggleObscure,
+    ValueChanged<String>? onChanged,
+    ValueChanged<String>? onSubmitted,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           label,
-          style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+          style: const TextStyle(
+            color: Color(0xFF334155),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        const SizedBox(height: 8),
-        SizedBox(
-          height: 45,
-          child: TextField(
-            controller: controller,
-            obscureText: obscureText,
-            style: const TextStyle(color: Colors.black87),
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: Colors.white.withValues(alpha: 0.9), 
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(4),
-                borderSide: BorderSide.none,
-              ),
-              suffixIcon: isPassword
-                  ? IconButton(
-                      icon: Icon(
-                        obscureText ? Icons.visibility_off : Icons.visibility,
-                        color: const Color(0xFF2D6A4F),
-                        size: 20,
-                      ),
-                      onPressed: onToggleObscure,
-                    )
-                  : null,
+        const SizedBox(height: 4),
+        TextField(
+          controller: controller,
+          obscureText: obscureText,
+          keyboardType: keyboardType,
+          onChanged: onChanged,
+          onSubmitted: onSubmitted,
+          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 15.2),
+          decoration: InputDecoration(
+            hintText: hintText,
+            hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14.5),
+            filled: true,
+            fillColor: Colors.white,
+            constraints: const BoxConstraints(minHeight: 46),
+            contentPadding: EdgeInsets.fromLTRB(14, 12, isPassword ? 48 : 14, 12),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
             ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 2.0),
+            ),
+            suffixIcon: isPassword
+                ? Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      child: InkWell(
+                        onTap: onToggleObscure,
+                        borderRadius: BorderRadius.circular(8),
+                        hoverColor: const Color(0xFFF1F5F9),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Icon(
+                            obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                            color: const Color(0xFF64748B),
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                : null,
+            suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildHeader() {
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: const BoxDecoration(shape: BoxShape.circle),
-              child: ClipOval(
-                child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              'Tabaco City Slaughterhouse',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

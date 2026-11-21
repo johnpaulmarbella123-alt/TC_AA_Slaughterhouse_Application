@@ -76,6 +76,27 @@ class _RequestsContentState extends State<RequestsContent> {
   // --- controllers for the fields that were not wired up before ---
   final TextEditingController _customerNameController = TextEditingController();
   final TextEditingController _animalCountController = TextEditingController();
+  final List<_MobileAnimalLotEntry> _animalLotEntries = [
+    _MobileAnimalLotEntry(origin: 'Tabaco City'),
+  ];
+
+  String _currentDefaultOrigin() {
+    final brgy = selectedBarangay?.trim() ?? '';
+    final mun = selectedMunicipality?.trim() ?? '';
+    if (brgy.isNotEmpty && mun.isNotEmpty) return '$brgy, $mun';
+    if (mun.isNotEmpty) return mun;
+    return 'Tabaco City';
+  }
+
+  void _syncDefaultOriginToEmptyHeads() {
+    final def = _currentDefaultOrigin();
+    for (final entry in _animalLotEntries) {
+      final cur = entry.originCtrl.text.trim();
+      if (cur.isEmpty || cur == 'Tabaco City' || cur == 'City of Tabaco') {
+        entry.originCtrl.text = def;
+      }
+    }
+  }
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _marketStallController = TextEditingController();
   final TextEditingController _marketNameController = TextEditingController();
@@ -481,6 +502,9 @@ class _RequestsContentState extends State<RequestsContent> {
     _authSubscription?.cancel();
     _customerNameController.dispose();
     _animalCountController.dispose();
+    for (final entry in _animalLotEntries) {
+      entry.dispose();
+    }
     _addressController.dispose();
     _marketStallController.dispose();
     _marketNameController.dispose();
@@ -496,7 +520,7 @@ class _RequestsContentState extends State<RequestsContent> {
     // basic validation so you don't send empty junk to Supabase
     if (_customerNameController.text.trim().isEmpty ||
         selectedLivestock == null ||
-        _animalCountController.text.trim().isEmpty ||
+        _animalLotEntries.isEmpty ||
         selectedProvince == null ||
         selectedMunicipality == null ||
         selectedBarangay == null ||
@@ -507,6 +531,23 @@ class _RequestsContentState extends State<RequestsContent> {
         const SnackBar(content: Text("Please fill in all required fields (including Livestock Marking)")),
       );
       return;
+    }
+
+    for (int i = 0; i < _animalLotEntries.length; i++) {
+      final entry = _animalLotEntries[i];
+      if (entry.colorCtrl.text.trim().isEmpty ||
+          entry.originCtrl.text.trim().isEmpty ||
+          entry.sex.trim().isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Please fill in Color, Origin, and Sex for Head #${i + 1}",
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
     }
 
     if (!isBarangay &&
@@ -742,32 +783,62 @@ class _RequestsContentState extends State<RequestsContent> {
         });
       } catch (_) {}
 
-      // 1. Insert request with all the fields your schema actually has
-      final request = await supabase
-          .from('requests')
-          .insert({
-            'user_id': user.id,
-            'request_type': isBarangay ? 'barangay' : 'market',
-            'customer_name': _customerNameController.text.trim(),
-            'livestock_type': selectedLivestock,
-            'animal_count': int.tryParse(_animalCountController.text.trim()) ?? 0,
-            'province': selectedProvince,
-            'municipality': selectedMunicipality,
-            'barangay': selectedBarangay,
-            'address': _addressController.text.trim(),
-            'market_stall_number': !isBarangay ? _marketStallController.text.trim() : null,
-            'market_name': !isBarangay ? _marketNameController.text.trim() : null,
-            'preferred_date': preferredDateIso,
-            'marking': finalMarking,
-            'special_instruction': _specialInstructionsController.text.trim(),
-            'barangay_certificate': barangayCertificateUrl,
-            'business_permit': businessPermitUrl,
-            'proof_of_ownership': ownershipUrl,
-            'vet_certificate': vetCertificateUrl,
-            'status': 'pending',
-          })
-          .select()
-          .single();
+      // 1. Insert request with per-head animals_in_lot (ear_tag assigned later by Admin/Clerk)
+      final animalsInLotPayload = List.generate(
+        _animalLotEntries.length,
+        (i) => _animalLotEntries[i].toJson(i),
+      );
+      final double totalLiveWt = _animalLotEntries.fold<double>(
+        0.0,
+        (sum, e) => sum + (double.tryParse(e.liveWeightCtrl.text.trim()) ?? 0.0),
+      );
+
+      final baseInsertPayload = <String, dynamic>{
+        'user_id': user.id,
+        'request_type': isBarangay ? 'barangay' : 'market',
+        'customer_name': _customerNameController.text.trim(),
+        'livestock_type': selectedLivestock,
+        'animal_count': _animalLotEntries.length,
+        'animals_in_lot': animalsInLotPayload,
+        if (totalLiveWt > 0) 'live_weight': totalLiveWt,
+        'province': selectedProvince,
+        'municipality': selectedMunicipality,
+        'barangay': selectedBarangay,
+        'address': _addressController.text.trim(),
+        'market_stall_number': !isBarangay ? _marketStallController.text.trim() : null,
+        'market_name': !isBarangay ? _marketNameController.text.trim() : null,
+        'preferred_date': preferredDateIso,
+        'marking': finalMarking,
+        'special_instruction': _specialInstructionsController.text.trim(),
+        'barangay_certificate': barangayCertificateUrl,
+        'business_permit': businessPermitUrl,
+        'proof_of_ownership': ownershipUrl,
+        'vet_certificate': vetCertificateUrl,
+        'status': 'pending',
+      };
+
+      Map<String, dynamic> request;
+      try {
+        request = await supabase
+            .from('requests')
+            .insert(baseInsertPayload)
+            .select()
+            .single();
+      } catch (insertErr) {
+        // Only strip optional top-level live_weight if that column isn't present yet;
+        // NEVER silently drop animals_in_lot so customer head details are never lost.
+        if (baseInsertPayload.containsKey('live_weight') &&
+            insertErr.toString().toLowerCase().contains('live_weight')) {
+          baseInsertPayload.remove('live_weight');
+          request = await supabase
+              .from('requests')
+              .insert(baseInsertPayload)
+              .select()
+              .single();
+        } else {
+          rethrow;
+        }
+      }
 
       // 2. Reference number, e.g. MI-2026-001, built from the new row's id
       final refNo = "MI-${DateTime.now().year}-${request['id'].toString().padLeft(3, '0')}";
@@ -819,6 +890,12 @@ class _RequestsContentState extends State<RequestsContent> {
       _customerNameController.clear();
     }
     _animalCountController.clear();
+    for (final entry in _animalLotEntries) {
+      entry.dispose();
+    }
+    _animalLotEntries
+      ..clear()
+      ..add(_MobileAnimalLotEntry(origin: _currentDefaultOrigin()));
     _addressController.clear();
     if (!isBarangay && _savedStallNumber.isNotEmpty) {
       _marketStallController.text = _savedStallNumber;
@@ -2332,12 +2409,7 @@ class _RequestsContentState extends State<RequestsContent> {
 
                       const SizedBox(height: 16),
 
-                      _buildTextField(
-                        "Animal Count",
-                        "0",
-                        isNumber: true,
-                        controller: _animalCountController,
-                      ),
+                      _buildAnimalsInLotSection(),
 
                       const SizedBox(height: 16),
 
@@ -2434,6 +2506,7 @@ class _RequestsContentState extends State<RequestsContent> {
                         onChanged: (value) {
                           setState(() {
                             selectedBarangay = value;
+                            _syncDefaultOriginToEmptyHeads();
                           });
                         },
                       ),
@@ -2503,7 +2576,7 @@ class _RequestsContentState extends State<RequestsContent> {
                       ),
                       const SizedBox(height: 16),
                       _buildTextField(
-                        "Marking for livestock *",
+                        "Marking *",
                         _isMarkingLocked
                             ? "Official assigned marking"
                             : "Enter your permanent marking (1–5 letters/numbers, e.g., PAUL)",
@@ -2870,6 +2943,249 @@ class _RequestsContentState extends State<RequestsContent> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
+  }
+
+  Widget _buildAnimalsInLotSection() {
+    final count = _animalLotEntries.length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Animals in Lot ($count ${count == 1 ? 'head' : 'heads'})',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1A202C),
+              ),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _animalLotEntries.add(
+                    _MobileAnimalLotEntry(origin: _currentDefaultOrigin()),
+                  );
+                });
+              },
+              icon: const Icon(Icons.add, size: 17, color: Color(0xFF1A202C)),
+              label: const Text(
+                'Add Head',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1A202C),
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                backgroundColor: const Color(0xFFF1F5F9),
+                side: BorderSide(color: Colors.grey.shade300),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        ...List.generate(_animalLotEntries.length, (index) {
+          final entry = _animalLotEntries[index];
+          return Container(
+            key: ObjectKey(entry),
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFAFBFD),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2D6A4F).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Head #${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1B4332),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      'Ear-Tag assigned upon receiving',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Color *', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          TextField(
+                            controller: entry.colorCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: InputDecoration(
+                              hintText: 'e.g. White',
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Origin (Brgy/Mun) *', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          TextField(
+                            controller: entry.originCtrl,
+                            textCapitalization: TextCapitalization.words,
+                            decoration: InputDecoration(
+                              hintText: 'Tabaco City',
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Sex *', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          DropdownButtonFormField<String>(
+                            initialValue: entry.sex,
+                            isDense: true,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: '', child: Text('—', overflow: TextOverflow.ellipsis)),
+                              DropdownMenuItem(value: 'Male', child: Text('Male', overflow: TextOverflow.ellipsis)),
+                              DropdownMenuItem(value: 'Female', child: Text('Female', overflow: TextOverflow.ellipsis)),
+                            ],
+                            onChanged: (val) => setState(() => entry.sex = val ?? ''),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Live Wt (kg, opt.)', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 4),
+                          TextField(
+                            controller: entry.liveWeightCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                            decoration: InputDecoration(
+                              hintText: '0.0',
+                              isDense: true,
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (_animalLotEntries.length > 1) ...[
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () {
+                          setState(() {
+                            final removed = _animalLotEntries.removeAt(index);
+                            removed.dispose();
+                          });
+                        },
+                        tooltip: 'Remove head',
+                        icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626)),
+                        style: IconButton.styleFrom(
+                          backgroundColor: const Color(0xFFFEF2F2),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _MobileAnimalLotEntry {
+  final TextEditingController colorCtrl;
+  final TextEditingController originCtrl;
+  final TextEditingController liveWeightCtrl;
+  String sex;
+
+  _MobileAnimalLotEntry({
+    String color = '',
+    String origin = 'Tabaco City',
+    this.sex = '',
+    String liveWeight = '',
+  })  : colorCtrl = TextEditingController(text: color),
+        originCtrl = TextEditingController(text: origin),
+        liveWeightCtrl = TextEditingController(text: liveWeight);
+
+  Map<String, dynamic> toJson(int index) {
+    final wt = double.tryParse(liveWeightCtrl.text.trim()) ?? 0.0;
+    return {
+      'head_no': index + 1,
+      'ear_tag': '', // Assigned by Admin/Clerk in Receiving & New Requests
+      'color': colorCtrl.text.trim(),
+      'origin': originCtrl.text.trim(),
+      'sex': sex.trim(),
+      'live_weight': wt,
+    };
+  }
+
+  void dispose() {
+    colorCtrl.dispose();
+    originCtrl.dispose();
+    liveWeightCtrl.dispose();
   }
 }
 

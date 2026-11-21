@@ -12,6 +12,7 @@ import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
+import '../widgets/animals_in_lot_editor.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -2731,6 +2732,15 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               const Text('Update Slaughter Process', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
               const Text('Update the process stage and inspection results.', style: TextStyle(color: Colors.grey, fontSize: 13)),
+              if (widget.request['animals_in_lot'] is List &&
+                  (widget.request['animals_in_lot'] as List).isNotEmpty) ...[
+                const SizedBox(height: 14),
+                AnimalsInLotReadOnlyList(
+                  rawAnimalsInLot: widget.request['animals_in_lot'],
+                  fallbackCount: (widget.request['animal_count'] as num?)?.toInt() ?? 1,
+                  fallbackOrigin: (widget.request['barangay'] ?? widget.request['municipality'] ?? 'Tabaco City').toString(),
+                ),
+              ],
               const SizedBox(height: 20),
               Row(
                 children: [

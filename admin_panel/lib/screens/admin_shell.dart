@@ -193,7 +193,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
   late AnimationController _animController;
   late Animation<double> _widthAnimation;
   late Animation<double> _fadeAnimation;
-  late Animation<double> _rotateAnimation;
   bool _isCollapsed = false;
 
   @override
@@ -205,10 +204,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
     _animController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 200),
     );
 
-    _widthAnimation = Tween<double>(begin: 285.0, end: 72.0).animate(
+    _widthAnimation = Tween<double>(begin: 288.0, end: 80.0).animate(
       CurvedAnimation(
         parent: _animController,
         curve: Curves.easeInOutCubic,
@@ -219,13 +218,6 @@ class _AdminSidebarState extends State<_AdminSidebar>
       CurvedAnimation(
         parent: _animController,
         curve: const Interval(0.0, 0.40, curve: Curves.easeOut),
-      ),
-    );
-
-    _rotateAnimation = Tween<double>(begin: 0.0, end: 0.5).animate(
-      CurvedAnimation(
-        parent: _animController,
-        curve: Curves.easeInOutCubic,
       ),
     );
   }
@@ -347,17 +339,11 @@ class _AdminSidebarState extends State<_AdminSidebar>
         return Container(
           width: currentWidth,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : Colors.white,
-            border: Border(
-              right: BorderSide(
-                color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-                width: 1,
-              ),
-            ),
+            color: const Color(0xFF0F5132),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
-                blurRadius: 10,
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 15,
                 offset: const Offset(2, 0),
               ),
             ],
@@ -375,32 +361,24 @@ class _AdminSidebarState extends State<_AdminSidebar>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // ─── LOGO HEADER (Fixed compact height) ───
+                            // ─── LOGO HEADER ───
                             _buildLogoHeader(isDark, settingsService),
 
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 14),
 
-                            // ─── OPERATIONAL MODULES (0 through 6) ───
+                            // ─── OPERATIONAL MODULES (0 through 7) ───
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 10),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   if (settingsService.isModuleAllowed(0))
                                     _buildNavItem(
                                       index: 0,
-                                      icon: Icons.dashboard_outlined,
-                                      activeIcon: Icons.dashboard,
-                                      label: settingsService.currentRole == 'Clerk'
-                                          ? 'Clerk Dashboard'
-                                          : (settingsService.currentRole == 'Inspector'
-                                              ? 'Inspector Dashboard'
-                                              : 'Dashboard'),
-                                      subtitle: settingsService.currentRole == 'Clerk'
-                                          ? 'Pending tasks & billing'
-                                          : (settingsService.currentRole == 'Inspector'
-                                              ? 'Pending tasks & ante-mortem'
-                                              : 'Overview & statistics'),
+                                      icon: Icons.grid_view_outlined,
+                                      activeIcon: Icons.grid_view_rounded,
+                                      label: 'Dashboard',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   if (settingsService.isModuleAllowed(1)) ...[
@@ -409,8 +387,8 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       index: 1,
                                       icon: Icons.assignment_outlined,
                                       activeIcon: Icons.assignment,
-                                      label: 'Receiving & New Requests',
-                                      subtitle: 'Customer details & animal inspection',
+                                      label: 'Receiving',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   ],
@@ -420,8 +398,8 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       index: 2,
                                       icon: Icons.fact_check_outlined,
                                       activeIcon: Icons.fact_check,
-                                      label: 'Document Verification',
-                                      subtitle: 'Permits & certificates verification',
+                                      label: 'Verification',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   ],
@@ -429,10 +407,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 3,
-                                      icon: Icons.content_cut_outlined,
-                                      activeIcon: Icons.content_cut,
-                                      label: 'Slaughter & Inspection',
-                                      subtitle: 'Process tagging & post-mortem',
+                                      icon: Icons.medical_services_outlined,
+                                      activeIcon: Icons.medical_services,
+                                      label: 'Inspection',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   ],
@@ -440,10 +418,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 4,
-                                      icon: Icons.payment_outlined,
-                                      activeIcon: Icons.payment,
-                                      label: 'Payment & Cashiering',
-                                      subtitle: 'Fee calculation & receipts',
+                                      icon: Icons.payments_outlined,
+                                      activeIcon: Icons.payments,
+                                      label: 'Cashiering',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   ],
@@ -451,10 +429,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 5,
-                                      icon: Icons.inventory_2_outlined,
-                                      activeIcon: Icons.inventory_2,
-                                      label: 'Meat Releasing',
-                                      subtitle: 'Ready for pickup & release',
+                                      icon: Icons.local_shipping_outlined,
+                                      activeIcon: Icons.local_shipping,
+                                      label: 'Releasing',
+                                      subtitle: '',
                                       isDark: isDark,
                                     ),
                                   ],
@@ -462,10 +440,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 6,
-                                      icon: Icons.assessment_outlined,
-                                      activeIcon: Icons.assessment,
-                                      label: 'Reports & Records',
-                                      subtitle: 'Daily, weekly & monthly analytics',
+                                      icon: Icons.description_outlined,
+                                      activeIcon: Icons.description,
+                                      label: 'Reports',
+                                      subtitle: '',
                                       badgeCount: _illegalReportBadgeCount,
                                       isDark: isDark,
                                     ),
@@ -476,39 +454,34 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
                             const Spacer(),
 
+                            const SizedBox(height: 8),
+
+                            // ─── PINNED SETTINGS (Admin Only) ───
                             if (settingsService.isAdmin) ...[
-                              // ─── 24PX GAP WITH SUBTLE DIVIDER LINE ───
                               Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 14),
                                 child: Divider(
                                   height: 1,
                                   thickness: 1,
-                                  color: isDark
-                                      ? const Color(0xFF334155)
-                                      : Colors.grey.shade200,
+                                  color: Colors.white.withValues(alpha: 0.10),
                                 ),
                               ),
-
-                              // ─── SETTINGS (Admin Only) ───
+                              const SizedBox(height: 8),
                               Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
                                 child: _buildNavItem(
                                   index: 7,
                                   icon: Icons.settings_outlined,
                                   activeIcon: Icons.settings,
                                   label: 'Settings',
-                                  subtitle: 'Fees, Staff, Schedule, Profile',
+                                  subtitle: '',
                                   isDark: isDark,
                                 ),
                               ),
+                              const SizedBox(height: 8),
                             ],
 
-                            const SizedBox(height: 4),
-
-                            // ─── ADMIN FOOTER (Admin Avatar & Logout) ───
+                            // ─── FOOTER (Profile + Sign Out) ───
                             _buildAdminFooter(context, isDark, settingsService),
                           ],
                         ),
@@ -524,77 +497,75 @@ class _AdminSidebarState extends State<_AdminSidebar>
     );
   }
 
-  Widget _buildLogoHeader(
-      bool isDark, AppSettingsService settings) {
+  Widget _buildLogoHeader(bool isDark, AppSettingsService settings) {
     return Container(
-      height: 66,
+      height: 78,
       decoration: BoxDecoration(
         border: Border(
           bottom: BorderSide(
-            color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
+            color: Colors.white.withValues(alpha: 0.10),
             width: 1,
           ),
         ),
       ),
       child: AnimatedCrossFade(
-        duration: const Duration(milliseconds: 280),
+        duration: const Duration(milliseconds: 200),
         firstCurve: Curves.easeInOutCubic,
         secondCurve: Curves.easeInOutCubic,
         sizeCurve: Curves.easeInOutCubic,
         crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
         firstChild: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 44,
+                height: 44,
+                padding: const EdgeInsets.all(2),
                 decoration: BoxDecoration(
+                  color: Colors.white,
                   shape: BoxShape.circle,
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF2D6A4F).withValues(alpha: 0.2),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withValues(alpha: 0.18),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
                     ),
                   ],
                 ),
                 child: ClipOval(
-                  child: Image.asset(settings.cityLogoPath, fit: BoxFit.cover),
+                  child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: ClipRect(
                   child: FadeTransition(
                     opacity: _fadeAnimation,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Column(
+                    child: const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          settings.headerTitle,
+                          'CITY OF TABACO, ALBAY',
                           style: TextStyle(
-                            color: isDark
-                                ? const Color(0xFF40916C)
-                                : const Color(0xFF2D6A4F),
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                            color: Color(0xFFCBD5E1),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11,
+                            letterSpacing: 0.9,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.clip,
                           softWrap: false,
                         ),
-                        const SizedBox(height: 1),
+                        SizedBox(height: 2),
                         Text(
-                          settings.headerSubtitle,
+                          'City Abattoir System',
                           style: TextStyle(
-                            color: isDark
-                                ? const Color(0xFF94A3B8)
-                                : const Color(0xFF718096),
-                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            height: 1.2,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.clip,
@@ -605,37 +576,45 @@ class _AdminSidebarState extends State<_AdminSidebar>
                   ),
                 ),
               ),
-            ),
               IconButton(
-                icon: RotationTransition(
-                  turns: _rotateAnimation,
-                  child: Icon(
-                    Icons.menu_open_rounded,
-                    color: isDark ? Colors.white60 : const Color(0xFF718096),
-                    size: 20,
-                  ),
-                ),
+                icon: _buildPanelToggleIcon(isCollapsed: false),
                 tooltip: 'Collapse Sidebar',
                 splashRadius: 18,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                 onPressed: _toggleCollapse,
               ),
             ],
           ),
         ),
         secondChild: Container(
-          width: 72,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          width: 80,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                ClipOval(
-                  child: Image.asset(settings.cityLogoPath, width: 26, height: 26, fit: BoxFit.cover),
+                Container(
+                  width: 34,
+                  height: 34,
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
+                  ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 InkWell(
                   onTap: _toggleCollapse,
                   borderRadius: BorderRadius.circular(4),
@@ -643,14 +622,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                     message: 'Expand Sidebar',
                     child: Padding(
                       padding: const EdgeInsets.all(2),
-                      child: RotationTransition(
-                        turns: _rotateAnimation,
-                        child: Icon(
-                          Icons.menu_rounded,
-                          color: isDark ? Colors.white70 : const Color(0xFF2D6A4F),
-                          size: 18,
-                        ),
-                      ),
+                      child: _buildPanelToggleIcon(isCollapsed: true),
                     ),
                   ),
                 ),
@@ -658,6 +630,33 @@ class _AdminSidebarState extends State<_AdminSidebar>
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPanelToggleIcon({required bool isCollapsed}) {
+    const color = Color(0xFFCBD5E1);
+    return Container(
+      width: 20,
+      height: 18,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(4.5),
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 4.5),
+          Container(width: 1.4, height: double.infinity, color: color),
+          Expanded(
+            child: Center(
+              child: Icon(
+                isCollapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
+                size: 12,
+                color: color,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -675,96 +674,84 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
     final itemWidget = Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: () => widget.onItemSelected(index),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
+        hoverColor: Colors.white.withValues(alpha: 0.10),
         child: Container(
-          height: 46,
+          padding: _isCollapsed
+              ? const EdgeInsets.symmetric(vertical: 12)
+              : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF2D6A4F).withValues(alpha: isDark ? 0.25 : 0.12)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: isSelected
-                ? Border.all(
-                    color: const Color(0xFF2D6A4F).withValues(alpha: 0.4),
-                    width: 1,
-                  )
-                : Border.all(color: Colors.transparent, width: 1),
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.12),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
           ),
           child: Row(
+            mainAxisAlignment:
+                _isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
-              // ─── ANCHORED ICON SLOT (48px wide: centered in 72px collapsed strip) ───
-              SizedBox(
-                width: 48,
-                child: Center(
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      Icon(
-                        isSelected ? activeIcon : icon,
-                        color: isSelected
-                            ? (isDark ? const Color(0xFF40916C) : const Color(0xFF2D6A4F))
-                            : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096)),
-                        size: 20,
-                      ),
-                      if (badgeCount > 0)
-                        Positioned(
-                          right: -7,
-                          top: -5,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFDC2626),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
-                            child: Text(
-                              '$badgeCount',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    isSelected ? activeIcon : icon,
+                    color: isSelected
+                        ? const Color(0xFF0F5132)
+                        : const Color(0xFFE2E8F0),
+                    size: 20,
+                  ),
+                  if (badgeCount > 0 && _isCollapsed)
+                    Positioned(
+                      right: -7,
+                      top: -5,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFB91C1C),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+                        child: Text(
+                          '$badgeCount',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                    ],
-                  ),
-                ),
+                      ),
+                    ),
+                ],
               ),
               if (_animController.value < 0.95)
                 Expanded(
-                child: ClipRect(
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                  child: ClipRect(
+                    child: FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 12),
+                        child: Row(
                           children: [
                             Expanded(
                               child: Text(
                                 label,
                                 style: TextStyle(
                                   color: isSelected
-                                      ? (isDark
-                                          ? const Color(0xFF40916C)
-                                          : const Color(0xFF2D6A4F))
-                                      : (isDark
-                                          ? const Color(0xFFF1F5F9)
-                                          : const Color(0xFF2D3748)),
-                                  fontWeight: isSelected
-                                      ? FontWeight.w700
-                                      : FontWeight.w600,
-                                  fontSize: 12.5,
-                                  height: 1.15,
+                                      ? const Color(0xFF0F5132)
+                                      : const Color(0xFFE2E8F0),
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                                  fontSize: 14,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.clip,
@@ -772,50 +759,29 @@ class _AdminSidebarState extends State<_AdminSidebar>
                               ),
                             ),
                             if (badgeCount > 0) ...[
-                              const SizedBox(width: 4),
+                              const SizedBox(width: 6),
                               Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 1),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDC2626),
-                                  borderRadius: BorderRadius.circular(8),
+                                  color: const Color(0xFFB91C1C),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   '$badgeCount',
                                   style: const TextStyle(
                                     color: Colors.white,
-                                    fontSize: 9.5,
-                                    fontWeight: FontWeight.bold,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
                             ],
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: isSelected
-                                ? (isDark
-                                    ? const Color(0xFF40916C).withValues(alpha: 0.8)
-                                    : const Color(0xFF2D6A4F).withValues(alpha: 0.7))
-                            : (isDark
-                                ? const Color(0xFF64748B)
-                                : const Color(0xFFA0AEC0)),
-                            fontSize: 10,
-                            height: 1.15,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          softWrap: false,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
             ],
           ),
         ),
@@ -834,83 +800,76 @@ class _AdminSidebarState extends State<_AdminSidebar>
 
   Widget _buildAdminFooter(
       BuildContext context, bool isDark, AppSettingsService settings) {
+    final photoUrl = settings.profilePhotoUrl?.trim() ?? '';
+    final hasPhoto = photoUrl.isNotEmpty;
     return AnimatedCrossFade(
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 200),
       firstCurve: Curves.easeInOutCubic,
       secondCurve: Curves.easeInOutCubic,
       sizeCurve: Curves.easeInOutCubic,
       crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
       firstChild: Container(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Admin profile row - clickable to open My Profile tab!
             Material(
               color: Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               child: InkWell(
-                onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
+                onTap: () => widget.onItemSelected(7, 3),
                 borderRadius: BorderRadius.circular(8),
+                hoverColor: Colors.white.withValues(alpha: 0.10),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   child: Row(
                     children: [
                       CircleAvatar(
-                        radius: 16,
-                        backgroundColor: isDark
-                            ? const Color(0xFF334155)
-                            : Colors.grey.shade200,
-                        backgroundImage: settings.profilePhotoUrl != null
-                            ? NetworkImage(settings.profilePhotoUrl!)
-                            : null,
-                        child: settings.profilePhotoUrl == null
-                            ? Icon(
-                                Icons.person_outline,
-                                color: isDark
-                                    ? Colors.white70
-                                    : const Color(0xFF718096),
-                                size: 18,
-                              )
-                            : null,
+                        radius: 18,
+                        backgroundColor: Colors.white.withValues(alpha: 0.14),
+                        backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
+                        child: hasPhoto
+                            ? null
+                            : const Icon(
+                                Icons.person_outline_rounded,
+                                size: 20,
+                                color: Color(0xFFE2E8F0),
+                              ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       Expanded(
-                        child: FadeTransition(
-                          opacity: _fadeAnimation,
-                          child: ClipRect(
+                        child: ClipRect(
+                          child: FadeTransition(
+                            opacity: _fadeAnimation,
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
                                   settings.profileName,
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white
-                                        : const Color(0xFF2D3748),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
                                     fontWeight: FontWeight.w600,
-                                    fontSize: 12,
                                   ),
                                   maxLines: 1,
-                                  overflow: TextOverflow.clip,
-                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                                 const SizedBox(height: 1),
                                 Text(
                                   settings.currentRole,
-                                  style: TextStyle(
-                                    color: isDark
-                                        ? const Color(0xFF40916C)
-                                        : const Color(0xFF2D6A4F),
+                                  style: const TextStyle(
+                                    color: Color(0xFF6EE7B7),
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w500,
-                                    fontSize: 10.5,
                                   ),
                                   maxLines: 1,
-                                  overflow: TextOverflow.clip,
-                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ],
                             ),
@@ -918,39 +877,40 @@ class _AdminSidebarState extends State<_AdminSidebar>
                         ),
                       ),
                       Icon(
-                        Icons.chevron_right,
-                        size: 16,
-                        color: isDark ? Colors.white38 : Colors.grey.shade400,
+                        Icons.chevron_right_rounded,
+                        size: 18,
+                        color: Colors.white.withValues(alpha: 0.65),
                       ),
                     ],
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 6),
-            // Logout button
+            const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
-              height: 32,
-              child: OutlinedButton.icon(
+              height: 48,
+              child: TextButton.icon(
                 onPressed: () => _handleLogout(context),
-                icon: const Icon(Icons.logout, size: 15),
+                icon: const Icon(Icons.logout_rounded, size: 18, color: Color(0xFFE2E8F0)),
                 label: FadeTransition(
                   opacity: _fadeAnimation,
-                  child: const Text('Logout', style: TextStyle(fontSize: 12)),
+                  child: const Text(
+                    'Sign Out',
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
                 ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor:
-                      isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
-                  side: BorderSide(
-                    color: isDark
-                        ? const Color(0xFF334155)
-                        : Colors.grey.shade300,
+                style: ButtonStyle(
+                  backgroundColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.hovered) ||
+                        states.contains(WidgetState.pressed)) {
+                      return Colors.white.withValues(alpha: 0.20);
+                    }
+                    return Colors.white.withValues(alpha: 0.10);
+                  }),
+                  shape: WidgetStatePropertyAll(
+                    RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 0, horizontal: 8),
                 ),
               ),
             ),
@@ -958,52 +918,44 @@ class _AdminSidebarState extends State<_AdminSidebar>
         ),
       ),
       secondChild: Container(
-        width: 72,
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        width: 80,
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Tooltip(
-              message: '${settings.profileName} (${settings.currentRole})',
-              child: Material(
-                color: Colors.transparent,
-                shape: const CircleBorder(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: () => widget.onItemSelected(7, 3), // Tab 3 is My Profile
+              message: '${settings.profileName} • My Profile',
+              child: InkWell(
+                onTap: () => widget.onItemSelected(7, 3),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
                   child: CircleAvatar(
-                    radius: 15,
-                    backgroundColor: isDark
-                        ? const Color(0xFF334155)
-                        : Colors.grey.shade200,
-                    backgroundImage: settings.profilePhotoUrl != null
-                        ? NetworkImage(settings.profilePhotoUrl!)
-                        : null,
-                    child: settings.profilePhotoUrl == null
-                        ? Icon(
-                            Icons.person_outline,
-                            color: isDark
-                                ? Colors.white70
-                                : const Color(0xFF718096),
-                            size: 16,
-                          )
-                        : null,
+                    radius: 17,
+                    backgroundColor: Colors.white.withValues(alpha: 0.14),
+                    backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
+                    child: hasPhoto
+                        ? null
+                        : const Icon(
+                            Icons.person_outline_rounded,
+                            size: 19,
+                            color: Color(0xFFE2E8F0),
+                          ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
             Tooltip(
-              message: 'Logout',
+              message: 'Sign Out',
               child: IconButton(
-                icon: const Icon(Icons.logout, size: 18),
-                splashRadius: 16,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF718096),
+                icon: const Icon(Icons.logout_rounded, size: 20, color: Color(0xFFE2E8F0)),
+                splashRadius: 18,
                 onPressed: () => _handleLogout(context),
               ),
             ),

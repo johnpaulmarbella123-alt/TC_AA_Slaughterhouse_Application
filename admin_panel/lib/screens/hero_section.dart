@@ -58,21 +58,20 @@ class HeroSection extends StatelessWidget {
                     ),
                     const SizedBox(height: 60),
                     SizedBox(
-                      width: 220,
-                      child: ElevatedButton.icon(
+                      width: 260,
+                      child: ElevatedButton(
                         onPressed: () => Navigator.pushNamed(context, '/login'),
-                        icon: const Icon(Icons.lock_outline, size: 18, color: Colors.white),
-                        label: const Text(
-                          'Staff Portal / Log In',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
-                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2D6A4F),
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          backgroundColor: const Color(0xFF0F5132),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                           elevation: 3,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(8),
                           ),
+                        ),
+                        child: const Text(
+                          'Sign In to Abattoir System',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.white),
                         ),
                       ),
                     ),

@@ -65,8 +65,21 @@ class _DashboardPageState extends State<DashboardPage> {
   // Recent activity list
   List<Map<String, dynamic>> _recentActivities = [];
 
-  // Polling timer
+  // Polling timer & real-time clock
   Timer? _refreshTimer;
+  Timer? _clockTimer;
+  DateTime _currentTime = DateTime.now();
+
+  String get _realtimeSubtitle =>
+      'City Abattoir Office, City of Tabaco — ${DateFormat('MMMM d, yyyy • h:mm a').format(_currentTime)}';
+
+  bool _isSameLocalDay(DateTime? dt, DateTime ref) {
+    if (dt == null) return false;
+    final local = dt.toLocal();
+    return local.year == ref.year &&
+        local.month == ref.month &&
+        local.day == ref.day;
+  }
 
   // Search controller
   final TextEditingController _searchCtrl = TextEditingController();
@@ -83,6 +96,17 @@ class _DashboardPageState extends State<DashboardPage> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _loadAllDashboardData(silent: true);
       _checkAnteMortemAlerts();
+    });
+    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final now = DateTime.now();
+      final dayChanged = !_isSameLocalDay(now, _currentTime);
+      if (now.minute != _currentTime.minute || dayChanged) {
+        setState(() => _currentTime = now);
+        if (dayChanged) {
+          _loadAllDashboardData(silent: true);
+        }
+      }
     });
   }
 
@@ -292,6 +316,7 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _clockTimer?.cancel();
     _searchCtrl.dispose();
     _queueSearchCtrl?.dispose();
     super.dispose();
@@ -421,7 +446,9 @@ class _DashboardPageState extends State<DashboardPage> {
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
   Future<void> _loadDashboardStats() async {
     try {
-      // Total Revenue
+      final today = DateTime.now();
+
+      // Total Revenue (Today only — resets at midnight; Reports keeps full history)
       double revenue = 0;
       try {
         final paymentsData = await supabase
@@ -430,6 +457,8 @@ class _DashboardPageState extends State<DashboardPage> {
             .eq('status', 'paid');
 
         for (var p in List<Map<String, dynamic>>.from(paymentsData)) {
+          final createdAt = DateTime.tryParse(p['created_at']?.toString() ?? '');
+          if (!_isSameLocalDay(createdAt, today)) continue;
           final amt = double.tryParse(p['total_amount']?.toString() ?? '0') ?? 0;
           revenue += amt;
         }
@@ -437,7 +466,7 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard payments query error: $e');
       }
 
-      // Animals Processed
+      // Animals Processed (Today only — resets at midnight)
       int animals = 0;
       try {
         final processedStatuses = [
@@ -455,6 +484,10 @@ class _DashboardPageState extends State<DashboardPage> {
             .inFilter('status', processedStatuses);
 
         for (var r in List<Map<String, dynamic>>.from(requestsData)) {
+          final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
+          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+          final effectiveDate = releasedAt ?? createdAt;
+          if (!_isSameLocalDay(effectiveDate, today)) continue;
           final count = int.tryParse(r['animal_count']?.toString() ?? '0') ?? 1;
           animals += count;
         }
@@ -462,7 +495,7 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard animals query error: $e');
       }
 
-      // Avg Processing Time
+      // Avg Processing Time (Today only — resets at midnight)
       double avgHours = 0.0;
       try {
         final completedData = await supabase
@@ -475,7 +508,9 @@ class _DashboardPageState extends State<DashboardPage> {
         for (var r in List<Map<String, dynamic>>.from(completedData)) {
           final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
           final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
-          if (createdAt != null && releasedAt != null) {
+          if (createdAt != null &&
+              releasedAt != null &&
+              _isSameLocalDay(releasedAt, today)) {
             final diff = releasedAt.difference(createdAt).abs();
             totalHours += diff.inMinutes / 60.0;
             completedCount++;
@@ -486,14 +521,21 @@ class _DashboardPageState extends State<DashboardPage> {
         debugPrint('Dashboard avg processing time error: $e');
       }
 
-      // Satisfaction Rate (50% Completed Transactions + 50% Customer Review Ratings)
+      // Satisfaction Rate (Today only: 50% Completed Transactions + 50% Customer Review Ratings)
       double satisfaction = 0.0;
       try {
-        // 1. Transaction completion rate (released / total active requests)
-        final allReqRes = await supabase.from('requests').select('status');
+        // 1. Transaction completion rate for today
+        final allReqRes =
+            await supabase.from('requests').select('status, created_at, released_at');
         int totalRequests = 0;
         int completedRequests = 0;
         for (var req in List<Map<String, dynamic>>.from(allReqRes)) {
+          final createdAt = DateTime.tryParse(req['created_at']?.toString() ?? '');
+          final releasedAt = DateTime.tryParse(req['released_at']?.toString() ?? '');
+          if (!_isSameLocalDay(createdAt, today) &&
+              !_isSameLocalDay(releasedAt, today)) {
+            continue;
+          }
           final s = req['status']?.toString().toLowerCase() ?? '';
           if (s != 'cancelled' && s != 'rejected') {
             totalRequests++;
@@ -506,11 +548,13 @@ class _DashboardPageState extends State<DashboardPage> {
             ? (completedRequests / totalRequests) * 100.0
             : 0.0;
 
-        // 2. Customer review ratings from mobile app
-        final reviewsData = await supabase.from('reviews').select('rating');
+        // 2. Customer review ratings submitted today
+        final reviewsData = await supabase.from('reviews').select('rating, created_at');
         double totalRating = 0;
         int reviewCount = 0;
         for (var r in List<Map<String, dynamic>>.from(reviewsData)) {
+          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+          if (!_isSameLocalDay(createdAt, today)) continue;
           final rating = double.tryParse(r['rating']?.toString() ?? '0') ?? 0;
           if (rating > 0) {
             totalRating += rating;
@@ -663,49 +707,52 @@ class _DashboardPageState extends State<DashboardPage> {
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
   Future<void> _loadRecentActivities() async {
     try {
+      final today = DateTime.now();
       final List<Map<String, dynamic>> items = [];
 
-      // 1. Payment activity (Green bullet)
+      // 1. Payment activity (Today only — resets at midnight)
       try {
         final payments = await supabase
             .from('payments')
             .select('request_id, created_at, total_amount')
             .order('created_at', ascending: false)
-            .limit(2);
+            .limit(5);
 
         for (var p in payments) {
-          final idNum = (p['request_id'] ?? 142).toString().padLeft(4, '0');
-          final dt = DateTime.tryParse(p['created_at']?.toString() ?? '') ?? DateTime.now().subtract(const Duration(minutes: 5));
+          final dt = DateTime.tryParse(p['created_at']?.toString() ?? '');
+          if (!_isSameLocalDay(dt, today)) continue;
+          final idNum = (p['request_id'] ?? '').toString().padLeft(4, '0');
           items.add({
             'title': 'Request #$idNum payment confirmed',
-            'time': _formatTimeAgo(dt),
+            'time': _formatTimeAgo(dt!),
             'color': const Color(0xFF16A34A), // Green dot
             'dt': dt,
           });
         }
       } catch (_) {}
 
-      // 2. New Request activity (Amber bullet)
+      // 2. New Request activity (Today only — resets at midnight)
       try {
         final requests = await supabase
             .from('requests')
             .select('id, barangay, customer_name, created_at')
             .order('created_at', ascending: false)
-            .limit(2);
+            .limit(5);
 
         for (var r in requests) {
-          final brgy = r['barangay']?.toString() ?? r['customer_name']?.toString() ?? 'Brgy. Cormidal';
-          final dt = DateTime.tryParse(r['created_at']?.toString() ?? '') ?? DateTime.now().subtract(const Duration(minutes: 22));
+          final dt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+          if (!_isSameLocalDay(dt, today)) continue;
+          final brgy = r['barangay']?.toString() ?? r['customer_name']?.toString() ?? 'Walk-in';
           items.add({
             'title': 'New request from $brgy',
-            'time': _formatTimeAgo(dt),
+            'time': _formatTimeAgo(dt!),
             'color': const Color(0xFFD97706), // Amber dot
             'dt': dt,
           });
         }
       } catch (_) {}
 
-      // 3. Illegal report activity (Red bullet)
+      // 3. Illegal report activity (kept across days — except for the report)
       try {
         final notifs = await supabase
             .from('notifications')
@@ -716,8 +763,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
         for (var n in notifs) {
           final data = n['data'] is Map ? Map<String, dynamic>.from(n['data']) : <String, dynamic>{};
-          final ref = n['reference_no']?.toString() ?? data['reference_no']?.toString() ?? 'ISR-2026-000003';
-          final dt = DateTime.tryParse(n['created_at']?.toString() ?? '') ?? DateTime.now().subtract(const Duration(hours: 1));
+          final ref = n['reference_no']?.toString() ?? data['reference_no']?.toString() ?? '';
+          final dt = DateTime.tryParse(n['created_at']?.toString() ?? '');
+          if (ref.isEmpty || dt == null) continue;
           items.add({
             'title': 'Report $ref filed',
             'time': _formatTimeAgo(dt),
@@ -729,27 +777,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
       // Sort by date descending
       items.sort((a, b) => (b['dt'] as DateTime).compareTo(a['dt'] as DateTime));
-
-      // Fallback matching design screenshot if items are empty
-      if (items.isEmpty) {
-        items.addAll([
-          {
-            'title': 'Request #0142 payment confirmed',
-            'time': '5 min ago',
-            'color': const Color(0xFF16A34A),
-          },
-          {
-            'title': 'New request from Brgy. Cormidal',
-            'time': '22 min ago',
-            'color': const Color(0xFFD97706),
-          },
-          {
-            'title': 'Report ISR-2026-000003 filed',
-            'time': '1 hr ago',
-            'color': const Color(0xFFDC2626),
-          },
-        ]);
-      }
 
       if (mounted) {
         setState(() {
@@ -985,20 +1012,20 @@ class _DashboardPageState extends State<DashboardPage> {
         }
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF8FAFC),
+          backgroundColor: const Color(0xFFF4F6F9),
           body: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // â”€â”€â”€ 1. TOP HEADER ROW â”€â”€â”€
+                // ─── 1. TOP HEADER ROW ───
                 _buildHeaderRow(),
                 if (_isLoading) ...[
                   const SizedBox(height: 8),
                   const LinearProgressIndicator(
                     minHeight: 2,
                     backgroundColor: Colors.transparent,
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2D6A4F)),
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0F5132)),
                   ),
                   const SizedBox(height: 14),
                 ] else ...[
@@ -1037,10 +1064,10 @@ class _DashboardPageState extends State<DashboardPage> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // Welcome Text
-        const Column(
+        Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
+            const Text(
               'Welcome back, Admin',
               style: TextStyle(
                 fontSize: 24,
@@ -1049,12 +1076,12 @@ class _DashboardPageState extends State<DashboardPage> {
                 letterSpacing: -0.4,
               ),
             ),
-            SizedBox(height: 4),
+            const SizedBox(height: 4),
             Text(
-              'Overview and system statistics',
-              style: TextStyle(
+              _realtimeSubtitle,
+              style: const TextStyle(
                 fontSize: 13,
-                color: Color(0xFF64748B),
+                color: Color(0xFF475569),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1136,14 +1163,15 @@ class _DashboardPageState extends State<DashboardPage> {
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF166534),
+              color: Color(0xFF0F5132),
             ),
           ),
-          iconBgColor: const Color(0xFFDCFCE7),
-          title: 'Total Revenue',
+          iconBgColor: const Color(0xFFECFDF5),
+          title: 'TOTAL REVENUE',
           value: _formatRevenue(_totalRevenue),
+          valueColor: const Color(0xFF047857),
           subtitleText: _totalRevenue > 0 ? 'From paid requests' : 'No payments yet',
-          subtitleColor: const Color(0xFF16A34A),
+          subtitleColor: const Color(0xFF047857),
         );
 
         final card2 = _buildKpiCard(
@@ -1152,31 +1180,34 @@ class _DashboardPageState extends State<DashboardPage> {
             style: TextStyle(fontSize: 16),
           ),
           iconBgColor: const Color(0xFFFCE7F3),
-          title: 'Livestock Processed',
+          title: 'LIVESTOCK PROCESSED',
           value: '$_animalsProcessed',
+          valueColor: const Color(0xFF0F172A),
           subtitleText: _animalsProcessed > 0 ? 'Livestock completed' : 'None processed yet',
-          subtitleColor: const Color(0xFF16A34A),
+          subtitleColor: const Color(0xFF64748B),
         );
 
         final card3 = _buildKpiCard(
           iconWidget: const Icon(Icons.timer_outlined, size: 18, color: Color(0xFFB45309)),
-          iconBgColor: const Color(0xFFFEF3C7),
-          title: 'Avg Processing Time',
+          iconBgColor: const Color(0xFFFFFBEB),
+          title: 'AVG PROCESSING TIME',
           value: _formatProcessingTime(_avgProcessingHours),
+          valueColor: const Color(0xFF0F172A),
           subtitleText: 'per livestock',
-          subtitleColor: const Color(0xFF0D9488),
+          subtitleColor: const Color(0xFFD97706),
         );
 
         final card4 = InkWell(
           onTap: () => widget.onNavigate?.call(7, 'feedback'),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           child: _buildKpiCard(
-            iconWidget: const Icon(Icons.star_rounded, size: 20, color: Color(0xFF15803D)),
-            iconBgColor: const Color(0xFFDCFCE7),
-            title: 'Satisfaction Rate',
+            iconWidget: const Icon(Icons.star_rounded, size: 20, color: Color(0xFF1D4ED8)),
+            iconBgColor: const Color(0xFFEFF6FF),
+            title: 'SATISFACTION RATE',
             value: '${_satisfactionRate.toStringAsFixed(0)}%',
+            valueColor: const Color(0xFF1D4ED8),
             subtitleText: 'View customer feedback →',
-            subtitleColor: const Color(0xFF16A34A),
+            subtitleColor: const Color(0xFF1D4ED8),
           ),
         );
 
@@ -1213,18 +1244,19 @@ class _DashboardPageState extends State<DashboardPage> {
     required Color iconBgColor,
     required String title,
     required String value,
+    Color valueColor = const Color(0xFF0F172A),
     required String subtitleText,
     required Color subtitleColor,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: Colors.black.withValues(alpha: 0.035),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -1233,48 +1265,37 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Icon Box
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            alignment: Alignment.center,
-            child: iconWidget,
-          ),
-          const SizedBox(height: 14),
-
-          // Title
+          // Uppercase Tracked Label
           Text(
-            title,
+            title.toUpperCase(),
             style: const TextStyle(
-              fontSize: 12,
+              fontSize: 11.5,
               fontWeight: FontWeight.w600,
               color: Color(0xFF64748B),
+              letterSpacing: 0.6,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 10),
 
-          // Big Value
+          // Big Bold Metric Value
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 26,
+            style: TextStyle(
+              fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
+              color: valueColor,
               letterSpacing: -0.5,
+              height: 1.15,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
 
-          // Subtitle / Trend
+          // Clean Subtitle
           Text(
             subtitleText,
             style: TextStyle(
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w500,
               color: subtitleColor,
             ),
           ),
@@ -1711,8 +1732,26 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ],
           ),
-          child: Column(
-            children: _recentActivities.asMap().entries.map((entry) {
+          child: _recentActivities.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 14),
+                  child: Row(
+                    children: [
+                      Icon(Icons.history_toggle_off_rounded, size: 18, color: Color(0xFF94A3B8)),
+                      SizedBox(width: 10),
+                      Text(
+                        'No activity recorded today.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Color(0xFF475569),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: _recentActivities.asMap().entries.map((entry) {
               final idx = entry.key;
               final act = entry.value;
               final isLast = idx == _recentActivities.length - 1;
@@ -2054,8 +2093,7 @@ class _DashboardPageState extends State<DashboardPage> {
           children: [
             _buildRoleHeaderRow(
               roleTitle: 'Welcome back, ${AppSettingsService.instance.profileName}',
-              roleSubtitle:
-                  'Clerk Operations Dashboard — Track pending receiving requests, document verification, billing, and meat release tasks',
+              roleSubtitle: _realtimeSubtitle,
               badgeLabel: 'Clerk Portal',
               badgeColor: const Color(0xFF7C3AED),
             ),
@@ -2363,7 +2401,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           }
 
                           return DataRow(cells: [
-                            DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF065F46)))),
+                            DataCell(Text(refNo, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F5132)))),
                             DataCell(Text(req['marking']?.toString() ?? '—', style: const TextStyle(fontWeight: FontWeight.w600))),
                             DataCell(Text(req['customer_name']?.toString() ?? '—')),
                             DataCell(Text('${req['animal_count'] ?? 1} head(s) ${req['livestock_type'] ?? ''}')),
@@ -2829,51 +2867,63 @@ class _DashboardPageState extends State<DashboardPage> {
     required Color accent,
     required Color bg,
   }) {
+    final lower = title.toLowerCase();
+    final Color valueColor = lower.contains('release')
+        ? const Color(0xFF2563EB)
+        : (lower.contains('billing') || lower.contains('payment')
+            ? const Color(0xFF047857)
+            : const Color(0xFF0F172A));
+    final Color subColor = (lower.contains('billing') || lower.contains('payment'))
+        ? const Color(0xFFD97706)
+        : const Color(0xFF64748B);
+    final String displaySubtitle = (processedBadge != null && processedBadge.trim().isNotEmpty)
+        ? '$subtitle • $processedBadge'
+        : subtitle;
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(9),
+          Text(
+            title.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF64748B),
+              letterSpacing: 0.6,
             ),
-            child: Icon(icon, color: accent, size: 18),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Text(
             '$count',
-            style: const TextStyle(
-              fontSize: 26,
+            style: TextStyle(
+              fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
-              height: 1.2,
+              color: valueColor,
+              letterSpacing: -0.5,
+              height: 1.15,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            title,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF1E293B),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(
-              fontSize: 11.5,
+            displaySubtitle,
+            style: TextStyle(
+              fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF16A34A),
+              color: subColor,
             ),
           ),
         ],
@@ -3215,11 +3265,11 @@ class _DashboardPageState extends State<DashboardPage> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      const Text(
-                        'Meat Inspector Dashboard — Track pending ante-mortem exams, active night-slaughter operations, and post-mortem inspections',
-                        style: TextStyle(
+                      Text(
+                        _realtimeSubtitle,
+                        style: const TextStyle(
                           fontSize: 13,
-                          color: Color(0xFF64748B),
+                          color: Color(0xFF475569),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -3264,7 +3314,7 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(color: Color(0xFF065F46), width: 1.4),
+                            borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.4),
                           ),
                         ),
                       ),
@@ -3628,7 +3678,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                     DataCell(
                                       Text(
                                         refNo,
-                                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF065F46)),
+                                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F5132)),
                                       ),
                                     ),
                                     DataCell(
@@ -3675,7 +3725,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                               icon: const Icon(Icons.search, size: 14),
                                               label: const Text('Inspect Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: const Color(0xFF065F46),
+                                                backgroundColor: const Color(0xFF0F5132),
                                                 foregroundColor: Colors.white,
                                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -3726,51 +3776,62 @@ class _DashboardPageState extends State<DashboardPage> {
     required Color iconColor,
     required Color bgColor,
   }) {
+    final lower = title.toLowerCase();
+    final Color valueColor = lower.contains('flagged')
+        ? const Color(0xFFDC2626)
+        : (lower.contains('completed')
+            ? const Color(0xFF047857)
+            : (lower.contains('in-progress')
+                ? const Color(0xFF2563EB)
+                : const Color(0xFF0F172A)));
+    final Color subColor = lower.contains('flagged')
+        ? const Color(0xFFD97706)
+        : const Color(0xFF64748B);
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.035),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: bgColor,
-              borderRadius: BorderRadius.circular(9),
+          Text(
+            title.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF64748B),
+              letterSpacing: 0.6,
             ),
-            child: Icon(icon, color: iconColor, size: 18),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
           Text(
             '$count',
-            style: const TextStyle(
-              fontSize: 26,
+            style: TextStyle(
+              fontSize: 28,
               fontWeight: FontWeight.w800,
-              color: Color(0xFF0F172A),
-              height: 1.2,
+              color: valueColor,
+              letterSpacing: -0.5,
+              height: 1.15,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            title,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Color(0xFF1E293B),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
             subtitle,
-            style: const TextStyle(
-              fontSize: 11.5,
+            style: TextStyle(
+              fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: Color(0xFF16A34A),
+              color: subColor,
             ),
           ),
         ],
