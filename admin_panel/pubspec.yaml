@@ -23,6 +23,7 @@ dependencies:
   file_picker: ^10.3.2
   pdf: ^3.11.0
   printing: ^5.13.0
+  lucide_icons_flutter: ^4.0.3
 
 dev_dependencies:
   flutter_test:

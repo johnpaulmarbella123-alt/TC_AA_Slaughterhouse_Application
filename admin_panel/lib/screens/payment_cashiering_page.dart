@@ -31,6 +31,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   Timer? _pollingTimer;
   final Set<String> _sentOverduePaymentPenaltyNotifIds = {};
   final Set<String> _sentColdStoragePenaltyNotifIds = {};
+  final Set<String> _sendingReceiptIds = {};
+  final Set<String> _sentReceiptIds = {};
+  final Set<String> _verifyingPaymentIds = {};
   static Map<String, dynamic> _penaltyTrackingMap = {};
 
   @override
@@ -169,6 +172,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       return '$passed of $total head(s)';
     }
     return '$total head(s)';
+  }
+
+  static bool _isWalkInRequest(Map<String, dynamic> req) {
+    final uid = (req['user_id'] ?? '').toString().trim();
+    final instr = (req['special_instruction'] ?? '').toString();
+    final contact = (req['contact_number'] ?? '').toString().trim();
+    return uid.isEmpty || instr.contains('[WALK_IN]') || contact.isNotEmpty;
   }
 
   String _refNo(Map<String, dynamic> req) =>
@@ -587,10 +597,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   // ════════════════════════════════════════════
   //  SEND RECEIPT TO CUSTOMER
   // ════════════════════════════════════════════
-  Future<void> _sendReceiptForPayment(Map<String, dynamic> req) async {
+  Future<bool> _sendReceiptForPayment(Map<String, dynamic> req) async {
+    final reqIdStr = req['id'].toString();
+    if (mounted) {
+      setState(() => _sendingReceiptIds.add(reqIdStr));
+    }
     try {
       final reqId = req['id'];
-      final reqIdStr = reqId.toString();
       final userId = req['user_id'];
       final now = DateTime.now();
 
@@ -667,24 +680,24 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         );
       }
 
-      _loadRequests();
+      req['status'] = 'payment_pending';
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(children: [
-              Icon(Icons.check_circle, color: Colors.white, size: 20),
-              SizedBox(width: 8),
-              Text('Receipt sent with 5:00 PM penalty reminder! Awaiting customer payment...'),
-            ]),
-            backgroundColor: Colors.green.shade600,
-          ),
-        );
+        setState(() {
+          _sentReceiptIds.add(reqIdStr);
+        });
       }
+      _loadRequests(silent: true);
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent),
         );
+      }
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _sendingReceiptIds.remove(reqIdStr));
       }
     }
   }
@@ -928,9 +941,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   //  VERIFY AND CONFIRM PAYMENT (Online/Manual)
   // ════════════════════════════════════════════
   Future<void> _verifyAndConfirmPayment(Map<String, dynamic> req) async {
+    final reqId = req['id'];
+    final reqIdStr = reqId.toString();
     try {
-      final reqId = req['id'];
-      final reqIdStr = reqId.toString();
       final userId = req['user_id'];
       final fees = _calcFees(req);
       final receiptNo = _receiptNo(req);
@@ -950,6 +963,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         if (cashResult == null) return;
         tenderedAmount = cashResult['amount_tendered'] ?? totalDue;
         changeAmount = cashResult['change_amount'] ?? 0.0;
+      }
+
+      if (mounted) {
+        setState(() => _verifyingPaymentIds.add(reqIdStr));
       }
 
       final paymentData = <String, dynamic>{
@@ -1057,25 +1074,16 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         },
       );
 
-      _loadRequests();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(children: [
-              const Icon(Icons.check_circle, color: Colors.white, size: 20),
-              const SizedBox(width: 8),
-              Text('Payment for $refNo verified and confirmed!'),
-            ]),
-            backgroundColor: Colors.green.shade600,
-          ),
-        );
-      }
+      _loadRequests(silent: true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error verifying payment: $e'), backgroundColor: Colors.redAccent),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _verifyingPaymentIds.remove(reqIdStr));
       }
     }
   }
@@ -1140,17 +1148,23 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Payment & Cashiering',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-              const SizedBox(height: 2),
-              Text('Fee calculation, payment recording, receipts',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-            ],
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Payment & Cashiering',
+                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  'Fee calculation, payment recording, receipts',
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
@@ -1238,8 +1252,18 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
         ],
       ),
       child: Column(
@@ -1328,7 +1352,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1461,40 +1497,119 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                               ],
                             )),
                             DataCell(_buildStatusBadge(status)),
-                            DataCell(Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                OutlinedButton.icon(
-                                  onPressed: () => _showReceiptDialog(req),
-                                  icon: const Icon(Icons.receipt_long, size: 14),
-                                  label: const Text('Details', style: TextStyle(fontSize: 11)),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF4A5568),
-                                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                                    minimumSize: const Size(0, 32),
-                                    side: BorderSide(color: Colors.grey.shade300),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                  ),
-                                ),
-                                if (status == 'Awaiting Verification' || _isCashPendingStatus(status)) ...[
-                                  const SizedBox(width: 8),
-                                  ElevatedButton.icon(
-                                    onPressed: () => _verifyAndConfirmPayment(req),
-                                    icon: const Icon(Icons.check_circle, size: 13, color: Colors.white),
-                                    label: Text(
-                                      _isCashPendingStatus(status) ? 'Confirm Payment' : 'Verify',
-                                      style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                            DataCell(Builder(
+                              builder: (_) {
+                                final reqIdStr = req['id'].toString();
+                                final isWalkInRow = _isWalkInRequest(req);
+                                final isImmediateRow = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+                                    (req['slaughter_inspection'] is Map &&
+                                        (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' ||
+                                            (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
+                                    (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
+                                final isSendingRow = _sendingReceiptIds.contains(reqIdStr);
+                                final isSentRow = req['status'] == 'payment_pending' || _sentReceiptIds.contains(reqIdStr);
+                                final isVerifyingRow = _verifyingPaymentIds.contains(reqIdStr);
+                                final isUnpaidRow = status != 'Verified' &&
+                                    status != 'Paid' &&
+                                    status != 'Awaiting Verification' &&
+                                    !_isCashPendingStatus(status);
+                                final canSendReceiptRow = !isWalkInRow && !isImmediateRow && isUnpaidRow;
+                                final canProcessWalkInRow = (isWalkInRow || isImmediateRow) && isUnpaidRow;
+
+                                return Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      onPressed: () => _showReceiptDialog(req),
+                                      icon: const Icon(Icons.receipt_long, size: 14),
+                                      label: const Text('Details', style: TextStyle(fontSize: 11)),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: const Color(0xFF4A5568),
+                                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                                        minimumSize: const Size(0, 32),
+                                        side: BorderSide(color: Colors.grey.shade300),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                      ),
                                     ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2D6A4F),
-                                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                                      minimumSize: const Size(0, 32),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                      elevation: 0,
-                                    ),
-                                  ),
-                                ],
-                              ],
+                                    if (canSendReceiptRow) ...[
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: (isSendingRow || isSentRow) ? null : () => _sendReceiptForPayment(req),
+                                        icon: isSendingRow
+                                            ? const SizedBox(
+                                                width: 12,
+                                                height: 12,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                              )
+                                            : Icon(
+                                                isSentRow ? Icons.check_circle_outline : Icons.send_rounded,
+                                                size: 13,
+                                                color: Colors.white,
+                                              ),
+                                        label: Text(
+                                          isSendingRow ? 'Sending...' : (isSentRow ? 'Sent \u2713' : 'Send Receipt'),
+                                          style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: isSentRow ? const Color(0xFF15803D) : const Color(0xFF0F5132),
+                                          disabledBackgroundColor: isSentRow ? const Color(0xFF15803D) : const Color(0xFF0F5132).withValues(alpha: 0.7),
+                                          disabledForegroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          minimumSize: const Size(0, 32),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                          elevation: 0,
+                                        ),
+                                      ),
+                                    ],
+                                    if (canProcessWalkInRow) ...[
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: () => _showNewPaymentDialog(req['id']),
+                                        icon: const Icon(Icons.payments_outlined, size: 13, color: Colors.white),
+                                        label: const Text(
+                                          'Process Payment',
+                                          style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF0F5132),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          minimumSize: const Size(0, 32),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                          elevation: 0,
+                                        ),
+                                      ),
+                                    ],
+                                    if (status == 'Awaiting Verification' || _isCashPendingStatus(status)) ...[
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: isVerifyingRow ? null : () => _verifyAndConfirmPayment(req),
+                                        icon: isVerifyingRow
+                                            ? const SizedBox(
+                                                width: 12,
+                                                height: 12,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                              )
+                                            : const Icon(Icons.check_circle, size: 13, color: Colors.white),
+                                        label: Text(
+                                          isVerifyingRow
+                                              ? 'Verifying...'
+                                              : (_isCashPendingStatus(status) ? 'Confirm Payment' : 'Verify'),
+                                          style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xFF2D6A4F),
+                                          disabledBackgroundColor: const Color(0xFF2D6A4F).withValues(alpha: 0.7),
+                                          disabledForegroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          minimumSize: const Size(0, 32),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                          elevation: 0,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             )),
                           ]);
                         }).toList(),
@@ -1567,9 +1682,11 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
         (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
-    final isWalkIn = (req['user_id'] ?? '').toString().trim().isEmpty;
+    final isWalkIn = _isWalkInRequest(req);
     bool isCheckingPayMongo = false;
     bool isPrintingReceipt = false;
+    bool isSendingReceiptModal = false;
+    bool isReceiptSentModal = req['status'] == 'payment_pending' || _sentReceiptIds.contains(req['id'].toString());
     bool isThermal80mm = true;
     String? payMongoStatusResult;
     String? payMongoResultMsg;
@@ -2231,14 +2348,39 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                           const SizedBox(width: 8),
                         ],
                         ElevatedButton.icon(
-                          onPressed: () {
-                            Navigator.pop(dialogCtx);
-                            _sendReceiptForPayment(req);
-                          },
-                          icon: const Icon(Icons.send, size: 16, color: Colors.white),
-                          label: const Text('Send Receipt to Customer', style: TextStyle(color: Colors.white, fontSize: 13)),
+                          onPressed: (isSendingReceiptModal || isReceiptSentModal)
+                              ? null
+                              : () async {
+                                  setDialogState(() => isSendingReceiptModal = true);
+                                  final ok = await _sendReceiptForPayment(req);
+                                  if (dialogCtx.mounted) {
+                                    setDialogState(() {
+                                      isSendingReceiptModal = false;
+                                      if (ok) isReceiptSentModal = true;
+                                    });
+                                  }
+                                },
+                          icon: isSendingReceiptModal
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : Icon(
+                                  isReceiptSentModal ? Icons.check_circle_outline : Icons.send,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                          label: Text(
+                            isSendingReceiptModal
+                                ? 'Sending...'
+                                : (isReceiptSentModal ? 'Sent \u2713' : 'Send Receipt to Customer'),
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                          ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF0F5132),
+                            backgroundColor: isReceiptSentModal ? const Color(0xFF15803D) : const Color(0xFF0F5132),
+                            disabledBackgroundColor: isReceiptSentModal ? const Color(0xFF15803D) : const Color(0xFF0F5132).withValues(alpha: 0.7),
+                            disabledForegroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),

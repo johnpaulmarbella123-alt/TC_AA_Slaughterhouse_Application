@@ -1,3 +1,4 @@
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -247,11 +248,18 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Stack(
         children: [
-          // Full-screen Slaughterhouse Building Background
+          // Full-screen Slaughterhouse Building Background (subtle frosted blur)
           Positioned.fill(
-            child: Image.asset('assets/images/BG.jpeg', fit: BoxFit.cover),
+            child: ImageFiltered(
+              imageFilter: ImageFilter.blur(
+                sigmaX: 4.0,
+                sigmaY: 4.0,
+                tileMode: TileMode.clamp,
+              ),
+              child: Image.asset('assets/images/BG.jpeg', fit: BoxFit.cover),
+            ),
           ),
-          // Light Neutral 15% Dark Tint Overlay (crisp photo, no blur)
+          // Light Neutral 15% Dark Tint Overlay
           Positioned.fill(
             child: Container(color: Colors.black.withValues(alpha: 0.15)),
           ),
@@ -343,7 +351,7 @@ class _LoginPageState extends State<LoginPage> {
                                   ),
                                   const SizedBox(height: 2),
                                   const Text(
-                                    'AA Slaughterhouse Management System',
+                                    'City Abattoir Management System',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       color: Color(0xFFA7F3D0),
@@ -397,8 +405,8 @@ class _LoginPageState extends State<LoginPage> {
                               ],
                               _buildTextField(
                                 controller: _usernameController,
-                                label: 'Staff Email',
-                                hintText: 'tcaaslaughterhouse@gmail.com',
+                                label: 'Email Address',
+                                hintText: 'Enter your email',
                                 keyboardType: TextInputType.emailAddress,
                                 onChanged: (_) {
                                   if (_errorMessage != null) {
@@ -517,52 +525,60 @@ class _LoginPageState extends State<LoginPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 4),
-        TextField(
-          controller: controller,
-          obscureText: obscureText,
-          keyboardType: keyboardType,
-          onChanged: onChanged,
-          onSubmitted: onSubmitted,
-          style: const TextStyle(color: Color(0xFF0F172A), fontSize: 15.2),
-          decoration: InputDecoration(
-            hintText: hintText,
-            hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14.5),
-            filled: true,
-            fillColor: Colors.white,
-            constraints: const BoxConstraints(minHeight: 46),
-            contentPadding: EdgeInsets.fromLTRB(14, 12, isPassword ? 48 : 14, 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 2.0),
-            ),
-            suffixIcon: isPassword
-                ? Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: Material(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      child: InkWell(
-                        onTap: onToggleObscure,
-                        borderRadius: BorderRadius.circular(8),
-                        hoverColor: const Color(0xFFF1F5F9),
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Icon(
-                            obscureText ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                            color: const Color(0xFF64748B),
-                            size: 20,
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 46,
+          child: TextField(
+            controller: controller,
+            obscureText: obscureText,
+            keyboardType: keyboardType,
+            onChanged: onChanged,
+            onSubmitted: onSubmitted,
+            textAlignVertical: TextAlignVertical.center,
+            style: const TextStyle(color: Color(0xFF0F172A), fontSize: 15),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: hintText,
+              hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14.5),
+              filled: true,
+              fillColor: Colors.white,
+              constraints: const BoxConstraints(minHeight: 46, maxHeight: 46),
+              contentPadding: EdgeInsets.fromLTRB(14, 13, isPassword ? 44 : 14, 13),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFCBD5E1), width: 1.0),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF0F5132), width: 2.0),
+              ),
+              suffixIcon: isPassword
+                  ? Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Tooltip(
+                        message: obscureText ? 'Show password' : 'Hide password',
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          child: InkWell(
+                            onTap: onToggleObscure,
+                            borderRadius: BorderRadius.circular(8),
+                            hoverColor: const Color(0xFFF1F5F9),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Icon(
+                                obscureText ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                color: const Color(0xFF64748B),
+                                size: 20,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  )
-                : null,
-            suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                    )
+                  : null,
+              suffixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 46, maxHeight: 46),
+            ),
           ),
         ),
       ],

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
+import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
@@ -26,6 +27,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   String _filterStatus = 'All';
   Timer? _pollingTimer;
   final Set<String> _notifiedPickupReadyIds = {};
+  final Set<String> _notifyingPickupIds = {};
   final Set<String> _sentColdStoragePenaltyNotifIds = {};
   Map<String, dynamic> _penaltyTrackingMap = {};
 
@@ -594,17 +596,23 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Meat Releasing',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-              const SizedBox(height: 2),
-              Text('Ready for pickup, collection information',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-            ],
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Meat Releasing',
+                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  'Ready for pickup, collection information',
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
@@ -739,8 +747,18 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+            BoxShadow(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
           ],
         ),
         child: Column(
@@ -846,7 +864,19 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1216,6 +1246,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       );
     }
 
+    final reqIdStr = req['id'].toString();
+    final isNotifying = _notifyingPickupIds.contains(reqIdStr);
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1225,14 +1257,22 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               ? 'Customer notified that meat is ready for collection (click to resend reminder)'
               : 'Send notification to customer that their meat is ready for collection (starts 5:00 PM \u20b1150 Cold Storage deadline)',
           child: ElevatedButton.icon(
-            icon: Icon(
-              isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
-              size: 14,
-              color: Colors.white,
-            ),
-            onPressed: () => _notifyReadyForCollection(req),
+            icon: isNotifying
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Icon(
+                    isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+            onPressed: isNotifying ? null : () => _notifyReadyForCollection(req),
             style: ElevatedButton.styleFrom(
               backgroundColor: isAlreadyNotified ? const Color(0xFF0F5132) : const Color(0xFF185FA5),
+              disabledBackgroundColor: const Color(0xFF185FA5).withValues(alpha: 0.7),
+              disabledForegroundColor: Colors.white,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 34),
@@ -1240,7 +1280,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready',
+              isNotifying ? 'Sending...' : (isAlreadyNotified ? 'Notified ✓' : 'Notify Ready'),
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1290,6 +1330,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       return waitingBtn;
     }
 
+    final reqIdStr = req['id'].toString();
+    final isNotifying = _notifyingPickupIds.contains(reqIdStr);
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
 
     return Row(
@@ -1300,14 +1342,22 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               ? 'Customer already notified that meat is ready for collection (click to resend)'
               : 'Send notification to customer that their meat is ready for collection (must pay at Cashier before pickup)',
           child: ElevatedButton.icon(
-            icon: Icon(
-              isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
-              size: 14,
-              color: Colors.white,
-            ),
-            onPressed: () => _notifyReadyForCollection(req),
+            icon: isNotifying
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Icon(
+                    isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+            onPressed: isNotifying ? null : () => _notifyReadyForCollection(req),
             style: ElevatedButton.styleFrom(
               backgroundColor: isAlreadyNotified ? const Color(0xFF0F5132) : const Color(0xFF185FA5),
+              disabledBackgroundColor: const Color(0xFF185FA5).withValues(alpha: 0.7),
+              disabledForegroundColor: Colors.white,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 34),
@@ -1315,7 +1365,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready',
+              isNotifying ? 'Sending...' : (isAlreadyNotified ? 'Notified ✓' : 'Notify Ready'),
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1327,9 +1377,12 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   }
 
   Future<void> _notifyReadyForCollection(Map<String, dynamic> req) async {
+    final reqId = req['id'];
+    final reqIdStr = reqId.toString();
+    if (mounted) {
+      setState(() => _notifyingPickupIds.add(reqIdStr));
+    }
     try {
-      final reqId = req['id'];
-      final reqIdStr = reqId.toString();
       final userId = req['user_id'];
       final ref = _refNo(req);
       final isPaid = _isPaid(req);
@@ -1343,10 +1396,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         deadline = deadline.add(const Duration(days: 1));
       }
       final deadlineStr = DateFormat('MMMM d, yyyy • 5:00 PM').format(deadline);
-
-      setState(() {
-        _notifiedPickupReadyIds.add(reqIdStr);
-      });
 
       final existingNotes = (req['release_notes'] ?? '').toString().trim();
       final stampedTag = 'Notified ready for collection at ${now.toIso8601String()}';
@@ -1407,31 +1456,42 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         );
       }
 
-      _loadRequests(silent: true);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.notifications_active, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(isPaid
-                      ? 'Customer notified that order $ref is ready for collection (5:00 PM \u20b1150 Cold Storage reminder included).'
-                      : 'Customer notified that order $ref is ready for collection (awaiting cashier payment + 5:00 PM penalty reminder).'),
-                ),
-              ],
-            ),
-            backgroundColor: const Color(0xFF185FA5),
-          ),
+      // Auto-send TextBee SMS to walk-in customer when meat is ready for pickup
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
+        final smsText = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'releasing',
+          refNo: ref,
+          customerName: (req['customer_name'] ?? 'Customer').toString(),
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+        );
+        await WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsText,
+          stage: 'releasing',
+          refNo: ref,
+          customerName: (req['customer_name'] ?? 'Customer').toString(),
+          requestId: reqIdStr,
         );
       }
+
+      if (mounted) {
+        setState(() {
+          _notifiedPickupReadyIds.add(reqIdStr);
+        });
+      }
+      _loadRequests(silent: true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error sending notification: $e'), backgroundColor: Colors.redAccent),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _notifyingPickupIds.remove(reqIdStr));
       }
     }
   }

@@ -14,6 +14,7 @@ import '../widgets/walk_in_sms_helper.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/phone_number_formatter.dart';
 import '../widgets/staff_notification_bell.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
@@ -699,34 +700,74 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           bottom: BorderSide(color: Colors.grey.shade200, width: 1),
         ),
       ),
-      child: Row(
-        children: [
-          const Text(
-            'Receiving & Inspection',
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1A202C),
-            ),
-          ),
-          const Spacer(),
-          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              dateStr,
-              style: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFF4A5568),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isCompact = constraints.maxWidth < 720;
+          final titleBlock = const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Receiving & Inspection',
+                style: TextStyle(
+                  fontSize: 24,
+                  height: 32 / 24,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0F172A),
+                ),
               ),
-            ),
-          ),
-        ],
+              SizedBox(height: 3),
+              Text(
+                'Livestock intake, walk-in registration, and request approval',
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 20 / 14,
+                  fontWeight: FontWeight.w400,
+                  color: Color(0xFF475569),
+                ),
+              ),
+            ],
+          );
+          final actionsBlock = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  dateStr,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF475569),
+                  ),
+                ),
+              ),
+            ],
+          );
+          if (isCompact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                titleBlock,
+                const SizedBox(height: 10),
+                actionsBlock,
+              ],
+            );
+          }
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: 12),
+              actionsBlock,
+            ],
+          );
+        },
       ),
     );
   }
@@ -797,7 +838,19 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1226,7 +1279,19 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2081,6 +2146,364 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     });
   }
 
+  /// Checks whether the currently entered walk-in customer is registered in the
+  /// authoritative Meat Dealers Directory (`RegularDealersService`).
+  RegularDealer? get _matchedRegisteredDealer {
+    final enteredName = _customerNameCtrl.text.trim();
+    if (enteredName.isEmpty) return null;
+    final dealersService = RegularDealersService.instance;
+    final matched = dealersService.findAuthoritativeDealer(customerName: enteredName);
+    if (matched != null) return matched;
+    final upper = enteredName.toUpperCase();
+    for (final d in dealersService.allDealers) {
+      if (d.name.trim().toUpperCase() == upper) return d;
+    }
+    return null;
+  }
+
+  bool get _isRegisteredDealer => _matchedRegisteredDealer != null;
+
+  /// Opens a quick registration modal that saves a new walk-in dealer directly
+  /// into the Meat Dealers Directory (`public.regular_dealers`) and auto-fills
+  /// their official name, permanent marking, category, and phone back into this form.
+  Future<void> _showQuickRegisterDealerDialog() async {
+    final dealersService = RegularDealersService.instance;
+    final initialName = _customerNameCtrl.text.trim();
+    final nameCtrl = TextEditingController(text: initialName);
+    final suggestedMark = initialName.isNotEmpty
+        ? dealersService.suggestMarkingForName(initialName)
+        : '';
+    final markingCtrl = TextEditingController(
+      text: _markingCtrl.text.trim().isNotEmpty ? _markingCtrl.text.trim().toUpperCase() : suggestedMark,
+    );
+    final phoneCtrl = TextEditingController(text: _contactNumberCtrl.text.trim());
+    String selectedCategory = _isBarangay ? 'barangay' : 'market';
+    String? errorMsg;
+    bool isSubmitting = false;
+
+    final registered = await showDialog<RegularDealer>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return Dialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Container(
+                width: 460,
+                padding: const EdgeInsets.all(24),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFECFDF5),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF0F5132), size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Register Walk-In Meat Dealer',
+                                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                ),
+                                Text(
+                                  'Add dealer to the official Meat Dealers Directory first',
+                                  style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      if (errorMsg != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          margin: const EdgeInsets.only(bottom: 14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.error_outline, size: 16, color: Color(0xFFDC2626)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  errorMsg!,
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B), fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const Text('Dealer Full Name *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: nameCtrl,
+                        textCapitalization: TextCapitalization.words,
+                        inputFormatters: const [WordsCapitalizationFormatter()],
+                        onChanged: (v) {
+                          if (markingCtrl.text.trim().isEmpty && v.trim().isNotEmpty) {
+                            markingCtrl.text = dealersService.suggestMarkingForName(v.trim());
+                          }
+                          if (errorMsg != null) setModalState(() => errorMsg = null);
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'e.g. Juan Dela Cruz',
+                          filled: true,
+                          fillColor: const Color(0xFFF8FAFC),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5)),
+                        ),
+                        style: const TextStyle(fontSize: 13.5),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text('Dealer Category *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setModalState(() => selectedCategory = 'barangay'),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: selectedCategory == 'barangay' ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: selectedCategory == 'barangay' ? const Color(0xFF0F5132) : Colors.grey.shade300,
+                                    width: selectedCategory == 'barangay' ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Barangay Dealer',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: selectedCategory == 'barangay' ? const Color(0xFF0F5132) : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setModalState(() => selectedCategory = 'market'),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: selectedCategory == 'market' ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: selectedCategory == 'market' ? const Color(0xFF0F5132) : Colors.grey.shade300,
+                                    width: selectedCategory == 'market' ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    'Market Dealer',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: selectedCategory == 'market' ? const Color(0xFF0F5132) : const Color(0xFF475569),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Permanent Marking *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                                const SizedBox(height: 6),
+                                TextField(
+                                  controller: markingCtrl,
+                                  textCapitalization: TextCapitalization.characters,
+                                  inputFormatters: const [UpperCaseTextFormatter()],
+                                  onChanged: (_) {
+                                    if (errorMsg != null) setModalState(() => errorMsg = null);
+                                  },
+                                  decoration: InputDecoration(
+                                    hintText: 'e.g. JDC',
+                                    filled: true,
+                                    fillColor: const Color(0xFFF8FAFC),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5)),
+                                  ),
+                                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Contact / Phone No. *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                                const SizedBox(height: 6),
+                                TextField(
+                                  controller: phoneCtrl,
+                                  keyboardType: TextInputType.phone,
+                                  inputFormatters: [PhoneNumberFormatter()],
+                                  onChanged: (_) {
+                                    if (errorMsg != null) setModalState(() => errorMsg = null);
+                                  },
+                                  decoration: InputDecoration(
+                                    hintText: 'e.g. 0917-123-4567',
+                                    filled: true,
+                                    fillColor: const Color(0xFFF8FAFC),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5)),
+                                  ),
+                                  style: const TextStyle(fontSize: 13.5),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: isSubmitting ? null : () => Navigator.pop(dialogCtx, null),
+                            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                          ),
+                          const SizedBox(width: 10),
+                          ElevatedButton.icon(
+                            onPressed: isSubmitting
+                                ? null
+                                : () async {
+                                    final cleanName = nameCtrl.text.trim();
+                                    final cleanMark = markingCtrl.text.trim().toUpperCase();
+                                    final cleanPhone = phoneCtrl.text.trim();
+                                    if (cleanName.isEmpty) {
+                                      setModalState(() => errorMsg = 'Please enter the dealer\'s full name.');
+                                      return;
+                                    }
+                                    if (cleanMark.isEmpty) {
+                                      setModalState(() => errorMsg = 'Please assign a unique permanent marking.');
+                                      return;
+                                    }
+                                    if (cleanPhone.isEmpty) {
+                                      setModalState(() => errorMsg = 'Please enter a contact / phone number for SMS updates.');
+                                      return;
+                                    }
+                                    if (!PhoneNumberFormatter.isValidExact11(cleanPhone)) {
+                                      setModalState(() => errorMsg = 'Contact number must be exactly 11 digits (e.g. 0917-123-4567).');
+                                      return;
+                                    }
+                                    setModalState(() {
+                                      isSubmitting = true;
+                                      errorMsg = null;
+                                    });
+                                    try {
+                                      final newDealer = await dealersService.addDealerManually(
+                                        name: cleanName,
+                                        markings: cleanMark,
+                                        category: selectedCategory,
+                                        phone: cleanPhone,
+                                      );
+                                      if (dialogCtx.mounted) {
+                                        Navigator.pop(dialogCtx, newDealer);
+                                      }
+                                    } catch (e) {
+                                      setModalState(() {
+                                        isSubmitting = false;
+                                        errorMsg = e.toString().replaceFirst('Exception: ', '');
+                                      });
+                                    }
+                                  },
+                            icon: isSubmitting
+                                ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                                : const Icon(Icons.check_circle_outline, size: 16, color: Colors.white),
+                            label: Text(
+                              isSubmitting ? 'Registering...' : 'Register Dealer',
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF0F5132),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    nameCtrl.dispose();
+    markingCtrl.dispose();
+    phoneCtrl.dispose();
+
+    if (registered != null && mounted) {
+      await _loadRegisteredCustomers();
+      final item = _CustomerLookupItem(
+        name: registered.name,
+        markings: registered.markings,
+        category: registered.category,
+        phone: registered.phone,
+        userId: registered.userId,
+        isRegularDealer: true,
+      );
+      _onCustomerSelected(item);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.verified_user, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('${registered.name} registered in Meat Dealers Directory (Mark: ${registered.markings}).'),
+              ),
+            ]),
+            backgroundColor: const Color(0xFF0F5132),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _loadMunicipalities(String provinceCode) async {
     try {
       final response = await http.get(
@@ -2153,6 +2576,16 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   }
 
   Future<void> _saveRecord() async {
+    if (!_isRegisteredDealer) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Walk-in dealer is not yet registered. Please register them in the Meat Dealers Directory first.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     if (_customerNameCtrl.text.trim().isEmpty ||
         _selectedAnimalType == null ||
         _walkInLot.isEmpty) {
@@ -2185,7 +2618,18 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       return;
     }
 
-    if (_selectedCustomer?.userId == null && _contactNumberCtrl.text.trim().isEmpty) {
+    final enteredContact = _contactNumberCtrl.text.trim();
+    if (enteredContact.isNotEmpty && !PhoneNumberFormatter.isValidExact11(enteredContact)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Contact number must be exactly 11 digits (e.g. 0917-123-4567).'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedCustomer?.userId == null && enteredContact.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter Contact / Phone No. so walk-in updates can be sent via SMS or call'),
@@ -2269,6 +2713,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         'market_name': !_isBarangay ? _marketNameCtrl.text.trim() : null,
         'marking': _markingCtrl.text.trim(),
         'preferred_date': DateTime.now().toIso8601String().split('T')[0], // today's date
+        'special_instruction': '[WALK_IN]',
         'status': _isSeparateFacility ? 'slaughter_started' : 'approved', // Separate Facility bypasses Doc Verification directly into Slaughter & Inspection
       };
 
@@ -2461,14 +2906,124 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                         const SizedBox(height: 6),
                         _buildTextField(
                           _contactNumberCtrl,
-                          'e.g. 09171234567',
+                          'e.g. 0917-123-4567',
                           keyboardType: TextInputType.phone,
+                          inputFormatters: [PhoneNumberFormatter()],
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              if (_customerNameCtrl.text.trim().isEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, size: 16, color: Color(0xFF475569)),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Select a registered meat dealer from the directory, or register a new walk-in dealer first.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: _showQuickRegisterDealerDialog,
+                        icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Color(0xFF0F5132)),
+                        label: const Text(
+                          'Register New Dealer',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF0F5132)),
+                        ),
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else if (!_isRegisteredDealer) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 20, color: Color(0xFFD97706)),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Dealer Not Registered in Meat Dealers Directory',
+                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Walk-in meat dealers must be registered in the Meat Dealers Directory first before saving a slaughter request.',
+                              style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        onPressed: _showQuickRegisterDealerDialog,
+                        icon: const Icon(Icons.person_add_alt_1_rounded, size: 15, color: Colors.white),
+                        label: const Text(
+                          'Register Dealer',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F5132),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          elevation: 0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF6EE7B7)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified, size: 16, color: Color(0xFF059669)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Registered Meat Dealer: ${_matchedRegisteredDealer!.name}'
+                          '${_matchedRegisteredDealer!.markings.isNotEmpty ? ' • Permanent Marking: ${_matchedRegisteredDealer!.markings}' : ''}',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF065F46)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
 
               // ── Animal Type ──
@@ -2639,9 +3194,10 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _isSaving ? null : _saveRecord,
+                    onPressed: (_isSaving || !_isRegisteredDealer) ? null : _saveRecord,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1A202C),
+                      disabledBackgroundColor: Colors.grey.shade300,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2889,6 +3445,15 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                   textCapitalization: TextCapitalization.words,
                   inputFormatters: const [WordsCapitalizationFormatter()],
                   style: const TextStyle(fontSize: 13),
+                  onChanged: (value) {
+                    setState(() {
+                      if (_selectedCustomer != null &&
+                          _selectedCustomer!.name.trim().toUpperCase() != value.trim().toUpperCase()) {
+                        _selectedCustomer = null;
+                        _isMarkingLocked = false;
+                      }
+                    });
+                  },
                   decoration: InputDecoration(
                     hintText: 'Type surname, full name, or marking (e.g. Bondad, 4)...',
                     hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),

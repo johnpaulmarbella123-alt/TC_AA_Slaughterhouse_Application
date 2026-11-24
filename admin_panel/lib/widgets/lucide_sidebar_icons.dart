@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 enum LucideSidebarIcon {
@@ -219,18 +220,37 @@ class _LucidePainter extends CustomPainter {
         break;
 
       case LucideSidebarIcon.settings:
-        canvas.drawCircle(const Offset(12, 12), 3, paint);
-        canvas.drawCircle(const Offset(12, 12), 7.2, paint);
-        for (int i = 0; i < 8; i++) {
-          final angle = i * 3.14159265 / 4;
-          final cosA = _cos(angle);
-          final sinA = _sin(angle);
-          canvas.drawLine(
-            Offset(12 + 7.2 * cosA, 12 + 7.2 * sinA),
-            Offset(12 + 9.6 * cosA, 12 + 9.6 * sinA),
-            paint,
-          );
+        // Authentic Lucide `settings` 6-lobe rounded outline gear (24x24 viewBox)
+        canvas.drawCircle(const Offset(12, 12), 3.0, paint);
+        final gear = Path();
+        const int teeth = 6;
+        const double outerR = 9.8;
+        const double innerR = 7.3;
+        const double step = (2 * math.pi) / teeth;
+        const double halfTooth = 0.20;
+        const double halfValley = 0.24;
+
+        Offset polar(double r, double a) =>
+            Offset(12 + r * math.cos(a), 12 + r * math.sin(a));
+
+        for (int i = 0; i < teeth; i++) {
+          final centerAngle = -math.pi / 2 + i * step;
+          final tLeft = polar(outerR, centerAngle - halfTooth);
+          final tRight = polar(outerR, centerAngle + halfTooth);
+          final vLeft = polar(innerR, centerAngle + step / 2 - halfValley);
+          final vRight = polar(innerR, centerAngle + step / 2 + halfValley);
+          final nextTLeft = polar(outerR, centerAngle + step - halfTooth);
+
+          if (i == 0) {
+            gear.moveTo(tLeft.dx, tLeft.dy);
+          }
+          gear.arcToPoint(tRight, radius: const Radius.circular(9.8));
+          gear.lineTo(vLeft.dx, vLeft.dy);
+          gear.arcToPoint(vRight, radius: const Radius.circular(7.3));
+          gear.lineTo(nextTLeft.dx, nextTLeft.dy);
         }
+        gear.close();
+        canvas.drawPath(gear, paint);
         break;
 
       case LucideSidebarIcon.user:
@@ -284,16 +304,6 @@ class _LucidePainter extends CustomPainter {
 
   void _rrect(Canvas c, double l, double t, double w, double h, double r, Paint p) {
     c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(l, t, w, h), Radius.circular(r)), p);
-  }
-
-  double _cos(double rad) {
-    const vals = [1.0, 0.70710678, 0.0, -0.70710678, -1.0, -0.70710678, 0.0, 0.70710678];
-    return vals[((rad / (3.14159265 / 4)).round()) % 8];
-  }
-
-  double _sin(double rad) {
-    const vals = [0.0, 0.70710678, 1.0, 0.70710678, 0.0, -0.70710678, -1.0, -0.70710678];
-    return vals[((rad / (3.14159265 / 4)).round()) % 8];
   }
 
   @override

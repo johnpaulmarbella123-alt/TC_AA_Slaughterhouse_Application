@@ -512,19 +512,22 @@ class _SettingsPageState extends State<SettingsPage>
                 Text(
                   'System Settings & Administration',
                   style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    fontSize: 24,
+                    height: 32 / 24,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
                   ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   'Configure slaughter fees, staff roles & module access, capacity schedules, administrator profile, and branding.',
                   style: TextStyle(
-                    fontSize: 12.5,
+                    fontSize: 14,
+                    height: 20 / 14,
+                    fontWeight: FontWeight.w400,
                     color: isDark
                         ? const Color(0xFF94A3B8)
-                        : const Color(0xFF64748B),
+                        : const Color(0xFF475569),
                   ),
                 ),
               ],

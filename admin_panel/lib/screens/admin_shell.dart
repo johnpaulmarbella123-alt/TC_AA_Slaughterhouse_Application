@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,7 @@ import 'reports_records_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
 import '../services/staff_notification_service.dart';
+import '../widgets/dialog_blur_observer.dart';
 import '../widgets/lucide_sidebar_icons.dart';
 
 class AdminShell extends StatefulWidget {
@@ -117,52 +119,76 @@ class _AdminShellState extends State<AdminShell> {
           });
         }
 
+        final shellBody = Row(
+          children: [
+            // ─── SIDEBAR ───
+            _AdminSidebar(
+              selectedIndex: _selectedIndex,
+              onItemSelected: (idx, [tab]) => _onNavigate(idx, tab),
+            ),
+            // ─── CONTENT AREA (Preserved in memory for instant zero-lag navigation) ───
+            Expanded(
+              child: IndexedStack(
+                index: _selectedIndex,
+                children: [
+                  _loadedPages.contains(0)
+                      ? DashboardPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(1)
+                      ? ReceivingRequestsPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(2)
+                      ? DocumentVerificationPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(3)
+                      ? SlaughterInspectionPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(4)
+                      ? PaymentCashieringPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(5)
+                      ? MeatReleasingPage(onNavigate: _onNavigate)
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(6)
+                      ? ReportsRecordsPage(
+                          initialTab: _reportsInitialTab,
+                        )
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(7)
+                      ? SettingsPage(
+                          initialTab: _settingsInitialTab,
+                          navVersion: _settingsNavVersion,
+                        )
+                      : const SizedBox.shrink(),
+                ],
+              ),
+            ),
+          ],
+        );
+
         return Scaffold(
-          body: Row(
-            children: [
-              // ─── SIDEBAR ───
-              _AdminSidebar(
-                selectedIndex: _selectedIndex,
-                onItemSelected: (idx, [tab]) => _onNavigate(idx, tab),
-              ),
-              // ─── CONTENT AREA (Preserved in memory for instant zero-lag navigation) ───
-              Expanded(
-                child: IndexedStack(
-                  index: _selectedIndex,
-                  children: [
-                    _loadedPages.contains(0)
-                        ? DashboardPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(1)
-                        ? ReceivingRequestsPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(2)
-                        ? DocumentVerificationPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(3)
-                        ? SlaughterInspectionPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(4)
-                        ? PaymentCashieringPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(5)
-                        ? MeatReleasingPage(onNavigate: _onNavigate)
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(6)
-                        ? ReportsRecordsPage(
-                            initialTab: _reportsInitialTab,
-                          )
-                        : const SizedBox.shrink(),
-                    _loadedPages.contains(7)
-                        ? SettingsPage(
-                            initialTab: _settingsInitialTab,
-                            navVersion: _settingsNavVersion,
-                          )
-                        : const SizedBox.shrink(),
-                  ],
-                ),
-              ),
-            ],
+          body: ValueListenableBuilder<bool>(
+            valueListenable: DialogBlurObserver.instance.hasActiveDialog,
+            child: shellBody,
+            builder: (context, hasDialog, child) {
+              return TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: hasDialog ? 4.0 : 0.0),
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                child: child,
+                builder: (context, sigma, innerChild) {
+                  return ImageFiltered(
+                    enabled: sigma > 0.05,
+                    imageFilter: ImageFilter.blur(
+                      sigmaX: sigma,
+                      sigmaY: sigma,
+                      tileMode: TileMode.clamp,
+                    ),
+                    child: innerChild,
+                  );
+                },
+              );
+            },
           ),
         );
       },

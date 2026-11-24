@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/audit_log_service.dart';
+import '../services/walk_in_sms_service.dart';
 
 /// Reusable Walk-In Phone / SMS Notification helper for Tabaco City "AA" Slaughterhouse.
 /// Replaces printed claim stubs with a direct, zero-printer SMS / Phone feedback workflow
@@ -120,9 +121,12 @@ class WalkInSmsHelper {
       ),
     );
 
+    bool isSending = false;
+
     await showDialog<void>(
       context: context,
-      builder: (ctx) => Dialog(
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: Container(
           width: 520,
@@ -231,74 +235,106 @@ class WalkInSmsHelper {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  if (phone.isNotEmpty)
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final body = Uri.encodeComponent(msgCtrl.text.trim());
-                        final uri = Uri.parse('sms:$phone?body=$body');
-                        await AuditLogService.instance.log(
-                          action: 'WALKIN_SMS_NOTIFIED',
-                          module: stage.toUpperCase(),
-                          targetId: requestId ?? refNo,
-                          details: {
-                            'method': 'sms_app',
-                            'customer_name': customerName,
-                            'contact_number': phone,
-                            'ref_no': refNo,
+                  OutlinedButton.icon(
+                    onPressed: isSending
+                        ? null
+                        : () async {
+                            await Clipboard.setData(ClipboardData(text: msgCtrl.text.trim()));
+                            await AuditLogService.instance.log(
+                              action: 'WALKIN_SMS_NOTIFIED',
+                              module: stage.toUpperCase(),
+                              targetId: requestId ?? refNo,
+                              details: {
+                                'method': 'copy_sms',
+                                'customer_name': customerName,
+                                'contact_number': phone,
+                                'ref_no': refNo,
+                              },
+                            );
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('SMS message copied for $customerName ($phone)'),
+                                  backgroundColor: const Color(0xFF0F5132),
+                                ),
+                              );
+                            }
                           },
-                        );
-                        if (await canLaunchUrl(uri)) {
-                          await launchUrl(uri);
-                        } else if (context.mounted) {
-                          Clipboard.setData(ClipboardData(text: msgCtrl.text.trim()));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('SMS app not available on desktop — message copied to clipboard!'),
-                              backgroundColor: Color(0xFF0F5132),
-                            ),
-                          );
-                        }
-                      },
-                      icon: const Icon(Icons.send_outlined, size: 16),
-                      label: const Text('Open SMS App'),
-                    ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    onPressed: () async {
-                      await Clipboard.setData(ClipboardData(text: msgCtrl.text.trim()));
-                      await AuditLogService.instance.log(
-                        action: 'WALKIN_SMS_NOTIFIED',
-                        module: stage.toUpperCase(),
-                        targetId: requestId ?? refNo,
-                        details: {
-                          'method': 'copy_sms',
-                          'customer_name': customerName,
-                          'contact_number': phone,
-                          'ref_no': refNo,
-                        },
-                      );
-                      if (ctx.mounted) Navigator.pop(ctx);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('SMS update copied for $customerName ($phone)'),
-                            backgroundColor: const Color(0xFF0F5132),
-                          ),
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.copy_rounded, size: 16),
-                    label: const Text('Copy SMS Update'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F5132),
-                      foregroundColor: Colors.white,
-                    ),
+                    icon: const Icon(Icons.copy_rounded, size: 15),
+                    label: const Text('Copy SMS'),
                   ),
+                  if (phone.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: isSending
+                          ? null
+                          : () async {
+                              final body = Uri.encodeComponent(msgCtrl.text.trim());
+                              final uri = Uri.parse('sms:$phone?body=$body');
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri);
+                              } else if (context.mounted) {
+                                Clipboard.setData(ClipboardData(text: msgCtrl.text.trim()));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('SMS app not available on desktop — message copied to clipboard!'),
+                                    backgroundColor: Color(0xFF0F5132),
+                                  ),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.open_in_new, size: 15),
+                      label: const Text('SMS App'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: isSending
+                          ? null
+                          : () async {
+                              setDialogState(() => isSending = true);
+                              final result = await WalkInSmsService.sendSms(
+                                phone: phone,
+                                message: msgCtrl.text.trim(),
+                                stage: stage,
+                                refNo: refNo,
+                                customerName: customerName,
+                                requestId: requestId,
+                              );
+                              if (ctx.mounted) {
+                                setDialogState(() => isSending = false);
+                                if (result.success) Navigator.pop(ctx);
+                              }
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(result.message),
+                                    backgroundColor: result.success
+                                        ? const Color(0xFF0F5132)
+                                        : Colors.redAccent,
+                                  ),
+                                );
+                              }
+                            },
+                      icon: isSending
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.send_rounded, size: 16),
+                      label: Text(isSending ? 'Sending...' : 'Send SMS Now'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F5132),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
           ),
         ),
+      ),
       ),
     );
     msgCtrl.dispose();

@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/illegal_slaughter_pdf_generator.dart';
 import '../services/notification_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/phone_number_formatter.dart';
 
 class IllegalSlaughterReportsView extends StatefulWidget {
   final VoidCallback? onReportsUpdated;
@@ -3414,7 +3415,16 @@ class _WalkInReportDialogState extends State<_WalkInReportDialog> {
                               flex: 2,
                               child: TextFormField(
                                 controller: _phoneCtrl,
-                                decoration: _fieldDeco('Contact Number', prefixIcon: Icons.phone_outlined),
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [PhoneNumberFormatter()],
+                                decoration: _fieldDeco('Contact Number (e.g. 0917-123-4567)', prefixIcon: Icons.phone_outlined),
+                                validator: (v) {
+                                  final val = (v ?? '').trim();
+                                  if (val.isEmpty) return null;
+                                  return PhoneNumberFormatter.isValidExact11(val)
+                                      ? null
+                                      : 'Must be exactly 11 digits';
+                                },
                               ),
                             ),
                           ],

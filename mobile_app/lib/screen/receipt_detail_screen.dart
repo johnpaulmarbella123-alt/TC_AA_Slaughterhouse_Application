@@ -9,6 +9,7 @@ import 'dashed_line.dart';
 import 'payment.dart' show kMintHeader;
 import 'select_payment_screen.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/phone_number_formatter.dart';
 
 const kAccentGreen = Color(0xFF1BC47D);
 
@@ -1437,7 +1438,8 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                     TextField(
                       controller: contactCtrl,
                       keyboardType: TextInputType.phone,
-                      decoration: _sheetInputDecoration('e.g. 09171234567'),
+                      inputFormatters: [PhoneNumberFormatter()],
+                      decoration: _sheetInputDecoration('e.g. 0917-123-4567'),
                       style: const TextStyle(fontSize: 13),
                     ),
                     const SizedBox(height: 12),
@@ -1484,6 +1486,15 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                           if (name.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Please enter representative full name'), backgroundColor: Colors.orange),
+                            );
+                            return;
+                          }
+                          if (!PhoneNumberFormatter.isValidExact11(contact)) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Contact number must be exactly 11 digits (e.g. 0917-123-4567)'),
+                                backgroundColor: Colors.orange,
+                              ),
                             );
                             return;
                           }

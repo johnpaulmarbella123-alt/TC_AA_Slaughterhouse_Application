@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/phone_number_formatter.dart';
 
 /// Full-screen page for reporting illegal slaughter activities.
 class ReportIllegalSlaughterScreen extends StatelessWidget {
@@ -1355,13 +1356,18 @@ class _ReportFormSheetState extends State<_ReportFormSheet> {
                 TextFormField(
                   controller: _phoneCtrl,
                   keyboardType: TextInputType.phone,
+                  inputFormatters: [PhoneNumberFormatter()],
                   decoration: _inputDeco(
-                    "+63 XXX XXX XXXX",
+                    "e.g. 0917-123-4567",
                     prefixIcon: Icons.phone_outlined,
                   ),
                   validator: (v) {
                     if (_isAnonymous) return null;
-                    return (v == null || v.trim().isEmpty) ? 'Required' : null;
+                    final val = (v ?? '').trim();
+                    if (val.isEmpty) return 'Required';
+                    return PhoneNumberFormatter.isValidExact11(val)
+                        ? null
+                        : 'Must be exactly 11 digits (e.g. 0917-123-4567)';
                   },
                 ),
                 const SizedBox(height: 14),

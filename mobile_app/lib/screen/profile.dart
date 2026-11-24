@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../auth/auth_server.dart';
 import '../pages/home_page.dart'; // for globalAvatarUrl
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/phone_number_formatter.dart';
 import 'dart:async';
 
 class ProfileContent extends StatefulWidget {
@@ -173,7 +174,8 @@ class _ProfileContentState extends State<ProfileContent> with WidgetsBindingObse
       }
 
       _nameController.text = name;
-      _phoneController.text = phoneNumber;
+      _phoneController.text =
+          phoneNumber.isNotEmpty ? PhoneNumberFormatter.format(phoneNumber) : '';
       _addressController.text = address;
     } catch (e) {
       debugPrint("Error loading profile: $e");
@@ -345,6 +347,20 @@ String? _extractStoragePath(String publicUrl) {
 
   Future<void> toggleEdit() async {
     if (isEditing) {
+      final trimmedPhone = _phoneController.text.trim();
+      if (trimmedPhone.isNotEmpty &&
+          !PhoneNumberFormatter.isValidExact11(trimmedPhone)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Phone number must be exactly 11 digits (e.g. 0917-123-4567).'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
         try {
@@ -603,6 +619,8 @@ String? _extractStoragePath(String publicUrl) {
               icon: Icons.phone_outlined,
               controller: _phoneController,
               isEditing: isEditing,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [PhoneNumberFormatter()],
             ),
             const SizedBox(height: 16),
             _buildDataField(
@@ -625,6 +643,7 @@ String? _extractStoragePath(String publicUrl) {
     required TextEditingController controller,
     required bool isEditing,
     TextCapitalization textCapitalization = TextCapitalization.none,
+    TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
@@ -646,6 +665,7 @@ String? _extractStoragePath(String publicUrl) {
                 child: isEditing
                     ? TextField(
                         controller: controller,
+                        keyboardType: keyboardType,
                         textCapitalization: textCapitalization,
                         inputFormatters: inputFormatters,
                         decoration: const InputDecoration(border: InputBorder.none),

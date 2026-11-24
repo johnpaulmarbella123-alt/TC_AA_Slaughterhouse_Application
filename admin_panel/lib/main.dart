@@ -6,6 +6,7 @@ import 'screens/hero_section.dart';
 import 'screens/admin_shell.dart';
 import 'pages/login_page.dart';
 import 'services/app_settings_service.dart';
+import 'widgets/dialog_blur_observer.dart';
 import 'theme.dart';
 
 void main() async {
@@ -57,6 +58,7 @@ class MyApp extends StatelessWidget {
           darkTheme: AppTheme.darkTheme,
           themeMode: AppSettingsService.instance.themeMode,
           debugShowCheckedModeBanner: false,
+          navigatorObservers: [DialogBlurObserver.instance],
           initialRoute: (Supabase.instance.client.auth.currentSession == null &&
                   !AppSettingsService.instance.hasActiveStaffSession)
               ? '/'

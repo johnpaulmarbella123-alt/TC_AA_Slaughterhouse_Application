@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../pages/home_page.dart';
 import '../screen/welcome.dart';
+import '../widgets/connectivity_overlay.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -118,14 +119,7 @@ class _AuthGateState extends State<AuthGate> {
         if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
           return snapshot.data!;
         }
-        return const Scaffold(
-          backgroundColor: Colors.white,
-          body: Center(
-            child: CircularProgressIndicator(
-              color: Color(0xFF218358),
-            ),
-          ),
-        );
+        return const AppStartupLoadingView();
       },
     );
   }

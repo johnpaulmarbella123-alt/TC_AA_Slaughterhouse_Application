@@ -36,6 +36,20 @@ class AppColors {
   static const Color darkBorder = Color(0xFF334155);
   static const Color darkText = Color(0xFFF8FAFC);
   static const Color darkSubtext = Color(0xFF94A3B8);
+
+  /// Standard two-layer soft elevation shadow shared by KPI and table cards.
+  static List<BoxShadow> get cardElevationShadow => [
+        BoxShadow(
+          color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+        BoxShadow(
+          color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+          blurRadius: 3,
+          offset: const Offset(0, 1),
+        ),
+      ];
 }
 
 class AppTypography {
@@ -47,6 +61,26 @@ class AppTypography {
     'Roboto',
     'sans-serif',
   ];
+
+  /// Standard Page Header Title (h1): 24px, line-height 32px, Bold (700), #0F172A
+  static const TextStyle pageHeaderTitle = TextStyle(
+    fontFamily: uiFontFamily,
+    fontFamilyFallback: uiFontFallback,
+    fontSize: 24,
+    height: 32 / 24,
+    fontWeight: FontWeight.w700,
+    color: AppColors.ink,
+  );
+
+  /// Standard Page Header Subtitle (p): 14px, line-height 20px, Regular (400), #475569
+  static const TextStyle pageHeaderSubtitle = TextStyle(
+    fontFamily: uiFontFamily,
+    fontFamilyFallback: uiFontFallback,
+    fontSize: 14,
+    height: 20 / 14,
+    fontWeight: FontWeight.w400,
+    color: AppColors.muted,
+  );
 
   static const String monoFontFamily = 'Courier New';
   static const List<String> monoFontFallback = ['Courier', 'monospace'];
@@ -159,7 +193,9 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         color: AppColors.surface,
-        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        elevation: 3,
+        shadowColor: const Color(0xFF0F172A).withValues(alpha: 0.14),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: const BorderSide(color: AppColors.borderDivider),

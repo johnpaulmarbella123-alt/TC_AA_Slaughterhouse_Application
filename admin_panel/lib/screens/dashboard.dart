@@ -448,94 +448,161 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       final today = DateTime.now();
 
-      // Total Revenue (Today only — resets at midnight; Reports keeps full history)
       double revenue = 0;
-      try {
-        final paymentsData = await supabase
-            .from('payments')
-            .select('total_amount, status, created_at')
-            .eq('status', 'paid');
-
-        for (var p in List<Map<String, dynamic>>.from(paymentsData)) {
-          final createdAt = DateTime.tryParse(p['created_at']?.toString() ?? '');
-          if (!_isSameLocalDay(createdAt, today)) continue;
-          final amt = double.tryParse(p['total_amount']?.toString() ?? '0') ?? 0;
-          revenue += amt;
-        }
-      } catch (e) {
-        debugPrint('Dashboard payments query error: $e');
-      }
-
-      // Animals Processed (Today only — resets at midnight)
       int animals = 0;
-      try {
-        final processedStatuses = [
-          'doc_verified',
-          'releasable',
-          'mic_generated',
-          'payment_pending',
-          'paid',
-          'released',
-          'completed'
-        ];
-        final requestsData = await supabase
-            .from('requests')
-            .select('animal_count, status, created_at, released_at')
-            .inFilter('status', processedStatuses);
-
-        for (var r in List<Map<String, dynamic>>.from(requestsData)) {
-          final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
-          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
-          final effectiveDate = releasedAt ?? createdAt;
-          if (!_isSameLocalDay(effectiveDate, today)) continue;
-          final count = int.tryParse(r['animal_count']?.toString() ?? '0') ?? 1;
-          animals += count;
-        }
-      } catch (e) {
-        debugPrint('Dashboard animals query error: $e');
-      }
-
-      // Avg Processing Time (Today only — resets at midnight)
       double avgHours = 0.0;
+      final countedRequestIds = <String>{};
+
+      // Fetch requests with inspection & payment details so Dashboard matches Reports & Records
       try {
-        final completedData = await supabase
+        final rawRequests = await supabase
             .from('requests')
-            .select('created_at, released_at')
-            .not('released_at', 'is', null);
+            .select('*, slaughter_inspection(*), payments(*)');
 
         double totalHours = 0;
         int completedCount = 0;
-        for (var r in List<Map<String, dynamic>>.from(completedData)) {
-          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+
+        for (var raw in List<Map<String, dynamic>>.from(rawRequests)) {
+          final r = Map<String, dynamic>.from(raw);
+          final status = (r['status'] ?? '').toString().toLowerCase();
+
+          // Flatten slaughter_inspection
+          Map<String, dynamic>? insp;
+          final inspRaw = r['slaughter_inspection'];
+          if (inspRaw is List && inspRaw.isNotEmpty && inspRaw.first is Map) {
+            insp = Map<String, dynamic>.from(inspRaw.first as Map);
+          } else if (inspRaw is Map) {
+            insp = Map<String, dynamic>.from(inspRaw);
+          }
+
+          // Flatten payment
+          Map<String, dynamic>? payment;
+          final payRaw = r['payments'];
+          if (payRaw is List && payRaw.isNotEmpty && payRaw.first is Map) {
+            payment = Map<String, dynamic>.from(payRaw.first as Map);
+          } else if (payRaw is Map) {
+            payment = Map<String, dynamic>.from(payRaw);
+          }
+
+          final anti = (insp?['anti_mortem'] ?? '').toString().toLowerCase();
+          final post = (insp?['post_mortem'] ?? '').toString().toLowerCase();
+          final condReason = (insp?['condemnation_reason'] ?? '').toString().trim();
+          final vetFindings = (insp?['veterinary_findings'] ?? '').toString().trim();
+
+          final passedCount = int.tryParse((insp?['passed_count'] ?? r['passed_count'] ?? '').toString()) ?? 0;
+          final condemnedCount = int.tryParse((insp?['condemned_count'] ?? r['condemned_count'] ?? '').toString()) ?? 0;
+          final isPartialPassed = passedCount > 0 && condemnedCount > 0;
+
+          final isFullHealthIssue = !isPartialPassed &&
+              (anti == 'failed' ||
+                  status == 'anti_mortem_failed' ||
+                  status == 'taken_back' ||
+                  post == 'failed' ||
+                  status == 'post_mortem_failed' ||
+                  status == 'condemned' ||
+                  (condReason.isNotEmpty && condReason != 'null') ||
+                  (vetFindings.isNotEmpty && vetFindings != 'null' && anti != 'passed'));
+
+          if (isFullHealthIssue) continue;
+
+          final isProcessed = post == 'passed' ||
+              [
+                'releasable',
+                'mic_generated',
+                'payment_pending',
+                'paid',
+                'out_for_delivery',
+                'released',
+                'completed',
+              ].contains(status) ||
+              (status == 'slaughter_started' && anti == 'passed');
+
+          if (!isProcessed) continue;
+
           final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
-          if (createdAt != null &&
-              releasedAt != null &&
-              _isSameLocalDay(releasedAt, today)) {
-            final diff = releasedAt.difference(createdAt).abs();
-            totalHours += diff.inMinutes / 60.0;
+          final payCreatedAt = DateTime.tryParse(payment?['created_at']?.toString() ?? '');
+          final inspUpdatedAt = DateTime.tryParse(insp?['updated_at']?.toString() ?? '');
+          final inspCreatedAt = DateTime.tryParse(insp?['created_at']?.toString() ?? '');
+          final preferredDate = DateTime.tryParse(r['preferred_date']?.toString() ?? '');
+          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+
+          final isToday = _isSameLocalDay(inspCreatedAt, today) ||
+              _isSameLocalDay(preferredDate, today) ||
+              _isSameLocalDay(releasedAt, today) ||
+              _isSameLocalDay(payCreatedAt, today) ||
+              _isSameLocalDay(inspUpdatedAt, today) ||
+              _isSameLocalDay(createdAt, today);
+
+          if (!isToday) continue;
+
+          countedRequestIds.add(r['id'].toString());
+
+          // 1. Livestock Processed (Today)
+          final headCount = isPartialPassed
+              ? passedCount
+              : (int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1);
+          animals += headCount;
+
+          // 2. Total Revenue (Today — matches Reports & Records _calcRequestFee)
+          double fee = 0;
+          if (payment != null) {
+            fee = double.tryParse((payment['total_amount'] ?? payment['amount'] ?? 0).toString()) ?? 0;
+          }
+          if (fee <= 0) {
+            fee = double.tryParse((r['total_amount'] ?? r['total_fee'] ?? 0).toString()) ?? 0;
+          }
+          if (fee <= 0) {
+            final weight = double.tryParse((insp?['carcass_weight'] ?? r['carcass_weight'] ?? 0).toString()) ?? 0;
+            if (weight > 0) {
+              fee = (weight * 5.0) + 250.0;
+            }
+          }
+          revenue += fee;
+
+          // 3. Avg Processing Time (Today — includes processed/paid/released transactions)
+          final isDoneOrNearDone = post == 'passed' ||
+              ['releasable', 'paid', 'out_for_delivery', 'released', 'completed'].contains(status);
+          final endTime = releasedAt ?? payCreatedAt ?? inspUpdatedAt ?? inspCreatedAt;
+          if (isDoneOrNearDone && createdAt != null && endTime != null) {
+            final diff = endTime.difference(createdAt).abs();
+            totalHours += diff.inSeconds / 3600.0;
             completedCount++;
           }
         }
+
         if (completedCount > 0) avgHours = totalHours / completedCount;
+
+        // Also include any standalone paid payments today whose request wasn't counted above
+        try {
+          final paymentsData = await supabase
+              .from('payments')
+              .select('request_id, total_amount, status, created_at')
+              .eq('status', 'paid');
+
+          for (var p in List<Map<String, dynamic>>.from(paymentsData)) {
+            final reqIdStr = p['request_id']?.toString() ?? '';
+            if (reqIdStr.isNotEmpty && countedRequestIds.contains(reqIdStr)) continue;
+            final pCreated = DateTime.tryParse(p['created_at']?.toString() ?? '');
+            if (!_isSameLocalDay(pCreated, today)) continue;
+            final amt = double.tryParse(p['total_amount']?.toString() ?? '0') ?? 0;
+            revenue += amt;
+          }
+        } catch (e) {
+          debugPrint('Dashboard standalone payments query error: $e');
+        }
       } catch (e) {
-        debugPrint('Dashboard avg processing time error: $e');
+        debugPrint('Dashboard stats query error: $e');
       }
 
-      // Satisfaction Rate (Today only: 50% Completed Transactions + 50% Customer Review Ratings)
+      // Satisfaction Rate (All-time cumulative — never resets on date change:
+      // 50% Completed Transactions + 50% Customer Review Ratings)
       double satisfaction = 0.0;
       try {
-        // 1. Transaction completion rate for today
-        final allReqRes =
-            await supabase.from('requests').select('status, created_at, released_at');
+        // 1. All-time transaction completion rate
+        final allReqRes = await supabase.from('requests').select('status');
         int totalRequests = 0;
         int completedRequests = 0;
         for (var req in List<Map<String, dynamic>>.from(allReqRes)) {
-          final createdAt = DateTime.tryParse(req['created_at']?.toString() ?? '');
-          final releasedAt = DateTime.tryParse(req['released_at']?.toString() ?? '');
-          if (!_isSameLocalDay(createdAt, today) &&
-              !_isSameLocalDay(releasedAt, today)) {
-            continue;
-          }
           final s = req['status']?.toString().toLowerCase() ?? '';
           if (s != 'cancelled' && s != 'rejected') {
             totalRequests++;
@@ -548,13 +615,11 @@ class _DashboardPageState extends State<DashboardPage> {
             ? (completedRequests / totalRequests) * 100.0
             : 0.0;
 
-        // 2. Customer review ratings submitted today
-        final reviewsData = await supabase.from('reviews').select('rating, created_at');
+        // 2. All-time customer review ratings
+        final reviewsData = await supabase.from('reviews').select('rating');
         double totalRating = 0;
         int reviewCount = 0;
         for (var r in List<Map<String, dynamic>>.from(reviewsData)) {
-          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
-          if (!_isSameLocalDay(createdAt, today)) continue;
           final rating = double.tryParse(r['rating']?.toString() ?? '0') ?? 0;
           if (rating > 0) {
             totalRating += rating;
@@ -807,7 +872,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String _formatProcessingTime(double hours) {
     if (hours <= 0) return '0m';
     if (hours < 1) {
-      return '${(hours * 60).round()}m';
+      final mins = (hours * 60).round();
+      return mins > 0 ? '${mins}m' : '<1m';
     } else {
       final h = hours.floor();
       final m = ((hours - h) * 60).round();
@@ -1071,18 +1137,19 @@ class _DashboardPageState extends State<DashboardPage> {
               'Welcome back, Admin',
               style: TextStyle(
                 fontSize: 24,
-                fontWeight: FontWeight.w800,
+                height: 32 / 24,
+                fontWeight: FontWeight.w700,
                 color: Color(0xFF0F172A),
-                letterSpacing: -0.4,
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             Text(
               _realtimeSubtitle,
               style: const TextStyle(
-                fontSize: 13,
+                fontSize: 14,
+                height: 20 / 14,
                 color: Color(0xFF475569),
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w400,
               ),
             ),
           ],
@@ -1170,7 +1237,7 @@ class _DashboardPageState extends State<DashboardPage> {
           title: 'TOTAL REVENUE',
           value: _formatRevenue(_totalRevenue),
           valueColor: const Color(0xFF047857),
-          subtitleText: _totalRevenue > 0 ? 'From paid requests' : 'No payments yet',
+          subtitleText: _totalRevenue > 0 ? 'From processed & paid requests' : 'No payments yet',
           subtitleColor: const Color(0xFF047857),
         );
 
@@ -1256,9 +1323,14 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
@@ -2164,6 +2236,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2264,6 +2348,18 @@ class _DashboardPageState extends State<DashboardPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2525,6 +2621,18 @@ class _DashboardPageState extends State<DashboardPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2751,6 +2859,18 @@ class _DashboardPageState extends State<DashboardPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2888,9 +3008,14 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
@@ -3060,9 +3185,9 @@ class _DashboardPageState extends State<DashboardPage> {
                       roleTitle,
                       style: const TextStyle(
                         fontSize: 24,
-                        fontWeight: FontWeight.w800,
+                        height: 32 / 24,
+                        fontWeight: FontWeight.w700,
                         color: Color(0xFF0F172A),
-                        letterSpacing: -0.4,
                       ),
                     ),
                   ),
@@ -3085,13 +3210,14 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 3),
               Text(
                 roleSubtitle,
                 style: const TextStyle(
-                  fontSize: 13,
-                  color: Color(0xFF64748B),
-                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                  height: 20 / 14,
+                  color: Color(0xFF475569),
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ],
@@ -3239,9 +3365,9 @@ class _DashboardPageState extends State<DashboardPage> {
                               'Welcome back, ${AppSettingsService.instance.profileName}',
                               style: const TextStyle(
                                 fontSize: 24,
-                                fontWeight: FontWeight.w800,
+                                height: 32 / 24,
+                                fontWeight: FontWeight.w700,
                                 color: Color(0xFF0F172A),
-                                letterSpacing: -0.4,
                               ),
                             ),
                           ),
@@ -3264,13 +3390,14 @@ class _DashboardPageState extends State<DashboardPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         _realtimeSubtitle,
                         style: const TextStyle(
-                          fontSize: 13,
+                          fontSize: 14,
+                          height: 20 / 14,
                           color: Color(0xFF475569),
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ],
@@ -3407,6 +3534,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3504,6 +3643,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                  BoxShadow(
+                    color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                    blurRadius: 3,
+                    offset: const Offset(0, 1),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3796,9 +3947,14 @@ class _DashboardPageState extends State<DashboardPage> {
         border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.035),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
           ),
         ],
       ),
@@ -3910,6 +4066,18 @@ class _DashboardPageState extends State<DashboardPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4069,6 +4237,18 @@ class _DashboardPageState extends State<DashboardPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tabaco City "AA" Slaughterhouse — Download Mobile App (APK)</title>
+  <meta name="description" content="Official Android Mobile App for the Tabaco City AA Slaughterhouse Management & Customer Portal System. Schedule slaughter requests, track inspections, pay online, and manage carcass pickup." />
+  <link rel="icon" type="image/png" href="assets/logo1.png" />
+  <style>
+    :root {
+      --primary: #0f5132;
+      --primary-hover: #0b3d26;
+      --accent: #0f766e;
+      --mint-bg: #ecfdf5;
+      --mint-border: #a7f3d0;
+      --canvas: #f4f6f9;
+      --surface: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --border: #e2e8f0;
+      --shadow: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.05);
+      --shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.14);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--canvas);
+      color: var(--ink);
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Navbar */
+    .navbar {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(255, 255, 255, 0.92);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--ink);
+    }
+    .brand img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #fff;
+      padding: 2px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    }
+    .brand-text span {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .brand-text strong {
+      font-size: 15.5px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+    }
+    .nav-links a {
+      text-decoration: none;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 0.15s ease;
+    }
+    .nav-links a:hover { color: var(--primary); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-size: 14.5px;
+      font-weight: 600;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #ffffff;
+      box-shadow: 0 6px 16px rgba(15, 81, 50, 0.25);
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+    .btn-outline {
+      background: #ffffff;
+      color: var(--primary);
+      border: 1.5px solid var(--primary);
+    }
+    .btn-outline:hover {
+      background: var(--mint-bg);
+    }
+    .nav-cta {
+      padding: 9px 16px;
+      font-size: 13.5px;
+    }
+
+    /* Hero */
+    .hero {
+      position: relative;
+      overflow: hidden;
+      background: linear-gradient(135deg, #0b3d26 0%, #0f5132 55%, #0f766e 100%);
+      color: #ffffff;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: url("assets/bg.jpeg") center/cover no-repeat;
+      opacity: 0.16;
+      filter: blur(3px);
+      transform: scale(1.04);
+    }
+    .hero-inner {
+      position: relative;
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 72px 24px 80px;
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 44px;
+      align-items: center;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      color: #d1fae5;
+      font-size: 12.5px;
+      font-weight: 600;
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 4vw, 2.85rem);
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+    .hero p.lead {
+      font-size: 16.5px;
+      color: #e2e8f0;
+      max-width: 560px;
+      margin-bottom: 28px;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .hero .btn-primary {
+      background: #ffffff;
+      color: var(--primary);
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+    }
+    .hero .btn-primary:hover {
+      background: #ecfdf5;
+    }
+    .hero .btn-outline {
+      background: rgba(255, 255, 255, 0.1);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.45);
+    }
+    .hero .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    .meta-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 13px;
+      color: #a7f3d0;
+    }
+    .meta-badges span {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* QR Card */
+    .qr-card {
+      background: #ffffff;
+      color: var(--ink);
+      border-radius: 20px;
+      padding: 28px 24px;
+      text-align: center;
+      box-shadow: var(--shadow-lg);
+      border: 1px solid rgba(255, 255, 255, 0.6);
+    }
+    .qr-card .seal {
+      width: 56px;
+      height: 56px;
+      margin: 0 auto 10px;
+      display: block;
+    }
+    .qr-card h2 {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 4px;
+    }
+    .qr-card p {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+    .qr-box {
+      display: inline-block;
+      padding: 12px;
+      border-radius: 14px;
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      margin-bottom: 14px;
+    }
+    .qr-box img {
+      width: 184px;
+      height: 184px;
+      display: block;
+      border-radius: 8px;
+    }
+    .qr-file {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--primary);
+      background: var(--mint-bg);
+      border: 1px solid var(--mint-border);
+      padding: 5px 10px;
+      border-radius: 999px;
+      display: inline-block;
+      font-weight: 600;
+    }
+
+    /* Sections */
+    .section {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 68px 24px;
+    }
+    .section-header {
+      text-align: center;
+      max-width: 680px;
+      margin: 0 auto 44px;
+    }
+    .section-eyebrow {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .section-header h2 {
+      font-size: 28px;
+      line-height: 1.25;
+      font-weight: 800;
+      color: var(--ink);
+      margin-bottom: 10px;
+    }
+    .section-header p {
+      font-size: 15px;
+      color: var(--muted);
+    }
+
+    /* Features Grid */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .feature-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
+    }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--mint-bg);
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+    .feature-card h3 {
+      font-size: 16.5px;
+      font-weight: 700;
+      color: var(--ink);
+      margin-bottom: 8px;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    /* Install Steps */
+    .install-wrap {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .step-card {
+      background: var(--canvas);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    .step-num {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 15px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+    .step-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .step-card p {
+      font-size: 13.5px;
+      color: var(--muted);
+    }
+
+    /* Footer */
+    footer {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 36px 24px 48px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 13.5px;
+    }
+    footer strong { color: var(--ink); }
+
+    @media (max-width: 900px) {
+      .hero-inner { grid-template-columns: 1fr; padding: 48px 20px 56px; }
+      .features-grid, .steps-grid { grid-template-columns: 1fr; }
+      .nav-links a:not(.btn) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Sticky Navbar -->
+  <header class="navbar">
+    <div class="nav-inner">
+      <a class="brand" href="#top">
+        <img src="assets/logo1.png" alt="City of Tabaco Official Seal" />
+        <div class="brand-text">
+          <span>City of Tabaco, Albay</span>
+          <strong>AA Slaughterhouse App</strong>
+        </div>
+      </a>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">How to Install</a>
+        <a class="btn btn-primary nav-cta" href="https://github.com/johnpaulmarbella123-alt/TC_AA_Slaughterhouse_Application/releases/latest/download/TC_AA_Slaughterhouse_App.apk">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download APK
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section id="top" class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="pill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          Official Android App • Version 1.0.3
+        </div>
+        <h1>Tabaco City "AA" Slaughterhouse Mobile Portal</h1>
+        <p class="lead">
+          Schedule livestock slaughter requests, track ante-mortem and post-mortem inspections in real time, settle slaughter fees via GCash/Online or Cash-on-Pickup, and authorize carcass collection directly from your Android phone.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/johnpaulmarbella123-alt/TC_AA_Slaughterhouse_Application/releases/latest/download/TC_AA_Slaughterhouse_App.apk">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Android APK (101 MB)
+          </a>
+          <a class="btn btn-outline" href="#features">Explore Features</a>
+        </div>
+        <div class="meta-badges">
+          <span>✓ Android 8.0+ Supported</span>
+          <span>✓ Free Official Download</span>
+          <span>✓ Direct GitHub Release</span>
+        </div>
+      </div>
+
+      <div class="qr-card">
+        <img class="seal" src="assets/logo1.png" alt="City of Tabaco Seal" />
+        <h2>Scan to Download APK</h2>
+        <p>Point your Android camera at the QR code to download directly to your phone.</p>
+        <div class="qr-box">
+          <img src="assets/app_qr_code.png" alt="Scan QR Code to Download TC AA Slaughterhouse APK" />
+        </div>
+        <div>
+          <span class="qr-file">TC_AA_Slaughterhouse_App.apk</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Section (#features) -->
+  <section id="features" class="section">
+    <div class="section-header">
+      <div class="section-eyebrow">Key Features</div>
+      <h2>Everything Meat Dealers & Farmers Need</h2>
+      <p>Built for Tabaco City Market and Barangay dealers to make slaughterhouse transactions faster, transparent, and paperless.</p>
+    </div>
+
+    <div class="features-grid">
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <h3>Online Slaughter Scheduling</h3>
+        <p>Submit Barangay or Market slaughter requests with multi-head lot details, livestock markings, and preferred dates from anywhere.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h3>Real-Time Inspection Tracking</h3>
+        <p>Follow every stage live—from Receiving and Document Verification to Ante-Mortem, Post-Mortem Inspection, and MIC issuance.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M8 7h8"/><path d="M8 11h8"/><path d="M8 15h5"/></svg>
+        </div>
+        <h3>Digital Receipts & Payments</h3>
+        <p>Receive itemized Official Receipts with transparent fee breakdowns. Pay online via GCash/Maya/Card or select Cash-on-Pickup.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>
+        </div>
+        <h3>Meat Pickup Authorization</h3>
+        <p>Unavailable to claim personally? Designate an Authorized Representative with valid ID once your meat is ready for collection.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        </div>
+        <h3>Instant Alerts & Badges</h3>
+        <p>Get notified immediately when receipts are issued, payments are verified, or carcasses are ready for pickup before the 5:00 PM cutoff.</p>
+      </article>
+
+      <article class="feature-card">
+        <div class="feature-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <h3>Illegal Slaughter Reporting</h3>
+        <p>Help protect food safety in Tabaco City by reporting suspected hot meat or uninspected slaughtering with photo and location details.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- Installation Guide (#install) -->
+  <div id="install" class="install-wrap">
+    <section class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">Quick Setup</div>
+        <h2>How to Install on Android</h2>
+        <p>Follow these three quick steps to install the official APK on your Android phone.</p>
+      </div>
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <h3>Download the APK</h3>
+          <p>Tap the <strong>Download Android APK</strong> button above or scan the QR code to save <code>TC_AA_Slaughterhouse_App.apk</code> to your device.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <h3>Allow App Installation</h3>
+          <p>Open the downloaded APK file. If prompted by Android, enable <strong>Install unknown apps</strong> for your browser or file manager.</p>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <h3>Install & Sign In</h3>
+          <p>Tap <strong>Install</strong>, open the Tabaco City "AA" Slaughterhouse app, and sign in or create your customer account to get started.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div>
+      <strong>City Government of Tabaco — City Abattoir Office</strong><br />
+      San Roque, Tabaco City, Albay, Philippines
+    </div>
+    <div>
+      Official Mobile App Distribution Portal • v1.0.3
+    </div>
+  </footer>
+</body>
+</html>

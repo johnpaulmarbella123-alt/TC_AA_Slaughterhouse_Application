@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
@@ -10,6 +11,7 @@ import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
+import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/animals_in_lot_editor.dart';
@@ -279,17 +281,23 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       ),
       child: Row(
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Slaughter & Inspection',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-              const SizedBox(height: 2),
-              Text('Process logging, post-mortem inspection, MIC generation',
-                  style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-            ],
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Slaughter & Inspection',
+                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                ),
+                SizedBox(height: 3),
+                Text(
+                  'Process logging, post-mortem inspection, MIC generation',
+                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
           StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
           const SizedBox(width: 12),
           Container(
@@ -391,8 +399,18 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+            BoxShadow(
+              color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+              blurRadius: 3,
+              offset: const Offset(0, 1),
+            ),
           ],
         ),
         child: Column(
@@ -421,7 +439,19 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))],
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -649,41 +679,43 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                     )),
                     // Customer Response column
                     DataCell(
-                      (req['user_id'] ?? '').toString().trim().isEmpty
-                          ? _buildBadge('Walk-In (On-Site)', Colors.grey, light: true)
-                          : (isPostMortemFailed || isCondemnedStatus)
+                      (isAntiMortemFailed &&
+                              (req['special_instruction'] ?? '').toString().contains('[CONFINED_FROM:'))
+                          ? Builder(builder: (_) {
+                              final instr = (req['special_instruction'] ?? '').toString();
+                              final m = RegExp(r'\[CONFINED_FROM:([^|\]]+)(?:\|days=(\d+))?\]').firstMatch(instr);
+                              final parentRef = m?.group(1) ?? '';
+                              final days = m?.group(2) ?? '1-2';
+                              final headCount = req['animal_count'] ?? 1;
+                              return GestureDetector(
+                                onTap: () => _showClearConfinementDialog(req),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    _buildBadge(
+                                      customerResponse == 'confine'
+                                          ? 'Confine ($headCount head • ${days}d)'
+                                          : 'Awaiting Confine ($headCount • ${days}d)',
+                                      customerResponse == 'confine' ? Colors.blue : Colors.orange,
+                                      light: true,
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      parentRef.isNotEmpty ? 'From $parentRef • Tap to manage' : 'Tap to manage',
+                                      style: TextStyle(fontSize: 9, color: Colors.blue.shade400),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            })
+                          : ((req['user_id'] ?? '').toString().trim().isEmpty ||
+                                  (req['special_instruction'] ?? '').toString().contains('[WALK_IN]') ||
+                                  (req['contact_number'] ?? '').toString().trim().isNotEmpty)
+                              ? _buildBadge('Walk-in Customer', Colors.grey, light: true)
+                              : (isPostMortemFailed || isCondemnedStatus)
                           ? (isCondemnationAcknowledged
                               ? _buildBadge('Slip Received & Concluded', Colors.green, light: true)
                               : _buildBadge('Awaiting Slip Review', Colors.orange, light: true))
-                          : (isAntiMortemFailed &&
-                                  (req['special_instruction'] ?? '').toString().contains('[CONFINED_FROM:'))
-                              ? Builder(builder: (_) {
-                                  final instr = (req['special_instruction'] ?? '').toString();
-                                  final m = RegExp(r'\[CONFINED_FROM:([^|\]]+)(?:\|days=(\d+))?\]').firstMatch(instr);
-                                  final parentRef = m?.group(1) ?? '';
-                                  final days = m?.group(2) ?? '1-2';
-                                  final headCount = req['animal_count'] ?? 1;
-                                  return GestureDetector(
-                                    onTap: () => _showClearConfinementDialog(req),
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        _buildBadge(
-                                          customerResponse == 'confine'
-                                              ? 'Confine ($headCount head • ${days}d)'
-                                              : 'Awaiting Confine ($headCount • ${days}d)',
-                                          customerResponse == 'confine' ? Colors.blue : Colors.orange,
-                                          light: true,
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          parentRef.isNotEmpty ? 'From $parentRef • Tap to manage' : 'Tap to manage',
-                                          style: TextStyle(fontSize: 9, color: Colors.blue.shade400),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                })
                               : ((req['anti_mortem']?.toString() == 'Failed') &&
                                   req['condemned_count'] != null &&
                                   (req['condemned_count'] as num) > 0 &&
@@ -1940,8 +1972,111 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
 
   bool _healthIssueDetected = false;
   final _condemnationCtrl = TextEditingController();
+  String? _condemnationType = 'Partial Condemnation';
+  TextEditingController? _condemnedPartCtrlField;
+  TextEditingController? _condemnedWeightCtrlField;
+  TextEditingController? _condemnationReasonCtrlField;
+  bool? _condemnationSlipGeneratedField = false;
+  bool? _showCondemnationFormField = false;
   int _condemnedCount = 1;
   int _confinementDays = 2;
+
+  bool get _showCondemnationForm => _showCondemnationFormField == true;
+  set _showCondemnationForm(bool v) => _showCondemnationFormField = v;
+
+  String get _resolvedCondemnationType =>
+      (_condemnationType == 'Whole Condemnation')
+          ? 'Whole Condemnation'
+          : 'Partial Condemnation';
+  TextEditingController get _condemnedPartCtrl =>
+      _condemnedPartCtrlField ??= TextEditingController();
+  TextEditingController get _condemnedWeightCtrl =>
+      _condemnedWeightCtrlField ??= TextEditingController(text: '0');
+  TextEditingController get _condemnationReasonCtrl =>
+      _condemnationReasonCtrlField ??= TextEditingController();
+  bool get _condemnationSlipGenerated => _condemnationSlipGeneratedField == true;
+  set _condemnationSlipGenerated(bool v) => _condemnationSlipGeneratedField = v;
+
+  String get _condemnationSlipNo {
+    final idNum = (widget.request['id'] ?? 0).toString().padLeft(4, '0');
+    return 'CS-${DateTime.now().year}-$idNum';
+  }
+
+  String _buildStructuredCondemnationSummary() {
+    final typeLabel = _resolvedCondemnationType;
+    final isPartial = typeLabel == 'Partial Condemnation';
+    final part = isPartial
+        ? _condemnedPartCtrl.text.trim()
+        : (_condemnedPartCtrl.text.trim().isNotEmpty
+            ? _condemnedPartCtrl.text.trim()
+            : 'Whole Carcass');
+    final wtStr = _condemnedWeightCtrl.text.trim().isEmpty
+        ? '0'
+        : _condemnedWeightCtrl.text.trim();
+    final reason = _condemnationReasonCtrl.text.trim();
+    return '[$typeLabel | Slip: $_condemnationSlipNo | Part: $part | Weight: $wtStr kg] $reason';
+  }
+
+  Future<void> _handleGenerateCondemnationSlip() async {
+    final isPartial = _resolvedCondemnationType == 'Partial Condemnation';
+    final part = _condemnedPartCtrl.text.trim();
+    final reason = _condemnationReasonCtrl.text.trim();
+
+    if (isPartial && part.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter the condemned part (e.g., Liver, Lungs).'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    if (reason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter the condemnation reason (e.g., Pneumonia, Bruising).'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final summary = _buildStructuredCondemnationSummary();
+    setState(() {
+      _condemnationCtrl.text = summary;
+      _condemnationSlipGenerated = true;
+      if (!isPartial) {
+        _healthIssueDetected = true;
+        _postMortem = 'Failed';
+      } else {
+        _healthIssueDetected = false;
+      }
+    });
+
+    final inspector = _selectedInspector ?? _inspectorCtrl.text.trim();
+    final weightDisplay = _condemnedWeightCtrl.text.trim().isNotEmpty &&
+            _condemnedWeightCtrl.text.trim() != '0'
+        ? _condemnedWeightCtrl.text.trim()
+        : (_carcassCtrl.text.trim().isNotEmpty ? _carcassCtrl.text.trim() : '0');
+
+    await showDialog(
+      context: context,
+      builder: (_) => _CondemnationSlipDialog(
+        request: widget.request,
+        condemnationReason: summary,
+        inspectorName: inspector.isNotEmpty ? inspector : 'Meat Inspector',
+        carcassWeight: weightDisplay,
+        supabase: widget.supabase,
+        isPartialCondemnation: isPartial,
+        slipNumber: _condemnationSlipNo,
+        onDone: () {
+          if (!isPartial) {
+            widget.onDone();
+          }
+        },
+      ),
+    );
+  }
 
   int get _totalHeads => int.tryParse(widget.request['animal_count']?.toString() ?? '1') ?? 1;
   bool get _hasHealthFailure => _antiMortem == 'Failed' || _postMortem == 'Failed' || _healthIssueDetected;
@@ -2042,9 +2177,26 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     _inspectorCtrl.text = _selectedInspector ?? '';
 
     if (req['process_notes'] != null) _notesCtrl.text = req['process_notes'].toString();
-    if (req['condemnation_reason'] != null) {
-      _healthIssueDetected = true;
-      _condemnationCtrl.text = req['condemnation_reason'].toString();
+    if (req['condemnation_reason'] != null && req['condemnation_reason'].toString().trim().isNotEmpty) {
+      final rawReason = req['condemnation_reason'].toString().trim();
+      _condemnationCtrl.text = rawReason;
+      _condemnationSlipGenerated = true;
+      _showCondemnationForm = true;
+      if (rawReason.contains('[Partial Condemnation')) {
+        _condemnationType = 'Partial Condemnation';
+        _healthIssueDetected = false;
+        final partM = RegExp(r'Part:\s*([^|\]]+)').firstMatch(rawReason);
+        final wtM = RegExp(r'Weight:\s*([0-9.]+)').firstMatch(rawReason);
+        final afterBracket = rawReason.contains(']') ? rawReason.split(']').last.trim() : rawReason;
+        if (partM != null) _condemnedPartCtrl.text = partM.group(1)?.trim() ?? '';
+        if (wtM != null) _condemnedWeightCtrl.text = wtM.group(1)?.trim() ?? '0';
+        _condemnationReasonCtrl.text = afterBracket;
+      } else {
+        _condemnationType = 'Whole Condemnation';
+        _healthIssueDetected = true;
+        final afterBracket = rawReason.contains(']') ? rawReason.split(']').last.trim() : rawReason;
+        _condemnationReasonCtrl.text = afterBracket;
+      }
     }
     final existingCondemned = int.tryParse(req['condemned_count']?.toString() ?? '');
     if (existingCondemned != null && existingCondemned >= 1 && existingCondemned <= _totalHeads) {
@@ -2624,6 +2776,27 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           referenceNo: staffRefNo,
           dedupKey: 'req_${reqId}_ready_for_payment',
         );
+
+        // Auto-send TextBee SMS to walk-in customer when billing is ready
+        final walkInPhone = (widget.request['contact_number'] ?? '').toString().trim();
+        if (!isImmediateSlaughterWalkIn && walkInPhone.isNotEmpty) {
+          final smsText = WalkInSmsHelper.buildDefaultMessage(
+            stage: 'payment',
+            refNo: staffRefNo,
+            customerName: staffCustLabel,
+            marking: (widget.request['marking'] ?? '').toString(),
+            livestockType: (widget.request['livestock_type'] ?? '').toString(),
+            animalCount: isPartialBatch ? passedCount : _totalHeads,
+          );
+          await WalkInSmsService.sendSms(
+            phone: walkInPhone,
+            message: smsText,
+            stage: 'payment',
+            refNo: staffRefNo,
+            customerName: staffCustLabel,
+            requestId: reqId.toString(),
+          );
+        }
       } else if (newStatus == 'anti_mortem_failed' ||
           newStatus == 'post_mortem_failed' ||
           newStatus == 'condemned' ||
@@ -3222,54 +3395,247 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                   ),
                 ),
               ],
-              // Health Issue / Condemnation
-              Row(
-                children: [
-                  Checkbox(
-                    value: _healthIssueDetected,
-                    onChanged: (v) => setState(() => _healthIssueDetected = v!),
-                  ),
-                  const Expanded(
-                    child: Text(
-                      'Health issue detected - Generate Condemnation Slip', 
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)
-                    )
-                  ),
-                ],
-              ),
-              if (_healthIssueDetected)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              // Record Condemnation Slip Checkbox + Collapsible Card
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  setState(() {
+                    final next = !_showCondemnationForm;
+                    _showCondemnationForm = next;
+                    if (!next && !_condemnationSlipGenerated) {
+                      _healthIssueDetected = false;
+                    }
+                  });
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                        child: Row(
-                          children: [
-                            Icon(Icons.warning_amber_rounded, color: Colors.grey.shade500, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(child: Text('A condemnation slip will be automatically generated and printed.', style: TextStyle(color: Colors.grey.shade600, fontSize: 12))),
-                          ],
+                      Checkbox(
+                        value: _showCondemnationForm,
+                        activeColor: const Color(0xFFD97706),
+                        onChanged: (v) {
+                          setState(() {
+                            final next = v == true;
+                            _showCondemnationForm = next;
+                            if (!next && !_condemnationSlipGenerated) {
+                              _healthIssueDetected = false;
+                            }
+                          });
+                        },
+                      ),
+                      const Expanded(
+                        child: Text(
+                          'Record Condemnation Slip (Optional \u2014 only if partial or whole condemnation)',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF92400E),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      const Text('Condemnation Details *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: _condemnationCtrl,
-                        textCapitalization: TextCapitalization.sentences,
-                        inputFormatters: const [SentencesCapitalizationFormatter()],
-                        decoration: InputDecoration(
-                          hintText: 'Describe the Health issue (e.g., liver abscess, lung lesion, etc...)',
-                          hintStyle: const TextStyle(color: Colors.black, fontSize: 13),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      if (_condemnationSlipGenerated)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDCFCE7),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF86EFAC)),
+                          ),
+                          child: Text(
+                            'Recorded ($_condemnationSlipNo)',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF166534),
+                            ),
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
+              ),
+              if (_showCondemnationForm) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isNarrow = constraints.maxWidth < 540;
+                        final typeDropdown = DropdownButtonFormField<String>(
+                          key: ValueKey(_resolvedCondemnationType),
+                          initialValue: _resolvedCondemnationType,
+                          isExpanded: true,
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A), fontWeight: FontWeight.w500),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: Colors.white,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.8),
+                            ),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'Partial Condemnation', child: Text('Partial Condemnation', overflow: TextOverflow.ellipsis)),
+                            DropdownMenuItem(value: 'Whole Condemnation', child: Text('Whole Condemnation', overflow: TextOverflow.ellipsis)),
+                          ],
+                          onChanged: (v) {
+                            if (v != null) {
+                              setState(() {
+                                _condemnationType = v;
+                                if (v == 'Whole Condemnation' && _condemnedPartCtrl.text.trim().isEmpty) {
+                                  _condemnedPartCtrl.text = 'Whole Carcass';
+                                } else if (v == 'Partial Condemnation' && _condemnedPartCtrl.text.trim() == 'Whole Carcass') {
+                                  _condemnedPartCtrl.clear();
+                                }
+                              });
+                            }
+                          },
+                        );
+
+                        final partField = TextField(
+                          controller: _condemnedPartCtrl,
+                          textCapitalization: TextCapitalization.words,
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: Colors.white,
+                            hintText: 'Condemned part (e.g., Liver, Lungs)',
+                            hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
+                            ),
+                          ),
+                        );
+
+                        final weightField = TextField(
+                          controller: _condemnedWeightCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: Colors.white,
+                            hintText: '0',
+                            suffixText: 'kg',
+                            suffixStyle: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
+                            ),
+                          ),
+                        );
+
+                        final reasonField = TextField(
+                          controller: _condemnationReasonCtrl,
+                          textCapitalization: TextCapitalization.sentences,
+                          inputFormatters: const [SentencesCapitalizationFormatter()],
+                          style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: Colors.white,
+                            hintText: 'Reason (e.g., Pneumonia, Bruising)',
+                            hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5),
+                            ),
+                          ),
+                        );
+
+                        if (isNarrow) {
+                          return Column(
+                            children: [
+                              Row(children: [Expanded(child: typeDropdown), const SizedBox(width: 8), Expanded(child: partField)]),
+                              const SizedBox(height: 8),
+                              Row(children: [Expanded(flex: 2, child: weightField), const SizedBox(width: 8), Expanded(flex: 3, child: reasonField)]),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            Expanded(flex: 3, child: typeDropdown),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 3, child: partField),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 2, child: weightField),
+                            const SizedBox(width: 10),
+                            Expanded(flex: 3, child: reasonField),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _handleGenerateCondemnationSlip,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF97316),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                      child: Text(
+                        'Generate Condemnation Slip ($_condemnationSlipNo)',
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ],
 
               const SizedBox(height: 16),
               const Divider(),
@@ -3726,6 +4092,8 @@ class _CondemnationSlipDialog extends StatefulWidget {
   final String carcassWeight;
   final SupabaseClient supabase;
   final VoidCallback onDone;
+  final bool isPartialCondemnation;
+  final String? slipNumber;
 
   const _CondemnationSlipDialog({
     required this.request,
@@ -3734,6 +4102,8 @@ class _CondemnationSlipDialog extends StatefulWidget {
     required this.carcassWeight,
     required this.supabase,
     required this.onDone,
+    this.isPartialCondemnation = false,
+    this.slipNumber,
   });
 
   @override
@@ -3768,13 +4138,24 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
         onLayout: (format) async => pdfBytes,
       );
 
-      // 2. Automatically update database status to condemned and concluded (only if entire batch is condemned)
-      if (!isPartialBatch) {
+      // 2. Persist condemnation details (only mark entire request condemned if NOT partial)
+      final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      if (widget.isPartialCondemnation) {
+        if (existing != null) {
+          await widget.supabase.from('slaughter_inspection').update({
+            'condemnation_reason': widget.condemnationReason,
+          }).eq('request_id', reqId);
+        } else {
+          await widget.supabase.from('slaughter_inspection').insert({
+            'request_id': reqId,
+            'condemnation_reason': widget.condemnationReason,
+          });
+        }
+      } else if (!isPartialBatch) {
         await widget.supabase.from('requests').update({
           'status': 'condemned',
         }).eq('id', reqId);
 
-        final existing = await widget.supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
         if (existing != null) {
           await widget.supabase.from('slaughter_inspection').update({
             'post_mortem': 'Failed',
@@ -3795,16 +4176,21 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
       final userId = widget.request['user_id']?.toString() ?? widget.request['customer_id']?.toString();
       if (userId != null && userId.isNotEmpty) {
         final livestock = widget.request['livestock_type'] ?? 'Livestock';
+        final slipLabel = widget.slipNumber != null ? ' (${widget.slipNumber})' : '';
         await NotificationService.sendNotificationSafely(
           widget.supabase,
           userId: userId,
-          title: 'Slaughter Condemned — Condemnation Slip Issued',
-          message: 'A condemnation slip has been issued for your livestock ($livestock). The slaughter operation has been concluded.',
+          title: widget.isPartialCondemnation
+              ? 'Partial Condemnation Slip Issued$slipLabel'
+              : 'Slaughter Condemned — Condemnation Slip Issued',
+          message: widget.isPartialCondemnation
+              ? 'A partial condemnation slip$slipLabel was recorded for your $livestock (${widget.condemnationReason}). The remaining passed carcass continues normal processing.'
+              : 'A condemnation slip has been issued for your livestock ($livestock). The slaughter operation has been concluded.',
           type: 'condemnation_slip',
           data: {
             'request_id': reqId,
             'condemnation_reason': widget.condemnationReason,
-            'status': 'condemned',
+            'status': widget.isPartialCondemnation ? 'partial_condemnation' : 'condemned',
           },
         );
       }
@@ -3813,9 +4199,13 @@ class _CondemnationSlipDialogState extends State<_CondemnationSlipDialog> {
         Navigator.pop(context);
         widget.onDone();
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Condemnation slip printed and operation marked concluded!'),
-            backgroundColor: Color(0xFF2D6A4F),
+          SnackBar(
+            content: Text(
+              widget.isPartialCondemnation
+                  ? 'Partial condemnation slip${widget.slipNumber != null ? " (${widget.slipNumber})" : ""} printed & recorded!'
+                  : 'Condemnation slip printed and operation marked concluded!',
+            ),
+            backgroundColor: const Color(0xFF2D6A4F),
           ),
         );
       }
