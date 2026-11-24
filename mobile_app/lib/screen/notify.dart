@@ -7,7 +7,6 @@ import 'condemnation_slip_screen.dart';
 import 'notification_options_dialog.dart';
 import 'receipt_detail_screen.dart';
 import 'view_status_update_screen.dart';
-import '../services/walk_in_claim_helper.dart';
 import '../utils/text_capitalization_formatters.dart';
 
 class NotifyPage extends StatefulWidget {
@@ -677,7 +676,7 @@ class _NotifyPageState extends State<NotifyPage> {
                     Expanded(
                       child: Text(
                         (data['payment_status'] == 'unpaid')
-                            ? 'Please complete your payment at the Cashier window first. Pickup authorization and your Official Receipt are granted once payment is confirmed.'
+                            ? 'Cash-on-Pickup: Cannot pick up personally? You can already assign an Authorized Representative below — they will settle payment at the Cashier window upon pickup.'
                             : 'Cannot pick up personally? You can designate an Authorized Representative in the Official Receipt screen.',
                         style: const TextStyle(fontSize: 11, color: Color(0xFF4A5568), fontStyle: FontStyle.italic),
                       ),
@@ -717,7 +716,9 @@ class _NotifyPageState extends State<NotifyPage> {
               },
               child: Text(
                 (data['payment_status'] == 'unpaid')
-                    ? 'View Payment Details'
+                    ? (!isDelivery && !isHandoverConfirmed
+                        ? 'Assign Rep / Payment Details'
+                        : 'View Payment Details')
                     : (!isDelivery && !isHandoverConfirmed ? 'View Receipt / Assign Rep' : 'View Receipt'),
                 style: const TextStyle(color: Color(0xFF0A3D2E)),
               ),
@@ -2034,41 +2035,8 @@ class _NotifyPageState extends State<NotifyPage> {
               _userSwitchedTab = true;
             }),
           ),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: _showClaimWalkInDialog,
-            icon: const Icon(Icons.add_link, size: 16, color: Color(0xFF0A3D2E)),
-            label: const Text(
-              'Claim Walk-In',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF0A3D2E),
-              ),
-            ),
-            style: TextButton.styleFrom(
-              backgroundColor: const Color(0xFFE4F8F0),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18),
-                side: const BorderSide(color: Color(0xFF3ECFA3)),
-              ),
-            ),
-          ),
         ],
       ),
-    );
-  }
-
-  Future<void> _showClaimWalkInDialog() async {
-    await WalkInClaimHelper.showClaimDialog(
-      context,
-      onClaimSuccess: () async {
-        await _loadActiveRequest();
-        await _loadNotifications();
-      },
     );
   }
 

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
+import 'package:printing/printing.dart';
 
 /// Generates official Daily, Weekly, and Monthly Slaughterhouse Production & Revenue Reports
 /// for Tabaco City Slaughterhouse in a single comprehensive PDF containing:
@@ -14,6 +15,30 @@ import 'package:intl/intl.dart';
 /// - Official Signatures
 class ReportPdfGenerator {
   static pw.MemoryImage? _cachedLogo;
+  static pw.ThemeData? _cachedFontTheme;
+  static bool _fontThemeLoaded = false;
+
+  static Future<pw.ThemeData?> _loadFontTheme() async {
+    if (_fontThemeLoaded) return _cachedFontTheme;
+    _fontThemeLoaded = true;
+    try {
+      final regular = await PdfGoogleFonts.notoSansRegular();
+      final bold = await PdfGoogleFonts.notoSansBold();
+      final italic = await PdfGoogleFonts.notoSansItalic();
+      final boldItalic = await PdfGoogleFonts.notoSansBoldItalic();
+      _cachedFontTheme = pw.ThemeData.withFont(
+        base: regular,
+        bold: bold,
+        italic: italic,
+        boldItalic: boldItalic,
+      );
+    } catch (_) {
+      _cachedFontTheme = null;
+    }
+    return _cachedFontTheme;
+  }
+
+  static String get _currency => _cachedFontTheme != null ? '\u20b1 ' : 'PHP ';
 
   /// Main generator method.
   /// [reportSection]: 'all' (default, single PDF with Sections 1, 2, & 3 + Revenue),
@@ -46,7 +71,8 @@ class ReportPdfGenerator {
                 ? DateFormat('MMMM yyyy').format(targetDate)
                 : 'Week of ${DateFormat('MMMM d, yyyy').format(targetDate)}');
 
-    final pdf = pw.Document();
+    final fontTheme = await _loadFontTheme();
+    final pdf = pw.Document(theme: fontTheme);
 
     // Partition requests
     final marketRequests = requests
@@ -319,7 +345,7 @@ class ReportPdfGenerator {
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
         children: [
-          _summaryKpi('TOTAL REVENUE', '\u20b1 ${NumberFormat('#,##0.00').format(revenue)}', PdfColor.fromHex('#1B4332')),
+          _summaryKpi('TOTAL REVENUE', '$_currency${NumberFormat('#,##0.00').format(revenue)}', PdfColor.fromHex('#1B4332')),
           _summaryKpi('LIVESTOCK PROCESSED', '$processedCount Heads', PdfColor.fromHex('#2D6A4F')),
           _summaryKpi('TOTAL CARCASS WEIGHT', '${totalWeight.toStringAsFixed(1)} kg', PdfColor.fromHex('#2B6CB0')),
           _summaryKpi('HEALTH ISSUES / CONDEMNED', '$healthIssueCount Cases', PdfColor.fromHex('#C53030')),
@@ -788,7 +814,7 @@ class ReportPdfGenerator {
             _headerCellCenter('$totalHeads Heads',
                 pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#2D6A4F'))),
             _headerCellCenter('${totalWeight.toStringAsFixed(1)} kg', style),
-            _headerCellCenter('\u20b1 ${NumberFormat('#,##0.00').format(totalRevenue)}',
+            _headerCellCenter('$_currency${NumberFormat('#,##0.00').format(totalRevenue)}',
                 pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#1B4332'))),
           ],
         ),

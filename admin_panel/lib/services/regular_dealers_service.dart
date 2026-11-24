@@ -181,116 +181,11 @@ class RegularDealersService {
 
   NmicSettings get nmicSettings => _nmicSettings;
 
-  /// Default 40 Market Dealers Roster
-  static final List<Map<String, dynamic>> defaultMarketDealers = [
-    {'dealer_number': 1, 'name': 'P. CARDIÑO', 'markings': 'X7', 'category': 'market'},
-    {'dealer_number': 2, 'name': 'V. OGENA', 'markings': 'VK', 'category': 'market'},
-    {'dealer_number': 3, 'name': 'A. BONDAD', 'markings': '4', 'category': 'market'},
-    {'dealer_number': 4, 'name': 'N. CANDANO', 'markings': 'N', 'category': 'market'},
-    {'dealer_number': 5, 'name': 'J. BAÑADERA', 'markings': 'BOGS', 'category': 'market'},
-    {'dealer_number': 6, 'name': 'A. BONAOBRA', 'markings': 'ABE', 'category': 'market'},
-    {'dealer_number': 7, 'name': 'S. MENDOZA', 'markings': 'AM', 'category': 'market'},
-    {'dealer_number': 8, 'name': 'G. CAROLINO', 'markings': '11G', 'category': 'market'},
-    {'dealer_number': 9, 'name': 'S. ZUBELDIA', 'markings': '11', 'category': 'market'},
-    {'dealer_number': 10, 'name': 'J. TABLIZO', 'markings': 'JT', 'category': 'market'},
-    {'dealer_number': 11, 'name': 'W. COMPETENTE', 'markings': 'WC', 'category': 'market'},
-    {'dealer_number': 12, 'name': 'G. CAROLINO', 'markings': 'GENE', 'category': 'market'},
-    {'dealer_number': 13, 'name': 'R. BRONDO', 'markings': 'BR', 'category': 'market'},
-    {'dealer_number': 14, 'name': 'R. PIÑON', 'markings': 'RSP', 'category': 'market'},
-    {'dealer_number': 15, 'name': 'J. RACINES', 'markings': 'RLG', 'category': 'market'},
-    {'dealer_number': 16, 'name': 'F. BANDOJO', 'markings': 'FLORA', 'category': 'market'},
-    {'dealer_number': 17, 'name': 'J. SABENORIO', 'markings': 'MATA', 'category': 'market'},
-    {'dealer_number': 18, 'name': 'E. BILOLO', 'markings': 'JB', 'category': 'market'},
-    {'dealer_number': 19, 'name': 'M. PRIA', 'markings': 'JP', 'category': 'market'},
-    {'dealer_number': 20, 'name': 'M. BRAGAIS', 'markings': 'M', 'category': 'market'},
-    {'dealer_number': 21, 'name': 'A. ZUBELDIA', 'markings': 'AZ', 'category': 'market'},
-    {'dealer_number': 22, 'name': 'J. CARDIÑO', 'markings': '6', 'category': 'market'},
-    {'dealer_number': 23, 'name': 'F. BARCENAS', 'markings': 'ND', 'category': 'market'},
-    {'dealer_number': 24, 'name': 'C. CARDIÑO', 'markings': 'DC', 'category': 'market'},
-    {'dealer_number': 25, 'name': 'W. MAGDAONG', 'markings': 'BETH', 'category': 'market'},
-    {'dealer_number': 26, 'name': 'R. CRISTO', 'markings': 'REX', 'category': 'market'},
-    {'dealer_number': 27, 'name': 'A. CARDIÑO', 'markings': 'RC', 'category': 'market'},
-    {'dealer_number': 28, 'name': 'A. OGENA', 'markings': 'APOL', 'category': 'market'},
-    {'dealer_number': 29, 'name': 'M. BENIG', 'markings': 'DOY', 'category': 'market'},
-    {'dealer_number': 30, 'name': 'D. BARCENAS', 'markings': 'X', 'category': 'market'},
-    {'dealer_number': 31, 'name': 'Y. ELLANA', 'markings': 'GAPO', 'category': 'market'},
-    {'dealer_number': 32, 'name': 'L. VILILLA', 'markings': 'LV', 'category': 'market'},
-    {'dealer_number': 33, 'name': 'A. OGENA', 'markings': 'APIT', 'category': 'market'},
-    {'dealer_number': 34, 'name': 'B. OGENA', 'markings': 'YET', 'category': 'market'},
-    {'dealer_number': 35, 'name': 'R. DATOG', 'markings': 'RD', 'category': 'market'},
-    {'dealer_number': 36, 'name': 'J. CRISTO', 'markings': 'L3', 'category': 'market'},
-    {'dealer_number': 37, 'name': 'R. BORCELIS', 'markings': 'RON', 'category': 'market'},
-    {'dealer_number': 38, 'name': 'P. BURCE', 'markings': 'PZ', 'category': 'market'},
-    {'dealer_number': 39, 'name': 'J. CAROLINO', 'markings': 'JC', 'category': 'market'},
-    {'dealer_number': 40, 'name': 'J. SANTOS', 'markings': 'TCB', 'category': 'market'},
-  ];
+  /// Default Market Dealers Roster (empty on fresh system — populated dynamically from customer requests)
+  static final List<Map<String, dynamic>> defaultMarketDealers = [];
 
-  /// Default 63 Barangay Dealers Roster
-  static final List<Map<String, dynamic>> defaultBarangayDealers = [
-    {'dealer_number': 1, 'name': 'A. PAHUYO', 'markings': 'AP', 'category': 'barangay'},
-    {'dealer_number': 2, 'name': 'A. BOLATA', 'markings': 'BA', 'category': 'barangay'},
-    {'dealer_number': 3, 'name': 'R. CORNEL', 'markings': 'CO', 'category': 'barangay'},
-    {'dealer_number': 4, 'name': 'M. BOQUEO', 'markings': 'SMB', 'category': 'barangay'},
-    {'dealer_number': 5, 'name': 'S. BAÑADERA', 'markings': 'SALLY', 'category': 'barangay'},
-    {'dealer_number': 6, 'name': 'K. BURAO', 'markings': 'KB', 'category': 'barangay'},
-    {'dealer_number': 7, 'name': 'J. BORROMEO', 'markings': 'NHEZ', 'category': 'barangay'},
-    {'dealer_number': 8, 'name': 'A. CASITAS', 'markings': 'DONG', 'category': 'barangay'},
-    {'dealer_number': 9, 'name': 'F. BRON JR.', 'markings': 'F', 'category': 'barangay'},
-    {'dealer_number': 10, 'name': 'N. BUERE', 'markings': 'BUERE', 'category': 'barangay'},
-    {'dealer_number': 11, 'name': 'C. TERESAS', 'markings': 'AZON', 'category': 'barangay'},
-    {'dealer_number': 12, 'name': 'N. BODORAYA', 'markings': 'NB', 'category': 'barangay'},
-    {'dealer_number': 13, 'name': 'C. DOLAR', 'markings': 'CCD', 'category': 'barangay'},
-    {'dealer_number': 14, 'name': 'N. BOBIS', 'markings': '5C5', 'category': 'barangay'},
-    {'dealer_number': 15, 'name': 'S. BORROMEO', 'markings': 'SB', 'category': 'barangay'},
-    {'dealer_number': 16, 'name': 'E. BUSQUE', 'markings': 'GIN', 'category': 'barangay'},
-    {'dealer_number': 17, 'name': 'P. BRON JR.', 'markings': 'TOM', 'category': 'barangay'},
-    {'dealer_number': 18, 'name': 'F. BERCES', 'markings': 'FEL', 'category': 'barangay'},
-    {'dealer_number': 19, 'name': 'N. BIBAT', 'markings': 'BIBAT', 'category': 'barangay'},
-    {'dealer_number': 20, 'name': 'N. BOTICARIO', 'markings': 'NBB', 'category': 'barangay'},
-    {'dealer_number': 21, 'name': 'P. BO', 'markings': 'K', 'category': 'barangay'},
-    {'dealer_number': 22, 'name': 'C. BONAOBRA', 'markings': 'CEL', 'category': 'barangay'},
-    {'dealer_number': 23, 'name': 'S. BENDITAHAN', 'markings': 'SBJR', 'category': 'barangay'},
-    {'dealer_number': 24, 'name': 'B. BORROMEO', 'markings': '777', 'category': 'barangay'},
-    {'dealer_number': 25, 'name': 'D. BIEN', 'markings': 'DRB', 'category': 'barangay'},
-    {'dealer_number': 26, 'name': 'A. BUENCONSEJO', 'markings': 'LYN', 'category': 'barangay'},
-    {'dealer_number': 27, 'name': 'C. PUENLABRADA', 'markings': 'CHITO', 'category': 'barangay'},
-    {'dealer_number': 28, 'name': 'S. CEA', 'markings': 'SOLON', 'category': 'barangay'},
-    {'dealer_number': 29, 'name': 'M. BORSAL', 'markings': 'LON', 'category': 'barangay'},
-    {'dealer_number': 30, 'name': 'J. RACINES', 'markings': 'JET', 'category': 'barangay'},
-    {'dealer_number': 31, 'name': 'G. BONGALON', 'markings': 'C2', 'category': 'barangay'},
-    {'dealer_number': 32, 'name': 'B. CARULLO', 'markings': 'GBC', 'category': 'barangay'},
-    {'dealer_number': 33, 'name': 'A. CLEMENTE JR.', 'markings': 'AU', 'category': 'barangay'},
-    {'dealer_number': 34, 'name': 'L. LUMINARIO', 'markings': 'LITO', 'category': 'barangay'},
-    {'dealer_number': 35, 'name': 'R. BRAGAIS', 'markings': 'RMB', 'category': 'barangay'},
-    {'dealer_number': 36, 'name': 'E. TERESAS', 'markings': 'ET', 'category': 'barangay'},
-    {'dealer_number': 37, 'name': 'J. BORROMEO', 'markings': 'TAN', 'category': 'barangay'},
-    {'dealer_number': 38, 'name': 'I. GABATAN', 'markings': 'IREEN', 'category': 'barangay'},
-    {'dealer_number': 39, 'name': 'S. BALDORADO', 'markings': 'TCB', 'category': 'barangay'},
-    {'dealer_number': 40, 'name': 'N. BUBAN', 'markings': 'NEL', 'category': 'barangay'},
-    {'dealer_number': 41, 'name': 'C. JARONEL', 'markings': 'CJ', 'category': 'barangay'},
-    {'dealer_number': 42, 'name': 'F. BONEO', 'markings': 'IPE', 'category': 'barangay'},
-    {'dealer_number': 43, 'name': 'M. BUARA', 'markings': 'ETM', 'category': 'barangay'},
-    {'dealer_number': 44, 'name': 'L. DOLAR', 'markings': 'JRS', 'category': 'barangay'},
-    {'dealer_number': 45, 'name': 'A. OVERES', 'markings': 'ART', 'category': 'barangay'},
-    {'dealer_number': 46, 'name': 'A. BENOYO', 'markings': 'TABA/IPX', 'category': 'barangay'},
-    {'dealer_number': 47, 'name': 'M. BONAVENTE', 'markings': 'JM', 'category': 'barangay'},
-    {'dealer_number': 48, 'name': 'A. MONTIANO', 'markings': '125', 'category': 'barangay'},
-    {'dealer_number': 49, 'name': 'A. BONAVENTE', 'markings': 'VIN', 'category': 'barangay'},
-    {'dealer_number': 50, 'name': 'G. BURCE', 'markings': 'GS', 'category': 'barangay'},
-    {'dealer_number': 51, 'name': 'C. ALMONTE', 'markings': 'CAJ', 'category': 'barangay'},
-    {'dealer_number': 52, 'name': 'F. BUENDIA', 'markings': 'DICK', 'category': 'barangay'},
-    {'dealer_number': 53, 'name': 'J. BONGARES', 'markings': 'KXK', 'category': 'barangay'},
-    {'dealer_number': 54, 'name': 'V. PEREZ', 'markings': 'VPP', 'category': 'barangay'},
-    {'dealer_number': 55, 'name': 'S. BARRA', 'markings': 'Y', 'category': 'barangay'},
-    {'dealer_number': 56, 'name': 'D. CERILLO', 'markings': '99', 'category': 'barangay'},
-    {'dealer_number': 57, 'name': 'D. DE JESUS', 'markings': 'DAN', 'category': 'barangay'},
-    {'dealer_number': 58, 'name': 'J. BUIZON', 'markings': 'KOY', 'category': 'barangay'},
-    {'dealer_number': 59, 'name': 'E. BUIZON', 'markings': 'OK', 'category': 'barangay'},
-    {'dealer_number': 60, 'name': 'J. BONAOBRA', 'markings': 'RA', 'category': 'barangay'},
-    {'dealer_number': 61, 'name': 'J. BORLAGDAN', 'markings': 'NIG', 'category': 'barangay'},
-    {'dealer_number': 62, 'name': 'R. QUITASOL', 'markings': 'ARON', 'category': 'barangay'},
-    {'dealer_number': 63, 'name': 'J. BUENDIA', 'markings': 'JV-75', 'category': 'barangay'},
-  ];
+  /// Default Barangay Dealers Roster (empty on fresh system — populated dynamically from customer requests)
+  static final List<Map<String, dynamic>> defaultBarangayDealers = [];
 
   Future<void> init() async {
     if (_isLoaded) return;
@@ -354,27 +249,9 @@ class RegularDealersService {
       debugPrint('system_settings regular_dealers fallback: $e');
     }
 
-    // 4. If empty, seed default dealers roster
-    if (_dealers.isEmpty) {
-      _dealers = [
-        ...defaultMarketDealers.map((d) => RegularDealer(
-              id: 'mkt-${d['dealer_number']}',
-              dealerNumber: d['dealer_number'],
-              name: d['name'],
-              markings: d['markings'],
-              category: 'market',
-            )),
-        ...defaultBarangayDealers.map((d) => RegularDealer(
-              id: 'brgy-${d['dealer_number']}',
-              dealerNumber: d['dealer_number'],
-              name: d['name'],
-              markings: d['markings'],
-              category: 'barangay',
-            )),
-      ];
-      await _syncToSupabase();
-      await _saveLocalCache();
-    }
+    // 4. Do not pre-seed hardcoded default dealers on a fresh system;
+    //    dealers are added organically as customers submit requests or Admin registers them.
+    await _saveLocalCache();
 
     // Load NMIC settings from system_settings
     try {

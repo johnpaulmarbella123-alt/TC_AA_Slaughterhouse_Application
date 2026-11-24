@@ -4,10 +4,18 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'pdf_unicode_fonts.dart';
 import 'regular_dealers_service.dart';
 
 class NmicReportPdfGenerator {
   static pw.MemoryImage? _cachedLogo;
+
+  static const String _currency = '\u20b1';
+
+  static Future<pw.Document> _createDocument() async {
+    final fonts = await PdfUnicodeFonts.load();
+    return pw.Document(theme: fonts.standardTheme);
+  }
 
   static Future<pw.MemoryImage?> _loadLogo() async {
     if (_cachedLogo != null) return _cachedLogo;
@@ -36,7 +44,7 @@ class NmicReportPdfGenerator {
     required List<Map<String, dynamic>> requests,
   }) async {
     final logo = await _loadLogo();
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
     final dealersService = RegularDealersService.instance;
     await dealersService.init();
 
@@ -169,7 +177,7 @@ class NmicReportPdfGenerator {
     required DateTime month,
     required List<Map<String, dynamic>> requests,
   }) async {
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
     final dealersService = RegularDealersService.instance;
     await dealersService.init();
 
@@ -248,7 +256,7 @@ class NmicReportPdfGenerator {
     required DateTime month,
     required List<Map<String, dynamic>> requests,
   }) async {
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
     final dealersService = RegularDealersService.instance;
     await dealersService.init();
     final nmic = dealersService.nmicSettings;
@@ -402,7 +410,7 @@ class NmicReportPdfGenerator {
     required String species, // 'HOG', 'CATTLE', 'CARABAO', 'GOAT'
     required List<Map<String, dynamic>> requests,
   }) async {
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
     final dealersService = RegularDealersService.instance;
     await dealersService.init();
     final nmic = dealersService.nmicSettings;
@@ -525,9 +533,9 @@ class NmicReportPdfGenerator {
                     _td('$day', isBold: true),
                     _td(hasData ? '${s['heads']}' : ''),
                     _td(hasData ? NumberFormat('#,##0.0').format(s['weight']) : ''),
-                    _td(hasData ? NumberFormat('₱#,##0.00').format(s['amFee']) : ''),
-                    _td(hasData ? NumberFormat('₱#,##0.00').format(s['pmFee']) : ''),
-                    _td(hasData ? NumberFormat('₱#,##0.00').format(s['total']) : ''),
+                    _td(hasData ? '$_currency${NumberFormat('#,##0.00').format(s['amFee'])}' : ''),
+                    _td(hasData ? '$_currency${NumberFormat('#,##0.00').format(s['pmFee'])}' : ''),
+                    _td(hasData ? '$_currency${NumberFormat('#,##0.00').format(s['total'])}' : ''),
                   ],
                 );
               }),
@@ -538,9 +546,9 @@ class NmicReportPdfGenerator {
                   _td('TOTAL', isBold: true),
                   _td('$totalHeads', isBold: true),
                   _td(NumberFormat('#,##0.0').format(totalWeight), isBold: true),
-                  _td(NumberFormat('₱#,##0.00').format(totalAmFee), isBold: true),
-                  _td(NumberFormat('₱#,##0.00').format(totalPmFee), isBold: true),
-                  _td(NumberFormat('₱#,##0.00').format(grandTotal), isBold: true),
+                  _td('$_currency${NumberFormat('#,##0.00').format(totalAmFee)}', isBold: true),
+                  _td('$_currency${NumberFormat('#,##0.00').format(totalPmFee)}', isBold: true),
+                  _td('$_currency${NumberFormat('#,##0.00').format(grandTotal)}', isBold: true),
                 ],
               ),
             ],
@@ -553,8 +561,8 @@ class NmicReportPdfGenerator {
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
                 pw.Text('Breakdown:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9)),
-                pw.Text('LGU Share (75%) = ${NumberFormat("₱#,##0.00").format(lguShare)}', style: const pw.TextStyle(fontSize: 9)),
-                pw.Text('NMIS Share (25%) = ${NumberFormat("₱#,##0.00").format(nmisShare)}', style: const pw.TextStyle(fontSize: 9)),
+                pw.Text('LGU Share (75%) = $_currency${NumberFormat("#,##0.00").format(lguShare)}', style: const pw.TextStyle(fontSize: 9)),
+                pw.Text('NMIS Share (25%) = $_currency${NumberFormat("#,##0.00").format(nmisShare)}', style: const pw.TextStyle(fontSize: 9)),
               ],
             ),
           ),
@@ -571,7 +579,7 @@ class NmicReportPdfGenerator {
           pw.Text('Note: Official basis of Ante- and Post-Mortem Inspection fees:',
               style: pw.TextStyle(fontSize: 7.5, fontStyle: pw.FontStyle.italic)),
           pw.Text(
-              '(  ) DA AO No. 13, S. 1993: AM Fee = ₱$amRate/hd, PM Fee = ₱$pmRate/Kg\n'
+              '(  ) DA AO No. 13, S. 1993: AM Fee = $_currency$amRate/hd, PM Fee = $_currency$pmRate/Kg\n'
               '(X) ${nmic.feeBasisDetails}',
               style: const pw.TextStyle(fontSize: 7)),
         ],
@@ -591,7 +599,7 @@ class NmicReportPdfGenerator {
     required List<Map<String, dynamic>> requests,
   }) async {
     final logo = await _loadLogo();
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
 
     int totalHeads = 0;
     double totalWeight = 0;
@@ -664,7 +672,7 @@ class NmicReportPdfGenerator {
                     _td('$heads'),
                     _td(NumberFormat('#,##0.0').format(double.tryParse('$wt') ?? 0)),
                     _td(res.toString()),
-                    _td(NumberFormat('₱#,##0.00').format(double.tryParse('$fee') ?? 0)),
+                    _td('$_currency${NumberFormat('#,##0.00').format(double.tryParse('$fee') ?? 0)}'),
                   ],
                 );
               }),
@@ -696,7 +704,7 @@ class NmicReportPdfGenerator {
     String? customBody,
   }) async {
     final logo = await _loadLogo();
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
 
     final dateStr = DateFormat('MMMM d, yyyy').format(DateTime.now());
 
@@ -997,7 +1005,7 @@ class NmicReportPdfGenerator {
     required Map<String, int> dealerHeadsCount,
   }) async {
     final logo = await _loadLogo();
-    final pdf = pw.Document();
+    final pdf = await _createDocument();
     final dealersService = RegularDealersService.instance;
     await dealersService.init();
     final nmic = dealersService.nmicSettings;

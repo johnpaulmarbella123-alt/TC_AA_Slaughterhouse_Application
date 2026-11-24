@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../pages/home_page.dart' show globalPendingPaymentCount;
 import 'receipt_detail_screen.dart';
 
 const kMintHeader = Color(0xFF8FDCB8);
@@ -182,6 +183,13 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
         final dateB = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(2000);
         return dateB.compareTo(dateA);
       });
+
+      // Keep Payment bottom-nav badge synced with actual unpaid receipts
+      final unpaidCount = combined.where((p) {
+        final st = (p['status'] ?? '').toString().trim().toLowerCase();
+        return st != 'paid' && st != 'cancelled' && st != 'rejected';
+      }).length;
+      globalPendingPaymentCount.value = unpaidCount;
 
       if (mounted) {
         setState(() {

@@ -127,7 +127,6 @@ class AppTheme {
           }),
           foregroundColor: const WidgetStatePropertyAll(AppColors.white),
           elevation: const WidgetStatePropertyAll(0),
-          minimumSize: const WidgetStatePropertyAll(Size(0, 48)),
           padding: const WidgetStatePropertyAll(
             EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           ),
@@ -148,7 +147,6 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.forestGreen,
           side: const BorderSide(color: AppColors.forestGreen),
-          minimumSize: const Size(0, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           textStyle: const TextStyle(
             fontFamily: AppTypography.uiFontFamily,
@@ -170,7 +168,6 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surface,
-        constraints: const BoxConstraints(minHeight: 46),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
@@ -215,7 +212,6 @@ class AppTheme {
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.accentTeal,
           foregroundColor: AppColors.white,
-          minimumSize: const Size(0, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           textStyle: const TextStyle(
             fontFamily: AppTypography.uiFontFamily,
@@ -230,7 +226,6 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.accentTeal,
           side: const BorderSide(color: AppColors.accentTeal),
-          minimumSize: const Size(0, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
@@ -246,7 +241,6 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: const Color(0xFF0F172A),
-        constraints: const BoxConstraints(minHeight: 46),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),

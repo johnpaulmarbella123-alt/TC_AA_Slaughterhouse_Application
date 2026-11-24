@@ -8,6 +8,7 @@ import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
+import '../widgets/walk_in_sms_helper.dart';
 
 class MeatReleasingPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -864,10 +865,10 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           LayoutBuilder(
             builder: (context, constraints) {
               final availableWidth = constraints.maxWidth;
-              final tableWidth = availableWidth > 1050.0 ? availableWidth : 1050.0;
+              final tableWidth = availableWidth > 1120.0 ? availableWidth : 1120.0;
               final dynamicSpacing = (availableWidth > 1400)
-                  ? 34.0
-                  : (availableWidth > 1100 ? 24.0 : 16.0);
+                  ? 24.0
+                  : (availableWidth > 1100 ? 18.0 : 14.0);
 
               return Scrollbar(
                 controller: scrollController,
@@ -888,7 +889,8 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                       child: DataTable(
                         headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
                         dataRowMinHeight: 60,
-                        dataRowMaxHeight: 80,
+                        dataRowMaxHeight: 84,
+                        horizontalMargin: 16,
                         columnSpacing: dynamicSpacing,
                         columns: const [
                       DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -971,11 +973,30 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                                 ),
                         ),
                         DataCell(
-                          status == 'Released'
-                              ? _buildDoneButton(req)
-                              : isMarket
-                                  ? _buildReleaseForDeliveryButton(req)
-                                  : _buildReleaseForPickupButton(req),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
+                                WalkInSmsHelper.buildNotifyButton(
+                                  context: context,
+                                  contactNumber: req['contact_number'].toString(),
+                                  stage: 'releasing',
+                                  refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
+                                  customerName: (req['customer_name'] ?? 'Customer').toString(),
+                                  marking: (req['marking'] ?? '').toString(),
+                                  livestockType: (req['livestock_type'] ?? '').toString(),
+                                  animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                                  requestId: req['id']?.toString(),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
+                              status == 'Released'
+                                  ? _buildDoneButton(req)
+                                  : isMarket
+                                      ? _buildReleaseForDeliveryButton(req)
+                                      : _buildReleaseForPickupButton(req),
+                            ],
+                          ),
                         ),
                       ]);
                     }).toList(),
@@ -1172,20 +1193,23 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     );
   }
 
+  bool _isWalkIn(Map<String, dynamic> req) =>
+      (req['user_id'] ?? '').toString().trim().isEmpty;
+
   Widget _buildReleaseForPickupButton(Map<String, dynamic> req) {
     if (!_isPaid(req)) {
       return _buildAwaitingPaymentButton(req);
     }
 
     final isImmediate = _isImmediateSlaughter(req);
-    if (isImmediate) {
+    if (isImmediate || _isWalkIn(req)) {
       return OutlinedButton(
         onPressed: () => _showReleaseDialog(req, isDelivery: false),
         style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFF2D6A4F),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          foregroundColor: const Color(0xFF0F5132),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           minimumSize: const Size(0, 34),
-          side: const BorderSide(color: Color(0xFF2D6A4F)),
+          side: const BorderSide(color: Color(0xFF0F5132)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
         ),
         child: const Text('Verify Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
@@ -1208,27 +1232,27 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             ),
             onPressed: () => _notifyReadyForCollection(req),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isAlreadyNotified ? const Color(0xFF2D6A4F) : const Color(0xFF185FA5),
+              backgroundColor: isAlreadyNotified ? const Color(0xFF0F5132) : const Color(0xFF185FA5),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 34),
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready for Collection',
+              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready',
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         OutlinedButton(
           onPressed: () => _showReleaseDialog(req, isDelivery: false),
           style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFF2D6A4F),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            foregroundColor: const Color(0xFF0F5132),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
             minimumSize: const Size(0, 34),
-            side: const BorderSide(color: Color(0xFF2D6A4F)),
+            side: const BorderSide(color: Color(0xFF0F5132)),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
           ),
           child: const Text('Verify Handover', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
@@ -1253,7 +1277,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFFB45309),
           backgroundColor: const Color(0xFFFFFBEB),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           minimumSize: const Size(0, 34),
           side: const BorderSide(color: Color(0xFFFCD34D)),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -1262,7 +1286,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       ),
     );
 
-    if (_isImmediateSlaughter(req)) {
+    if (_isImmediateSlaughter(req) || _isWalkIn(req)) {
       return waitingBtn;
     }
 
@@ -1283,20 +1307,20 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             ),
             onPressed: () => _notifyReadyForCollection(req),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isAlreadyNotified ? const Color(0xFF2D6A4F) : const Color(0xFF185FA5),
+              backgroundColor: isAlreadyNotified ? const Color(0xFF0F5132) : const Color(0xFF185FA5),
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(0, 34),
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready for Collection',
+              isAlreadyNotified ? 'Notified ✓' : 'Notify Ready',
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
         waitingBtn,
       ],
     );

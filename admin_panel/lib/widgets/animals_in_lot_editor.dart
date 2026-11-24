@@ -432,89 +432,145 @@ class AnimalsInLotReadOnlyList extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCBD5E1)),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.pets_outlined, size: 16, color: Color(0xFF2D6A4F)),
-              const SizedBox(width: 6),
-              Text(
-                'Animals in Lot (${list.length} ${list.length == 1 ? 'head' : 'heads'})',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1E293B),
-                ),
-              ),
-            ],
+          Text(
+            'Animals in Lot (${list.length} ${list.length == 1 ? 'head' : 'heads'})',
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF0F172A),
+            ),
           ),
           const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowHeight: 32,
-              dataRowMinHeight: 34,
-              dataRowMaxHeight: 42,
-              horizontalMargin: 10,
-              columnSpacing: 16,
-              headingRowColor: WidgetStateProperty.all(const Color(0xFFE2E8F0)),
-              columns: const [
-                DataColumn(label: Text('#', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Ear-Tag #', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Color', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Origin', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Sex', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Live Wt', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold))),
-              ],
-              rows: List.generate(list.length, (i) {
-                final item = list[i];
-                final tag = item.earTag.isNotEmpty ? item.earTag : 'Pending';
-                return DataRow(
-                  cells: [
-                    DataCell(Text('${i + 1}', style: const TextStyle(fontSize: 11.5))),
-                    DataCell(
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: item.earTag.isNotEmpty
-                              ? const Color(0xFFDCFCE7)
-                              : const Color(0xFFFEF3C7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          tag,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: item.earTag.isNotEmpty
-                                ? const Color(0xFF166534)
-                                : const Color(0xFF92400E),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Table(
+                defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                border: const TableBorder(
+                  horizontalInside: BorderSide(color: Color(0xFFE2E8F0), width: 1),
+                ),
+                columnWidths: const {
+                  0: FixedColumnWidth(32),
+                  1: FlexColumnWidth(1.3),
+                  2: FlexColumnWidth(1.1),
+                  3: FlexColumnWidth(1.8),
+                  4: FlexColumnWidth(0.9),
+                  5: FlexColumnWidth(1.2),
+                },
+                children: [
+                  const TableRow(
+                    decoration: BoxDecoration(color: Color(0xFFF1F5F9)),
+                    children: [
+                      _LotHeaderCell('#'),
+                      _LotHeaderCell('Ear-Tag #'),
+                      _LotHeaderCell('Color'),
+                      _LotHeaderCell('Origin'),
+                      _LotHeaderCell('Sex'),
+                      _LotHeaderCell('Live Wt'),
+                    ],
+                  ),
+                  ...List.generate(list.length, (i) {
+                    final item = list[i];
+                    final tag = item.earTag.isNotEmpty ? item.earTag : 'Pending';
+                    return TableRow(
+                      decoration: const BoxDecoration(color: Colors.white),
+                      children: [
+                        _LotDataCell('${i + 1}'),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: item.earTag.isNotEmpty
+                                    ? const Color(0xFFD1FAE5)
+                                    : const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                tag,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: item.earTag.isNotEmpty
+                                      ? const Color(0xFF047857)
+                                      : const Color(0xFFB45309),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    DataCell(Text(item.color.isNotEmpty ? item.color : '—', style: const TextStyle(fontSize: 11.5))),
-                    DataCell(Text(item.origin.isNotEmpty ? item.origin : '—', style: const TextStyle(fontSize: 11.5))),
-                    DataCell(Text(item.sex.isNotEmpty ? item.sex : '—', style: const TextStyle(fontSize: 11.5))),
-                    DataCell(
-                      Text(
-                        (item.liveWeight != null && item.liveWeight! > 0)
-                            ? '${item.liveWeight!.toStringAsFixed(1)} kg'
-                            : '—',
-                        style: const TextStyle(fontSize: 11.5),
-                      ),
-                    ),
-                  ],
-                );
-              }),
+                        _LotDataCell(item.color.isNotEmpty ? item.color : '—'),
+                        _LotDataCell(item.origin.isNotEmpty ? item.origin : '—'),
+                        _LotDataCell(item.sex.isNotEmpty ? item.sex : '—'),
+                        _LotDataCell(
+                          (item.liveWeight != null && item.liveWeight! > 0)
+                              ? '${item.liveWeight!.toStringAsFixed(1)} kg'
+                              : '—',
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LotHeaderCell extends StatelessWidget {
+  final String text;
+  const _LotHeaderCell(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Text(
+        text,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: Color(0xFF475569),
+        ),
+      ),
+    );
+  }
+}
+
+class _LotDataCell extends StatelessWidget {
+  final String text;
+  const _LotDataCell(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      child: Text(
+        text,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 12,
+          color: Color(0xFF0F172A),
+        ),
       ),
     );
   }

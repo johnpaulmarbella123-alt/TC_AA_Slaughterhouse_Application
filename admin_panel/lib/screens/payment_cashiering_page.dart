@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -11,6 +12,7 @@ import '../services/notification_service.dart';
 import '../services/receipt_pdf_generator.dart';
 import '../services/staff_notification_service.dart';
 import '../widgets/staff_notification_bell.dart';
+import '../widgets/walk_in_sms_helper.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -157,16 +159,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         target['condemned_count'] = int.tryParse(partialMatch.group(2) ?? '');
       }
     }
-  }
-
-  static String _formatReceiptCount(Map<String, dynamic> req) {
-    final total = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
-    final passed = int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
-    final condemned = int.tryParse((req['condemned_count'] ?? '').toString()) ?? 0;
-    if (passed > 0 && condemned > 0) {
-      return '$passed head${passed == 1 ? '' : 's'} (of $total requested \u2014 $condemned failed inspection)';
-    }
-    return '$total';
   }
 
   static String _formatTableCount(Map<String, dynamic> req) {
@@ -698,6 +690,241 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   }
 
   // ════════════════════════════════════════════
+  //  CASH TENDERED CONFIRMATION MODAL (Cash-on-Pickup)
+  // ════════════════════════════════════════════
+  Future<Map<String, double>?> _showCashTenderedConfirmDialog({
+    required String customerName,
+    required String refNo,
+    required double totalDue,
+  }) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<Map<String, double>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final tendered = double.tryParse(ctrl.text.trim()) ?? 0.0;
+            final isValid = ctrl.text.trim().isNotEmpty && tendered >= totalDue;
+            final diff = tendered - totalDue;
+            final changeDue = diff > 0 ? diff : 0.0;
+            final shortfall = diff < 0 ? diff.abs() : 0.0;
+
+            Widget quickChip(String label, double amount) {
+              return ActionChip(
+                label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F5132))),
+                backgroundColor: const Color(0xFFECFDF5),
+                side: const BorderSide(color: Color(0xFFA7F3D0)),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onPressed: () {
+                  ctrl.text = amount.toStringAsFixed(2);
+                  ctrl.selection = TextSelection.fromPosition(TextPosition(offset: ctrl.text.length));
+                  setModalState(() {});
+                },
+              );
+            }
+
+            return Dialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Container(
+                width: 440,
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFECFDF5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.payments_outlined, color: Color(0xFF0F5132), size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Confirm Cash Payment', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                              Text('Enter cash received from customer to calculate change', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Reference No.', style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B))),
+                              Text(refNo, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Customer', style: TextStyle(fontSize: 12.5, color: Color(0xFF64748B))),
+                              Flexible(
+                                child: Text(
+                                  customerName,
+                                  textAlign: TextAlign.end,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const Divider(height: 14),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Total Amount Due', style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
+                              Text('\u20b1${NumberFormat('#,##0.00').format(totalDue)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF0F5132))),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    RichText(
+                      text: const TextSpan(
+                        text: 'Cash Tendered (\u20b1) ',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2D3748)),
+                        children: [TextSpan(text: '*', style: TextStyle(color: Colors.red))],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: ctrl,
+                      autofocus: true,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+                      onChanged: (_) => setModalState(() {}),
+                      decoration: InputDecoration(
+                        prefixText: '\u20b1 ',
+                        prefixStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                        hintText: '0.00',
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5)),
+                      ),
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        quickChip('Exact (\u20b1${totalDue.toStringAsFixed(2)})', totalDue),
+                        if (500 >= totalDue) quickChip('\u20b1500', 500),
+                        if (1000 >= totalDue) quickChip('\u20b11,000', 1000),
+                        if (2000 >= totalDue) quickChip('\u20b12,000', 2000),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isValid ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isValid ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                isValid ? Icons.check_circle_outline : Icons.error_outline,
+                                size: 18,
+                                color: isValid ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                isValid ? 'Change Due' : 'Insufficient Cash',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: isValid ? const Color(0xFF065F46) : const Color(0xFF991B1B),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            isValid
+                                ? '\u20b1${NumberFormat('#,##0.00').format(changeDue)}'
+                                : 'Short by \u20b1${NumberFormat('#,##0.00').format(shortfall)}',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              color: isValid ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogCtx, null),
+                          child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                        ),
+                        const SizedBox(width: 10),
+                        ElevatedButton.icon(
+                          onPressed: isValid
+                              ? () => Navigator.pop(dialogCtx, {
+                                    'amount_tendered': tendered,
+                                    'change_amount': changeDue,
+                                  })
+                              : null,
+                          icon: const Icon(Icons.check_circle_outline, size: 16, color: Colors.white),
+                          label: const Text('Confirm & Mark Paid', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0F5132),
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    ctrl.dispose();
+    return result;
+  }
+
+  // ════════════════════════════════════════════
   //  VERIFY AND CONFIRM PAYMENT (Online/Manual)
   // ════════════════════════════════════════════
   Future<void> _verifyAndConfirmPayment(Map<String, dynamic> req) async {
@@ -710,13 +937,29 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       final refNo = _refNo(req);
       final method = _paymentMethod(req);
       final resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'GCash';
+      final totalDue = (fees['total'] as num?)?.toDouble() ?? 0.0;
 
-      final paymentData = {
+      double tenderedAmount = totalDue;
+      double changeAmount = 0.0;
+      if (resolvedMethod.toLowerCase().contains('cash')) {
+        final cashResult = await _showCashTenderedConfirmDialog(
+          customerName: req['customer_name']?.toString() ?? 'Customer',
+          refNo: refNo,
+          totalDue: totalDue,
+        );
+        if (cashResult == null) return;
+        tenderedAmount = cashResult['amount_tendered'] ?? totalDue;
+        changeAmount = cashResult['change_amount'] ?? 0.0;
+      }
+
+      final paymentData = <String, dynamic>{
         'request_id': reqId,
         'user_id': userId,
         'receipt_number': receiptNo,
         'payment_method': resolvedMethod,
         'total_amount': fees['total'],
+        'amount_tendered': tenderedAmount,
+        'change_amount': changeAmount,
         'balance': 0,
         'status': 'paid',
         'cashier_name': 'Admin',
@@ -730,11 +973,41 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       };
 
       final existing = await supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
-      if (existing != null) {
-        await supabase.from('payments').update(paymentData).eq('request_id', reqId);
-      } else {
-        await supabase.from('payments').insert(paymentData);
+      try {
+        if (existing != null) {
+          await supabase.from('payments').update(paymentData).eq('request_id', reqId);
+        } else {
+          await supabase.from('payments').insert(paymentData);
+        }
+      } catch (e) {
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains('amount_tendered') || errStr.contains('change_amount')) {
+          final fallbackData = Map<String, dynamic>.from(paymentData)
+            ..remove('amount_tendered')
+            ..remove('change_amount');
+          if (existing != null) {
+            await supabase.from('payments').update(fallbackData).eq('request_id', reqId);
+          } else {
+            await supabase.from('payments').insert(fallbackData);
+          }
+        } else {
+          rethrow;
+        }
       }
+
+      AuditLogService.instance.log(
+        action: 'payment_verified',
+        module: 'Payment & Cashiering',
+        targetId: reqId?.toString(),
+        targetRef: refNo,
+        details: {
+          'customer': req['customer_name'] ?? '',
+          'method': resolvedMethod,
+          'total_amount': fees['total'],
+          'amount_tendered': tenderedAmount,
+          'change_amount': changeAmount,
+        },
+      );
 
       await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
 
@@ -1294,8 +1567,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         (req['slaughter_inspection'] is Map && (req['slaughter_inspection']['anti_mortem']?.toString() == 'Separate Facility' || (req['slaughter_inspection']['process_notes'] ?? '').toString().contains('SEPARATE FACILITY'))) ||
         (req['process_notes'] ?? '').toString().contains('SEPARATE FACILITY');
 
+    final isWalkIn = (req['user_id'] ?? '').toString().trim().isEmpty;
     bool isCheckingPayMongo = false;
     bool isPrintingReceipt = false;
+    bool isThermal80mm = true;
     String? payMongoStatusResult;
     String? payMongoResultMsg;
     String resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'Online Payment';
@@ -1306,79 +1581,265 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
         resolvedMethod.toLowerCase() == 'grabpay' ||
         resolvedMethod.toLowerCase() == 'card';
 
+    final orNo = ReceiptPdfGenerator.formatOfficialOrNo(req, receiptNo);
+    final bookletOr = (payment?['booklet_or_no'] ?? req['booklet_or_no'] ?? '').toString().trim();
+    final txnNo = ReceiptPdfGenerator.formatTxnNo(req);
+    final dateTimeStr = DateFormat('MMM d, yyyy, hh:mm a').format(DateTime.now());
+    final customerNameUpper = (req['customer_name'] ?? '—').toString().toUpperCase();
+    final customerTypeLabel = isBarangay ? 'Barangay Meat Dealer' : 'Market Meat Dealer';
+
+    final totalCount = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    int passedCount = int.tryParse((req['passed_count'] ?? '').toString()) ?? 0;
+    int condemnedCount = int.tryParse((req['condemned_count'] ?? '').toString()) ?? 0;
+    if (passedCount == 0 && condemnedCount == 0) {
+      final notes = (req['process_notes'] ?? '').toString();
+      final m = RegExp(r'\[PARTIAL_BATCH:\s*passed=(\d+),\s*condemned=(\d+)\]').firstMatch(notes);
+      if (m != null) {
+        passedCount = int.tryParse(m.group(1) ?? '') ?? 0;
+        condemnedCount = int.tryParse(m.group(2) ?? '') ?? 0;
+      }
+    }
+    final billableHeads = (passedCount > 0) ? passedCount : totalCount;
+    final totalAmount = (fees['total'] as num?)?.toDouble() ?? 0.0;
+    final rawTendered = (payment?['amount_tendered'] as num?)?.toDouble() ?? totalAmount;
+    final tenderedAmount = rawTendered >= totalAmount ? rawTendered : totalAmount;
+    final storedChange = (payment?['change_amount'] as num?)?.toDouble();
+    final changeAmount = (storedChange != null && storedChange >= 0)
+        ? storedChange
+        : (tenderedAmount - totalAmount).clamp(0.0, double.infinity);
+    final methodUpper = (method != '—' && method.trim().isNotEmpty)
+        ? method.trim().toUpperCase()
+        : 'CASH';
+    String fmtPhp(num? v) => '\u20b1${NumberFormat('#,##0.00').format((v ?? 0).toDouble())}';
+
     showDialog(
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) => Dialog(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFF4F6F9),
         surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         child: Container(
-          width: 500,
-          padding: const EdgeInsets.all(32),
+          width: 560,
+          padding: const EdgeInsets.all(24),
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Official Government Header
-                const Center(
-                  child: Column(
-                    children: [
-                      Text(
-                        'REPUBLIC OF THE PHILIPPINES • PROVINCE OF ALBAY',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 1.0,
-                          color: Color(0xFF64748B),
-                        ),
+                // ── Format Switcher Bar (80mm Thermal vs A4 Standard) ──
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Official Receipt Preview',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF0F172A),
                       ),
-                      SizedBox(height: 4),
-                      Text(
-                        'CITY GOVERNMENT OF TABACO',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.4,
-                          color: Color(0xFF0F172A),
-                        ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE2E8F0),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      SizedBox(height: 3),
-                      Text(
-                        'TABACO CITY "AA" SLAUGHTERHOUSE & MEAT INSPECTION OFFICE',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                          color: Color(0xFF0F6E56),
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildFormatToggleBtn(
+                            label: '80mm Thermal',
+                            active: isThermal80mm,
+                            onTap: () => setDialogState(() => isThermal80mm = true),
+                          ),
+                          _buildFormatToggleBtn(
+                            label: 'A4 Standard',
+                            active: !isThermal80mm,
+                            onTap: () => setDialogState(() => isThermal80mm = false),
+                          ),
+                        ],
                       ),
-                      SizedBox(height: 3),
-                      Text(
-                        'NMIS Accredited Facility • City Veterinary Office',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w400,
-                          color: Color(0xFF64748B),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // ── Centered Official Receipt Card (340px 80mm / 480px A4) ──
+                Center(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: isThermal80mm ? 340 : 480,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // 1. Header Block
+                        Center(
+                          child: Column(
+                            children: [
+                              SizedBox(
+                                width: 48,
+                                height: 48,
+                                child: Image.asset(
+                                  'assets/images/logo1.png',
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                'REPUBLIC OF THE PHILIPPINES',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              const Text(
+                                'Province of Albay • City of Tabaco',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'CITY ABATTOIR OFFICE',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              const Text(
+                                'OFFICIAL RECEIPT',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.1,
+                                  color: Color(0xFF0F172A),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        _buildDashedDivider(const Color(0xFF94A3B8)),
+                        const SizedBox(height: 10),
+
+                        // 2. Transaction Metadata
+                        _orMetaRow('OR No.:', orNo, boldValue: true, monoValue: true),
+                        if (bookletOr.isNotEmpty)
+                          _orMetaRow('Booklet OR #:', bookletOr, boldValue: true, monoValue: true),
+                        _orMetaRow('TXN No.:', txnNo, monoValue: true),
+                        _orMetaRow('Date:', dateTimeStr),
+                        _orMetaRow('Payor:', customerNameUpper, boldValue: true),
+                        _orMetaRow('Type:', customerTypeLabel),
+
+                        const SizedBox(height: 8),
+                        _buildDashedDivider(const Color(0xFF94A3B8)),
+                        const SizedBox(height: 10),
+
+                        // 3. Itemized Fee Lines
+                        _orFeeLine('Veterinary Health Certificate ($billableHeads)', fmtPhp(fees['vet_health_cert'] as num?)),
+                        _orFeeLine('Permit to Slaughter ($billableHeads)', fmtPhp(fees['permit_to_slaughter'] as num?)),
+                        _orFeeLine('Facility Fee ($billableHeads)', fmtPhp(fees['facility'] as num?)),
+                        _orFeeLine('Corral Fee ($billableHeads)', fmtPhp(fees['corral'] as num?)),
+                        _orFeeLine('Ante-Mortem Fee ($billableHeads)', fmtPhp(fees['ante_mortem'] as num?)),
+                        _orFeeLine('Post-Mortem Fee (${weight.toStringAsFixed(0)})', fmtPhp(fees['post_mortem'] as num?)),
+                        if (!isBarangay)
+                          _orFeeLine('Delivery Van Fee ($billableHeads)', fmtPhp(fees['delivery_van'] as num?)),
+                        if (((fees['additional_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                          _orFeeLine(
+                            '${fees['additional_fee_label'] ?? 'Additional Surcharge'} (1)',
+                            fmtPhp(fees['additional_fee'] as num?),
+                          ),
+                        if (((fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
+                          _orFeeLine(
+                            'Overdue Payment Penalty (1)',
+                            fmtPhp(fees['overdue_penalty'] as num?),
+                            bold: true,
+                          ),
+                        if (((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
+                          _orFeeLine(
+                            'Cold Storage Penalty Fee (1)',
+                            fmtPhp(fees['cold_storage_penalty'] as num?),
+                            bold: true,
+                          ),
+                        if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                          _orFeeLine(
+                            'Missed Schedule Penalty (1)',
+                            fmtPhp(fees['penalty_fee'] as num?),
+                            bold: true,
+                            color: const Color(0xFFB91C1C),
+                          )
+                        else if (tracking?['is_warning_only'] == true ||
+                            req['is_warning_only'] == true ||
+                            (req['process_notes'] ?? '').toString().contains('1ST OFFENSE'))
+                          _orFeeLine(
+                            'Missed Schedule Notice (1st Offense)',
+                            '\u20b10.00',
+                            color: const Color(0xFFB45309),
+                          ),
+
+                        const SizedBox(height: 8),
+                        _buildDashedDivider(const Color(0xFF94A3B8)),
+                        const SizedBox(height: 10),
+
+                        // 4. Totals & Payment Summary
+                        _orFeeLine(
+                          status == 'Verified' ? 'TOTAL PAID:' : 'TOTAL DUE:',
+                          fmtPhp(totalAmount),
+                          bold: true,
+                          fontSize: 14,
+                        ),
+                        const SizedBox(height: 2),
+                        _orFeeLine(
+                          'Tendered ($methodUpper):',
+                          fmtPhp(status == 'Verified' ? tenderedAmount : 0.0),
+                        ),
+                        _orFeeLine(
+                          'Change:',
+                          fmtPhp(status == 'Verified' ? changeAmount : 0.0),
+                        ),
+
+                        const SizedBox(height: 8),
+                        _buildDashedDivider(const Color(0xFFCBD5E1)),
+                        const SizedBox(height: 10),
+
+                        // 5. Footer Note
+                        const Text(
+                          'Present this receipt to the Meat Inspector for MIC issuance.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 14),
-                const Divider(color: Color(0xFF0F172A), thickness: 1.2, height: 1),
-                const SizedBox(height: 18),
 
-                // Receipt Info
-                Text('Receipt Number: $receiptNo', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 2),
-                Text('Date: ${DateFormat('M/dd/yyyy').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
-                Text('Time: ${DateFormat('h:mm:ss a').format(DateTime.now())}', style: const TextStyle(fontSize: 13)),
+                const SizedBox(height: 14),
                 if (isImmediateSlaughter) ...[
                   Container(
                     margin: const EdgeInsets.only(top: 10, bottom: 4),
@@ -1511,92 +1972,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 16),
-
-                // Customer Info
-                const Text('CUSTOMER INFORMATION:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                Text('Name: ${req['customer_name'] ?? '\u2014'}', style: const TextStyle(fontSize: 13)),
-                Text('Reference: $refNo', style: const TextStyle(fontSize: 13)),
-                const SizedBox(height: 16),
-
-                // Livestock Info
-                const Text('LIVESTOCK INFORMATION:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                Text('Animal Type: ${req['livestock_type'] ?? '\u2014'}', style: const TextStyle(fontSize: 13)),
-                Text('Count: ${_formatReceiptCount(req)}', style: const TextStyle(fontSize: 13)),
-                Text('Weight: ${weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014'}', style: const TextStyle(fontSize: 13)),
-                const SizedBox(height: 16),
-
-                // Fee Breakdown
-                const Text('Payment Calculation Preview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                _feeRow('Veterinary Health Certificate:', '\u20b1${(fees['vet_health_cert'] as double).toStringAsFixed(2)}'),
-                _feeRow('Permit to Slaughter:', '\u20b1${(fees['permit_to_slaughter'] as double).toStringAsFixed(2)}'),
-                _feeRow('Facility Fee:', '\u20b1${(fees['facility'] as double).toStringAsFixed(2)}'),
-                _feeRow('Corral Fee:', '\u20b1${(fees['corral'] as double).toStringAsFixed(2)}'),
-                _feeRow('Ante-Mortem Fee:', '\u20b1${(fees['ante_mortem'] as double).toStringAsFixed(2)}'),
-                _feeRow('Post-Mortem (${weight.toStringAsFixed(0)} kg @ \u20b1${((fees['rate_per_kg'] as num?)?.toDouble() ?? 5.0).toStringAsFixed(2)}/kg):', '\u20b1${(fees['post_mortem'] as double).toStringAsFixed(2)}'),
-                if (((fees['additional_fee'] as num?)?.toDouble() ?? 0.0) > 0)
-                  _feeRow(
-                    '${fees['additional_fee_label'] ?? 'Additional Surcharge'}:',
-                    '\u20b1${((fees['additional_fee'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}',
-                  ),
-                if (((fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
-                  _feeRow(
-                    'Overdue Payment Penalty (Past 5:00 PM):',
-                    '\u20b1${((fees['overdue_penalty'] as num?)?.toDouble() ?? 100.0).toStringAsFixed(2)}',
-                    bold: true,
-                  ),
-                if (((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
-                  _feeRow(
-                    'Cold Storage Penalty Fee (Unclaimed Past 5:00 PM):',
-                    '\u20b1${((fees['cold_storage_penalty'] as num?)?.toDouble() ?? 150.0).toStringAsFixed(2)}',
-                    bold: true,
-                  ),
-                if (((fees['penalty_fee'] as num?)?.toDouble() ?? 0.0) > 0)
-                  _feeRow(
-                    'Missed Schedule Slot Penalty (Repeat Offense):',
-                    '\u20b1${((fees['penalty_fee'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(2)}',
-                    bold: true,
-                    color: const Color(0xFFB91C1C),
-                  )
-                else if (tracking?['is_warning_only'] == true ||
-                    req['is_warning_only'] == true ||
-                    (req['process_notes'] ?? '').toString().contains('1ST OFFENSE'))
-                  _feeRow(
-                    'Missed Schedule Notice (1st Offense):',
-                    'Warning Issued (\u20b10.00 Waived)',
-                    bold: false,
-                    color: const Color(0xFFB45309),
-                  ),
-                const SizedBox(height: 8),
-                Divider(color: Colors.grey.shade300),
-                _feeRow('Subtotal:', '\u20b1${(fees['subtotal'] as double).toStringAsFixed(2)}', bold: true),
-                if (!isBarangay) _feeRow('Delivery Van Fee:', '\u20b1${(fees['delivery_van'] as double).toStringAsFixed(2)}'),
-                const SizedBox(height: 8),
-                Divider(color: Colors.grey.shade400),
-                const SizedBox(height: 4),
-                _feeRow('TOTAL AMOUNT:', '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true, large: true),
-                const SizedBox(height: 12),
-                if (fees['cold_storage_unpaid_on_paid_order'] == true) ...[
-                  _feeRow('AMOUNT PAID (${method.toUpperCase()}):', '\u20b1${((fees['amount_paid'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
-                  _feeRow('BALANCE (COLD STORAGE FEE DUE AT PICKUP):', '\u20b1150.00', bold: true),
-                ] else ...[
-                  _feeRow('BALANCE:', status == 'Verified' ? '0' : '\u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}', bold: true),
-                ],
-                const SizedBox(height: 12),
-
-                // Payment Details
-                if (status == 'Verified') ...[
-                  Text('Payment Method: ${method.toUpperCase()}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                  Text(
-                    (fees['cold_storage_unpaid_on_paid_order'] == true)
-                        ? 'Status: PAID (BASE FEES) • \u20b1150.00 COLD STORAGE FEE DUE AT PICKUP'
-                        : 'Status: PAID',
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 8),
-                  Text('Cashier: ${payment?['cashier_name'] ?? 'Admin'}', style: const TextStyle(fontSize: 13)),
-                ] else if (method != '—' && method.isNotEmpty) ...[
+                if (status != 'Verified' && method != '—' && method.isNotEmpty) ...[
                   Container(
                     margin: const EdgeInsets.only(top: 8, bottom: 8),
                     padding: const EdgeInsets.all(12),
@@ -1785,12 +2161,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 16),
-
-                // Footer
-                const Text('Thank you!', style: TextStyle(fontSize: 13)),
-                const Text('Tabaco City Slaughterhouse', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 20),
+                const SizedBox(height: 12),
 
                 // Action Buttons
                 Row(
@@ -1809,13 +2180,27 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                             style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2D6A4F),
+                            backgroundColor: const Color(0xFF0F5132),
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(width: 10),
-                      ] else if (isImmediateSlaughter) ...[
+                      ] else if (isImmediateSlaughter || isWalkIn) ...[
+                        if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
+                          WalkInSmsHelper.buildNotifyButton(
+                            context: context,
+                            contactNumber: req['contact_number'].toString(),
+                            stage: 'payment',
+                            refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
+                            customerName: (req['customer_name'] ?? 'Customer').toString(),
+                            marking: (req['marking'] ?? '').toString(),
+                            livestockType: (req['livestock_type'] ?? '').toString(),
+                            animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                            requestId: req['id']?.toString(),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
                         ElevatedButton.icon(
                           onPressed: () {
                             Navigator.pop(dialogCtx);
@@ -1824,13 +2209,27 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                           icon: const Icon(Icons.payments_outlined, size: 16, color: Colors.white),
                           label: const Text('Process Payment', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2D6A4F),
+                            backgroundColor: const Color(0xFF0F5132),
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(width: 10),
                       ] else if (req['status'] != 'payment_pending') ...[
+                        if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
+                          WalkInSmsHelper.buildNotifyButton(
+                            context: context,
+                            contactNumber: req['contact_number'].toString(),
+                            stage: 'payment',
+                            refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
+                            customerName: (req['customer_name'] ?? 'Customer').toString(),
+                            marking: (req['marking'] ?? '').toString(),
+                            livestockType: (req['livestock_type'] ?? '').toString(),
+                            animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                            requestId: req['id']?.toString(),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
                         ElevatedButton.icon(
                           onPressed: () {
                             Navigator.pop(dialogCtx);
@@ -1839,7 +2238,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                           icon: const Icon(Icons.send, size: 16, color: Colors.white),
                           label: const Text('Send Receipt to Customer', style: TextStyle(color: Colors.white, fontSize: 13)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2D6A4F),
+                            backgroundColor: const Color(0xFF0F5132),
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
@@ -1882,9 +2281,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                   status: status,
                                   method: method,
                                   weight: weight,
+                                  isThermal80mm: isThermal80mm,
                                 );
                                 await Printing.layoutPdf(
-                                  name: 'Payment_Receipt_$refNo.pdf',
+                                  name: '${isThermal80mm ? "OR_80mm" : "OR_A4"}_$orNo.pdf',
                                   onLayout: (_) async => bytes,
                                 );
                               } catch (e) {
@@ -1910,13 +2310,15 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                             )
                           : const Icon(Icons.print, size: 16),
                       label: Text(
-                        isPrintingReceipt ? 'Printing...' : 'Print',
+                        isPrintingReceipt
+                            ? 'Printing...'
+                            : (isThermal80mm ? 'Print 80mm OR' : 'Print A4 OR'),
                         style: const TextStyle(fontSize: 13),
                       ),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF2D3748),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        side: const BorderSide(color: Color(0xFF2D3748)),
+                        foregroundColor: const Color(0xFF0F172A),
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                        side: const BorderSide(color: Color(0xFF0F172A)),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
@@ -1931,14 +2333,124 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   );
   }
 
-  Widget _feeRow(String label, String amount, {bool bold = false, bool large = false, Color? color}) {
+  Widget _buildFormatToggleBtn({
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 2,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            color: active ? const Color(0xFF0F5132) : const Color(0xFF475569),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDashedDivider(Color color) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final boxWidth = constraints.constrainWidth();
+        const dashWidth = 4.0;
+        const dashSpace = 3.0;
+        final dashCount = (boxWidth / (dashWidth + dashSpace)).floor().clamp(1, 300);
+        return Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: List.generate(
+            dashCount,
+            (_) => SizedBox(
+              width: dashWidth,
+              height: 1,
+              child: DecoratedBox(decoration: BoxDecoration(color: color)),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _orMetaRow(String label, String value, {bool boldValue = false, bool monoValue = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
-          Text(amount, style: TextStyle(fontSize: large ? 14 : 13, fontWeight: bold ? FontWeight.bold : FontWeight.normal, color: color)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontFamily: monoValue ? 'Courier New' : 'Segoe UI',
+                fontFamilyFallback: monoValue ? const ['Courier', 'monospace'] : const ['system-ui', 'sans-serif'],
+                fontSize: 12,
+                fontWeight: boldValue ? FontWeight.w700 : FontWeight.w400,
+                color: const Color(0xFF0F172A),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _orFeeLine(String label, String amount, {bool bold = false, double fontSize = 12, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+                color: color ?? const Color(0xFF0F172A),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            amount,
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              fontFamily: 'Courier New',
+              fontFamilyFallback: const ['Courier', 'monospace'],
+              fontSize: fontSize,
+              fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+              color: color ?? const Color(0xFF0F172A),
+            ),
+          ),
         ],
       ),
     );
@@ -1990,10 +2502,17 @@ class _NewPaymentEntryDialog extends StatefulWidget {
 
 class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
   final _refCtrl = TextEditingController();
+  final _cashTenderedCtrl = TextEditingController();
   String _customerName = '';
   double _totalAmount = 0;
   double _balanceAmount = 0;
   String _selectedMethod = 'Cash';
+
+  bool get _isCashMethod => _selectedMethod.toLowerCase().contains('cash');
+  double get _parsedCashTendered => double.tryParse(_cashTenderedCtrl.text.trim()) ?? 0.0;
+  double get _cashChangeDue => (_parsedCashTendered - _totalAmount).clamp(0.0, double.infinity);
+  double get _cashShortfall => (_totalAmount - _parsedCashTendered).clamp(0.0, double.infinity);
+  bool get _isCashValid => !_isCashMethod || (_cashTenderedCtrl.text.trim().isNotEmpty && _parsedCashTendered >= _totalAmount);
   bool _isLoading = false;
   bool _isProcessing = false;
   bool _isWaitingOnlinePayment = false;
@@ -2152,6 +2671,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         _totalAmount = total;
         _balanceAmount = total;
         _fees = fees;
+        _cashTenderedCtrl.clear();
         _isLoading = false;
       });
     } catch (e) {
@@ -2168,6 +2688,15 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
   Future<void> _processPayment() async {
     if (_foundRequest == null) return;
+    if (_isCashMethod && !_isCashValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a cash tendered amount equal to or greater than the total due.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
     setState(() => _isProcessing = true);
     try {
       final req = _foundRequest!;
@@ -2175,10 +2704,13 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       final userId = req['user_id'];
       final receiptNo = 'RCP-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
       final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final totalDue = (_fees['total'] as num?)?.toDouble() ?? _totalAmount;
+      final tenderedAmount = _isCashMethod ? _parsedCashTendered : totalDue;
+      final changeAmount = _isCashMethod ? _cashChangeDue : 0.0;
 
       // Check existing payment
       final existing = await widget.supabase.from('payments').select('id').eq('request_id', reqId).maybeSingle();
-      final paymentData = {
+      final paymentData = <String, dynamic>{
         'request_id': reqId,
         'user_id': userId,
         'receipt_number': receiptNo,
@@ -2186,6 +2718,8 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
             ? 'Online Payment'
             : _selectedMethod,
         'total_amount': _fees['total'],
+        'amount_tendered': tenderedAmount,
+        'change_amount': changeAmount,
         'balance': 0,
         'status': 'paid',
         'cashier_name': 'Admin',
@@ -2198,10 +2732,26 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         'delivery_van_fee': _fees['delivery_van'],
       };
 
-      if (existing != null) {
-        await widget.supabase.from('payments').update(paymentData).eq('request_id', reqId);
-      } else {
-        await widget.supabase.from('payments').insert(paymentData);
+      try {
+        if (existing != null) {
+          await widget.supabase.from('payments').update(paymentData).eq('request_id', reqId);
+        } else {
+          await widget.supabase.from('payments').insert(paymentData);
+        }
+      } catch (e) {
+        final errStr = e.toString().toLowerCase();
+        if (errStr.contains('amount_tendered') || errStr.contains('change_amount')) {
+          final fallbackData = Map<String, dynamic>.from(paymentData)
+            ..remove('amount_tendered')
+            ..remove('change_amount');
+          if (existing != null) {
+            await widget.supabase.from('payments').update(fallbackData).eq('request_id', reqId);
+          } else {
+            await widget.supabase.from('payments').insert(fallbackData);
+          }
+        } else {
+          rethrow;
+        }
       }
 
       await widget.supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
@@ -2215,6 +2765,8 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
           'customer': req['customer_name'] ?? '',
           'method': paymentData['payment_method'],
           'total_amount': _fees['total'],
+          'amount_tendered': tenderedAmount,
+          'change_amount': changeAmount,
         },
       );
 
@@ -2547,6 +3099,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       widget.supabase.removeChannel(_realtimeChannel!);
     }
     _refCtrl.dispose();
+    _cashTenderedCtrl.dispose();
     super.dispose();
   }
 
@@ -3024,6 +3577,112 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                   ),
                 ),
               ),
+              if (_isCashMethod && _foundRequest != null) ...[
+                const SizedBox(height: 18),
+                RichText(
+                  text: const TextSpan(
+                    text: 'Cash Tendered (\u20b1) ',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2D3748)),
+                    children: [TextSpan(text: '*', style: TextStyle(color: Colors.red))],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _cashTenderedCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    prefixText: '\u20b1 ',
+                    prefixStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                    hintText: 'Enter amount given by customer',
+                    filled: true,
+                    fillColor: const Color(0xFFF7FAFC),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.5)),
+                  ),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    ActionChip(
+                      label: Text('Exact (\u20b1${_totalAmount.toStringAsFixed(2)})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F5132))),
+                      backgroundColor: const Color(0xFFECFDF5),
+                      side: const BorderSide(color: Color(0xFFA7F3D0)),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onPressed: () {
+                        _cashTenderedCtrl.text = _totalAmount.toStringAsFixed(2);
+                        _cashTenderedCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _cashTenderedCtrl.text.length));
+                        setState(() {});
+                      },
+                    ),
+                    for (final preset in [500.0, 1000.0, 2000.0])
+                      if (preset >= _totalAmount)
+                        ActionChip(
+                          label: Text('\u20b1${NumberFormat('#,##0').format(preset)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0F5132))),
+                          backgroundColor: const Color(0xFFECFDF5),
+                          side: const BorderSide(color: Color(0xFFA7F3D0)),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 0),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          onPressed: () {
+                            _cashTenderedCtrl.text = preset.toStringAsFixed(2);
+                            _cashTenderedCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _cashTenderedCtrl.text.length));
+                            setState(() {});
+                          },
+                        ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _isCashValid ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _isCashValid ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            _isCashValid ? Icons.check_circle_outline : Icons.error_outline,
+                            size: 18,
+                            color: _isCashValid ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isCashValid ? 'Change Due' : 'Insufficient Cash',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _isCashValid ? const Color(0xFF065F46) : const Color(0xFF991B1B),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        _isCashValid
+                            ? '\u20b1${NumberFormat('#,##0.00').format(_cashChangeDue)}'
+                            : 'Short by \u20b1${NumberFormat('#,##0.00').format(_cashShortfall)}',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: _isCashValid ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 28),
 
               // Action Buttons
@@ -3054,7 +3713,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
                     ),
                   ] else ...[
                     ElevatedButton(
-                      onPressed: _foundRequest != null && !_isProcessing ? _processPayment : null,
+                      onPressed: _foundRequest != null && !_isProcessing && _isCashValid ? _processPayment : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF2D3748),
                         disabledBackgroundColor: Colors.grey.shade300,

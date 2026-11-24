@@ -12,6 +12,7 @@ import 'reports_records_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
 import '../services/staff_notification_service.dart';
+import '../widgets/lucide_sidebar_icons.dart';
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -362,7 +363,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             // ─── LOGO HEADER ───
-                            _buildLogoHeader(isDark, settingsService),
+                            _buildLogoHeader(isDark, settingsService, currentWidth),
 
                             const SizedBox(height: 14),
 
@@ -375,77 +376,77 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                   if (settingsService.isModuleAllowed(0))
                                     _buildNavItem(
                                       index: 0,
-                                      icon: Icons.grid_view_outlined,
-                                      activeIcon: Icons.grid_view_rounded,
+                                      icon: LucideSidebarIcon.layoutGrid,
                                       label: 'Dashboard',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   if (settingsService.isModuleAllowed(1)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 1,
-                                      icon: Icons.assignment_outlined,
-                                      activeIcon: Icons.assignment,
+                                      icon: LucideSidebarIcon.clipboardPlus,
                                       label: 'Receiving',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(2)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 2,
-                                      icon: Icons.fact_check_outlined,
-                                      activeIcon: Icons.fact_check,
+                                      icon: LucideSidebarIcon.clipboardCheck,
                                       label: 'Verification',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(3)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 3,
-                                      icon: Icons.medical_services_outlined,
-                                      activeIcon: Icons.medical_services,
+                                      icon: LucideSidebarIcon.stethoscope,
                                       label: 'Inspection',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(4)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 4,
-                                      icon: Icons.payments_outlined,
-                                      activeIcon: Icons.payments,
+                                      icon: LucideSidebarIcon.receiptDollar,
                                       label: 'Cashiering',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(5)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 5,
-                                      icon: Icons.local_shipping_outlined,
-                                      activeIcon: Icons.local_shipping,
+                                      icon: LucideSidebarIcon.truck,
                                       label: 'Releasing',
                                       subtitle: '',
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                   if (settingsService.isModuleAllowed(6)) ...[
                                     const SizedBox(height: 4),
                                     _buildNavItem(
                                       index: 6,
-                                      icon: Icons.description_outlined,
-                                      activeIcon: Icons.description,
+                                      icon: LucideSidebarIcon.fileText,
                                       label: 'Reports',
                                       subtitle: '',
                                       badgeCount: _illegalReportBadgeCount,
                                       isDark: isDark,
+                                      currentWidth: currentWidth,
                                     ),
                                   ],
                                 ],
@@ -471,18 +472,18 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                 padding: const EdgeInsets.symmetric(horizontal: 10),
                                 child: _buildNavItem(
                                   index: 7,
-                                  icon: Icons.settings_outlined,
-                                  activeIcon: Icons.settings,
+                                  icon: LucideSidebarIcon.settings,
                                   label: 'Settings',
                                   subtitle: '',
                                   isDark: isDark,
+                                  currentWidth: currentWidth,
                                 ),
                               ),
                               const SizedBox(height: 8),
                             ],
 
                             // ─── FOOTER (Profile + Sign Out) ───
-                            _buildAdminFooter(context, isDark, settingsService),
+                            _buildAdminFooter(context, isDark, settingsService, currentWidth),
                           ],
                         ),
                       ),
@@ -497,7 +498,8 @@ class _AdminSidebarState extends State<_AdminSidebar>
     );
   }
 
-  Widget _buildLogoHeader(bool isDark, AppSettingsService settings) {
+  Widget _buildLogoHeader(bool isDark, AppSettingsService settings, double currentWidth) {
+    final showCollapsed = _isCollapsed || currentWidth < 180;
     return Container(
       height: 78,
       decoration: BoxDecoration(
@@ -508,209 +510,189 @@ class _AdminSidebarState extends State<_AdminSidebar>
           ),
         ),
       ),
-      child: AnimatedCrossFade(
-        duration: const Duration(milliseconds: 200),
-        firstCurve: Curves.easeInOutCubic,
-        secondCurve: Curves.easeInOutCubic,
-        sizeCurve: Curves.easeInOutCubic,
-        crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-        firstChild: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      blurRadius: 4,
-                      offset: const Offset(0, 1),
+      child: showCollapsed
+          ? Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.18),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: _toggleCollapse,
+                      borderRadius: BorderRadius.circular(4),
+                      child: Tooltip(
+                        message: 'Expand Sidebar',
+                        child: Padding(
+                          padding: const EdgeInsets.all(2),
+                          child: _buildPanelToggleIcon(isCollapsed: true),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                child: ClipOval(
-                  child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
-                ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ClipRect(
-                  child: FadeTransition(
-                    opacity: _fadeAnimation,
-                    child: const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'CITY OF TABACO, ALBAY',
-                          style: TextStyle(
-                            color: Color(0xFFCBD5E1),
-                            fontWeight: FontWeight.w600,
-                            fontSize: 11,
-                            letterSpacing: 0.9,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          softWrap: false,
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'City Abattoir System',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 16,
-                            height: 1.2,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          softWrap: false,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: _buildPanelToggleIcon(isCollapsed: false),
-                tooltip: 'Collapse Sidebar',
-                splashRadius: 18,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                onPressed: _toggleCollapse,
-              ),
-            ],
-          ),
-        ),
-        secondChild: Container(
-          width: 80,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                InkWell(
-                  onTap: _toggleCollapse,
-                  borderRadius: BorderRadius.circular(4),
-                  child: Tooltip(
-                    message: 'Expand Sidebar',
-                    child: Padding(
+            )
+          : SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const NeverScrollableScrollPhysics(),
+              child: Container(
+                width: 288,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
                       padding: const EdgeInsets.all(2),
-                      child: _buildPanelToggleIcon(isCollapsed: true),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.18),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          ),
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ClipRect(
+                        child: FadeTransition(
+                          opacity: _fadeAnimation,
+                          child: const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'CITY OF TABACO, ALBAY',
+                                style: TextStyle(
+                                  color: Color(0xFFCBD5E1),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                  letterSpacing: 0.9,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                softWrap: false,
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'City Abattoir System',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                  height: 1.2,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.clip,
+                                softWrap: false,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      icon: _buildPanelToggleIcon(isCollapsed: false),
+                      tooltip: 'Collapse Sidebar',
+                      splashRadius: 18,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                      onPressed: _toggleCollapse,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
-      ),
     );
   }
 
   Widget _buildPanelToggleIcon({required bool isCollapsed}) {
-    const color = Color(0xFFCBD5E1);
-    return Container(
-      width: 20,
-      height: 18,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(4.5),
-        border: Border.all(color: color, width: 1.5),
-      ),
-      child: Row(
-        children: [
-          const SizedBox(width: 4.5),
-          Container(width: 1.4, height: double.infinity, color: color),
-          Expanded(
-            child: Center(
-              child: Icon(
-                isCollapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-                size: 12,
-                color: color,
-              ),
-            ),
-          ),
-        ],
-      ),
+    return LucideIcon(
+      isCollapsed ? LucideSidebarIcon.panelLeftOpen : LucideSidebarIcon.panelLeftClose,
+      size: 20,
+      color: const Color(0xFFCBD5E1),
     );
   }
 
   Widget _buildNavItem({
     required int index,
-    required IconData icon,
-    required IconData activeIcon,
+    required LucideSidebarIcon icon,
     required String label,
     required String subtitle,
     required bool isDark,
+    required double currentWidth,
     int badgeCount = 0,
   }) {
     final isSelected = widget.selectedIndex == index;
+    final showCollapsed = _isCollapsed || currentWidth < 160;
 
     final itemWidget = Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
         onTap: () => widget.onItemSelected(index),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         hoverColor: Colors.white.withValues(alpha: 0.10),
         child: Container(
-          padding: _isCollapsed
-              ? const EdgeInsets.symmetric(vertical: 12)
-              : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: showCollapsed
+              ? const EdgeInsets.symmetric(vertical: 14)
+              : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.12),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
                     ),
                   ]
                 : null,
           ),
           child: Row(
             mainAxisAlignment:
-                _isCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+                showCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
             children: [
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  Icon(
-                    isSelected ? activeIcon : icon,
+                  LucideIcon(
+                    icon,
                     color: isSelected
                         ? const Color(0xFF0F5132)
                         : const Color(0xFFE2E8F0),
                     size: 20,
                   ),
-                  if (badgeCount > 0 && _isCollapsed)
+                  if (badgeCount > 0 && showCollapsed)
                     Positioned(
                       right: -7,
                       top: -5,
@@ -734,24 +716,26 @@ class _AdminSidebarState extends State<_AdminSidebar>
                     ),
                 ],
               ),
-              if (_animController.value < 0.95)
+              if (!showCollapsed)
                 Expanded(
                   child: ClipRect(
                     child: FadeTransition(
                       opacity: _fadeAnimation,
                       child: Padding(
-                        padding: const EdgeInsets.only(left: 12),
+                        padding: const EdgeInsets.only(left: 14),
                         child: Row(
                           children: [
                             Expanded(
                               child: Text(
                                 label,
                                 style: TextStyle(
+                                  fontFamily: 'Segoe UI',
                                   color: isSelected
                                       ? const Color(0xFF0F5132)
                                       : const Color(0xFFE2E8F0),
-                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                                  fontSize: 14,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                                  fontSize: 15.5,
+                                  height: 1.3,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.clip,
@@ -788,7 +772,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
       ),
     );
 
-    if (_isCollapsed) {
+    if (showCollapsed) {
       return Tooltip(
         message: label,
         waitDuration: const Duration(milliseconds: 200),
@@ -799,16 +783,68 @@ class _AdminSidebarState extends State<_AdminSidebar>
   }
 
   Widget _buildAdminFooter(
-      BuildContext context, bool isDark, AppSettingsService settings) {
+      BuildContext context, bool isDark, AppSettingsService settings, double currentWidth) {
     final photoUrl = settings.profilePhotoUrl?.trim() ?? '';
     final hasPhoto = photoUrl.isNotEmpty;
-    return AnimatedCrossFade(
-      duration: const Duration(milliseconds: 200),
-      firstCurve: Curves.easeInOutCubic,
-      secondCurve: Curves.easeInOutCubic,
-      sizeCurve: Curves.easeInOutCubic,
-      crossFadeState: _isCollapsed ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-      firstChild: Container(
+    final showCollapsed = _isCollapsed || currentWidth < 180;
+
+    if (showCollapsed) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Tooltip(
+              message: '${settings.profileName} • My Profile',
+              child: InkWell(
+                onTap: () => widget.onItemSelected(7, 3),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: CircleAvatar(
+                    radius: 17,
+                    backgroundColor: Colors.white.withValues(alpha: 0.14),
+                    backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
+                    child: hasPhoto
+                        ? null
+                        : const LucideIcon(
+                            LucideSidebarIcon.user,
+                            size: 18,
+                            color: Color(0xFFE2E8F0),
+                          ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Tooltip(
+              message: 'Sign Out',
+              child: IconButton(
+                icon: const LucideIcon(
+                  LucideSidebarIcon.logOut,
+                  size: 20,
+                  color: Color(0xFFE2E8F0),
+                ),
+                splashRadius: 18,
+                onPressed: () => _handleLogout(context),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      child: Container(
+        width: 288,
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
         decoration: BoxDecoration(
           border: Border(
@@ -835,9 +871,9 @@ class _AdminSidebarState extends State<_AdminSidebar>
                         backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
                         child: hasPhoto
                             ? null
-                            : const Icon(
-                                Icons.person_outline_rounded,
-                                size: 20,
+                            : const LucideIcon(
+                                LucideSidebarIcon.user,
+                                size: 18,
                                 color: Color(0xFFE2E8F0),
                               ),
                       ),
@@ -890,16 +926,8 @@ class _AdminSidebarState extends State<_AdminSidebar>
             SizedBox(
               width: double.infinity,
               height: 48,
-              child: TextButton.icon(
+              child: TextButton(
                 onPressed: () => _handleLogout(context),
-                icon: const Icon(Icons.logout_rounded, size: 18, color: Color(0xFFE2E8F0)),
-                label: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: const Text(
-                    'Sign Out',
-                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                ),
                 style: ButtonStyle(
                   backgroundColor: WidgetStateProperty.resolveWith((states) {
                     if (states.contains(WidgetState.hovered) ||
@@ -912,51 +940,29 @@ class _AdminSidebarState extends State<_AdminSidebar>
                     RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
-      secondChild: Container(
-        width: 80,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: Colors.white.withValues(alpha: 0.10), width: 1),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Tooltip(
-              message: '${settings.profileName} • My Profile',
-              child: InkWell(
-                onTap: () => widget.onItemSelected(7, 3),
-                borderRadius: BorderRadius.circular(20),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: CircleAvatar(
-                    radius: 17,
-                    backgroundColor: Colors.white.withValues(alpha: 0.14),
-                    backgroundImage: hasPhoto ? NetworkImage(photoUrl) : null,
-                    child: hasPhoto
-                        ? null
-                        : const Icon(
-                            Icons.person_outline_rounded,
-                            size: 19,
-                            color: Color(0xFFE2E8F0),
-                          ),
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const LucideIcon(
+                      LucideSidebarIcon.logOut,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 8),
+                    FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: const Text(
+                        'Sign Out',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14.5,
+                          height: 20 / 14.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Tooltip(
-              message: 'Sign Out',
-              child: IconButton(
-                icon: const Icon(Icons.logout_rounded, size: 20, color: Color(0xFFE2E8F0)),
-                splashRadius: 18,
-                onPressed: () => _handleLogout(context),
               ),
             ),
           ],

@@ -13,6 +13,7 @@ import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/animals_in_lot_editor.dart';
+import '../widgets/walk_in_sms_helper.dart';
 
 class SlaughterInspectionPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -648,7 +649,9 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                     )),
                     // Customer Response column
                     DataCell(
-                      (isPostMortemFailed || isCondemnedStatus)
+                      (req['user_id'] ?? '').toString().trim().isEmpty
+                          ? _buildBadge('Walk-In (On-Site)', Colors.grey, light: true)
+                          : (isPostMortemFailed || isCondemnedStatus)
                           ? (isCondemnationAcknowledged
                               ? _buildBadge('Slip Received & Concluded', Colors.green, light: true)
                               : _buildBadge('Awaiting Slip Review', Colors.orange, light: true))
@@ -981,6 +984,21 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
+                            WalkInSmsHelper.buildNotifyButton(
+                              context: context,
+                              contactNumber: req['contact_number'].toString(),
+                              stage: 'inspection',
+                              refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
+                              customerName: (req['customer_name'] ?? 'Customer').toString(),
+                              marking: (req['marking'] ?? '').toString(),
+                              livestockType: (req['livestock_type'] ?? '').toString(),
+                              animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                              statusSummary: status.replaceAll('_', ' '),
+                              requestId: req['id']?.toString(),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
                           isFuture && status == 'doc_verified'
                               ? Tooltip(
                                   message: 'Livestock scheduled for a future date. Ante-mortem inspection cannot be logged until animal arrives at the facility.',
@@ -1933,7 +1951,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
   }
   bool get _isPartialBatch => _totalHeads >= 2 && _hasHealthFailure && _condemnedCount > 0 && _effectivePassedCount > 0;
 
-  bool _technicalError = false;
+  // (Technical Error/Delay UI removed from Update Slaughter Process dialog)
   final _delayReasonCtrl = TextEditingController();
   bool _isMissedSchedule = false;
   int _customerPriorMissedCount = 0;
@@ -2043,7 +2061,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         _delayReasonCtrl.text = match.group(1) ?? '';
       }
     }
-    _technicalError = _processStage == 'Technical Error/Delay';
+    // Technical Error/Delay dialog toggle removed
 
     final prefDateStr = req['preferred_date']?.toString();
     if (prefDateStr != null && prefDateStr.isNotEmpty) {
@@ -2942,11 +2960,6 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                                   }
                                 }
                                 _processStage = v!;
-                                if (_processStage == 'Technical Error/Delay') {
-                                  _technicalError = true;
-                                } else {
-                                  _technicalError = false;
-                                }
                                 if (_processStage == 'Complete' && _postMortem == 'Pending') {
                                   _postMortem = 'Passed';
                                 }
@@ -3262,59 +3275,6 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               const Divider(),
               const SizedBox(height: 16),
 
-              // Technical Error Section
-              GestureDetector(
-                onTap: () => setState(() {
-                  _technicalError = !_technicalError;
-                  if (_technicalError) {
-                    _processStage = 'Technical Error/Delay';
-                  } else if (_processStage == 'Technical Error/Delay') {
-                    _processStage = 'Preparation';
-                  }
-                }),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 48,
-                      child: Icon(_technicalError ? Icons.cancel : Icons.cancel_outlined, color: Colors.red, size: 24),
-                    ),
-                    const Expanded(
-                      child: Text('Technical Error / Issue', style: TextStyle(color: Colors.red, fontSize: 16, fontWeight: FontWeight.bold))
-                    ),
-                  ],
-                ),
-              ),
-              if (_technicalError)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('The customer will be notified that their livestock slaughter has been delayed due to an internal slaughterhouse technical issue. No penalty fee will be charged (₱0.00).', style: TextStyle(color: Color(0xFFC2410C), fontSize: 12)),
-                      const SizedBox(height: 16),
-                      const Text('Reason for Delay *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: _delayReasonCtrl,
-                        maxLines: 2,
-                        textCapitalization: TextCapitalization.sentences,
-                        inputFormatters: const [SentencesCapitalizationFormatter()],
-                        decoration: InputDecoration(
-                          hintText: 'Describe the technical error or reason for delay...',
-                          hintStyle: const TextStyle(color: Colors.black, fontSize: 13),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text('Slaughterhouse Facility Delay: ₱0.00 Penalty Fee (No charge to customer for facility delay).', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF15803D))),
-                    ],
-                  ),
-                ),
-
-              const SizedBox(height: 16),
-              const Divider(),
-              const SizedBox(height: 16),
-
               // Missed Schedule / Wasted Slot Penalty Section
               Builder(
                 builder: (context) {
@@ -3419,26 +3379,21 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                     child: const Text('Cancel', style: TextStyle(color: Colors.black87)),
                   ),
                   const SizedBox(width: 12),
-                  if (_technicalError)
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : () => _updateProcess(notifyDelay: true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFC2410C),
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      child: _isLoading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Notify Facility Delay (₱0 Fee)', style: TextStyle(color: Colors.white)),
-                    )
-                  else
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : () => _updateProcess(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      child: _isLoading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('Update Process', style: TextStyle(color: Colors.white)),
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : () => _updateProcess(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F5132),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Text('Update Process', style: TextStyle(color: Colors.white)),
+                  ),
                 ],
               ),
             ],

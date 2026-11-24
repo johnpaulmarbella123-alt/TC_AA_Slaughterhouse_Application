@@ -24,6 +24,7 @@ final ValueNotifier<String?> globalAvatarUrl = ValueNotifier<String?>(null);
 // Global notifier for unread notification count — updated by the HomeScreen
 // realtime listener, consumed by the bottom-nav badge. Instant updates.
 final ValueNotifier<int> globalUnreadNotifCount = ValueNotifier<int>(0);
+final ValueNotifier<int> globalPendingPaymentCount = ValueNotifier<int>(0);
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _selectedTab = 0;
@@ -66,13 +67,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _startNotificationListener();
     _startProfileStatusListener();
 
-    // Initial fetch so badge is correct on app launch.
+    // Initial fetch so badges are correct on app launch.
     _fetchUnreadCount();
+    _fetchPendingPaymentCount();
 
-    // Fast polling fallback (every 4 seconds) to ensure new notifications
+    // Fast polling fallback to ensure new notifications, unpaid receipts,
     // and account deactivation status update immediately.
     _notifPollingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _fetchUnreadCount();
+      _fetchPendingPaymentCount();
       _checkAccountStillActive();
     });
 
@@ -133,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // When user brings app back to foreground, immediately check for new notifications and account status
     if (state == AppLifecycleState.resumed) {
       _fetchUnreadCount();
+      _fetchPendingPaymentCount();
       _loadAvatar();
       _checkAccountStillActive();
     }
@@ -272,12 +276,77 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         globalUnreadNotifCount.value = newCount;
         debugPrint('HOME: Unread count changed: $oldCount → $newCount');
         if (newCount > oldCount) {
-          // New notification arrived, tell NotifyPage to refresh its list
+          // New notification arrived, tell NotifyPage & Payment badge to refresh
           _notifyRefreshTrigger.value++;
+          _fetchPendingPaymentCount();
         }
       }
     } catch (e) {
       debugPrint('HOME: Failed to fetch unread count: $e');
+    }
+  }
+
+  /// Fetch count of unpaid/pending receipts for the logged-in customer.
+  /// Persists across app restarts until payment is actually completed/verified.
+  Future<void> _fetchPendingPaymentCount() async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) {
+        globalPendingPaymentCount.value = 0;
+        return;
+      }
+
+      final Set<String> unpaidReqIds = {};
+
+      // 1. Check requests awaiting payment (receipt issued by Admin)
+      final reqRows = await Supabase.instance.client
+          .from('requests')
+          .select('id, status, payments(status)')
+          .eq('user_id', user.id)
+          .eq('status', 'payment_pending');
+
+      for (final row in (reqRows as List)) {
+        final r = Map<String, dynamic>.from(row as Map);
+        final payments = r['payments'];
+        bool alreadyPaid = false;
+        if (payments is List) {
+          alreadyPaid = payments.any((p) =>
+              p is Map && (p['status'] ?? '').toString().trim().toLowerCase() == 'paid');
+        } else if (payments is Map) {
+          alreadyPaid = (payments['status'] ?? '').toString().trim().toLowerCase() == 'paid';
+        }
+        if (!alreadyPaid && r['id'] != null) {
+          unpaidReqIds.add(r['id'].toString());
+        }
+      }
+
+      // 2. Also check any unpaid rows directly in payments table
+      final payRows = await Supabase.instance.client
+          .from('payments')
+          .select('id, request_id, status')
+          .eq('user_id', user.id)
+          .neq('status', 'paid');
+
+      for (final row in (payRows as List)) {
+        final p = Map<String, dynamic>.from(row as Map);
+        final st = (p['status'] ?? '').toString().trim().toLowerCase();
+        if (st == 'paid' || st == 'cancelled' || st == 'rejected') continue;
+        final key = (p['request_id'] ?? p['id'])?.toString();
+        if (key != null && key.isNotEmpty) {
+          unpaidReqIds.add(key);
+        }
+      }
+
+      final newCount = unpaidReqIds.length;
+      final oldCount = globalPendingPaymentCount.value;
+      if (newCount != oldCount) {
+        globalPendingPaymentCount.value = newCount;
+        if (newCount > oldCount) {
+          _paymentRefreshTrigger.value++;
+        }
+      }
+    } catch (e) {
+      debugPrint('HOME: Failed to fetch pending payment count: $e');
     }
   }
 
@@ -446,7 +515,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       badgeCount: count,
                     ),
                   ),
-                  _navItem(Icons.payment_outlined, "Payment", _bottomNavIndex == 3, payment),
+                  ValueListenableBuilder<int>(
+                    valueListenable: globalPendingPaymentCount,
+                    builder: (context, count, _) => _navItem(
+                      Icons.payment_outlined,
+                      "Payment",
+                      _bottomNavIndex == 3,
+                      payment,
+                      badgeCount: count,
+                    ),
+                  ),
                   _navItem(Icons.person_outline, "Profile", _bottomNavIndex == 4, profile),
                 ],
               ),

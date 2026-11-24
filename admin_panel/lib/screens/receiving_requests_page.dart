@@ -5,13 +5,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:printing/printing.dart';
 import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
-import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
 import '../widgets/animals_in_lot_editor.dart';
+import '../widgets/walk_in_sms_helper.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -29,7 +28,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   final supabase = Supabase.instance.client;
   final TextEditingController _searchController = TextEditingController();
 
-  List<Map<String, dynamic>> _allRequests = [];
   List<Map<String, dynamic>> _approvedRequests = [];
   List<Map<String, dynamic>> _pendingBarangay = [];
   List<Map<String, dynamic>> _pendingMarket = [];
@@ -121,7 +119,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
 
       if (mounted) {
         setState(() {
-          _allRequests = List<Map<String, dynamic>>.from(allRequests);
           _approvedRequests = List<Map<String, dynamic>>.from(approved);
           _pendingMarket = List<Map<String, dynamic>>.from(
             pendingAll.where((r) =>
@@ -944,18 +941,37 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                                   ),
                                   DataCell(Text(_formatDate(req['preferred_date']))),
                                   DataCell(
-                                    OutlinedButton(
-                                      onPressed: () => _showUpdateApprovedRequestDialog(req),
-                                      style: OutlinedButton.styleFrom(
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                        side: BorderSide(color: Colors.grey.shade300),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(6),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
+                                          WalkInSmsHelper.buildNotifyButton(
+                                            context: context,
+                                            contactNumber: req['contact_number'].toString(),
+                                            stage: 'receiving',
+                                            refNo: _buildRefNo(req),
+                                            customerName: (req['customer_name'] ?? 'Customer').toString(),
+                                            marking: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
+                                            livestockType: (req['livestock_type'] ?? '').toString(),
+                                            animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                                            requestId: req['id']?.toString(),
+                                          ),
+                                          const SizedBox(width: 6),
+                                        ],
+                                        OutlinedButton(
+                                          onPressed: () => _showUpdateApprovedRequestDialog(req),
+                                          style: OutlinedButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                            side: BorderSide(color: Colors.grey.shade300),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            foregroundColor: const Color(0xFF2D3748),
+                                            textStyle: const TextStyle(fontSize: 12),
+                                          ),
+                                          child: const Text('Update'),
                                         ),
-                                        foregroundColor: const Color(0xFF2D3748),
-                                        textStyle: const TextStyle(fontSize: 12),
-                                      ),
-                                      child: const Text('Update'),
+                                      ],
                                     ),
                                   ),
                                 ]);
@@ -1328,18 +1344,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                         customerName: cName,
                         marking: rawMark,
                       );
-                      final hasApprovedHistory = _allRequests.any((r) {
-                        final st = (r['status'] ?? '').toString().toLowerCase();
-                        if (st == 'pending' || st == 'rejected' || st == 'cancelled') return false;
-                        final rUid = r['user_id']?.toString();
-                        if (uId != null && uId.isNotEmpty && rUid != null && rUid.isNotEmpty) {
-                          return rUid == uId;
-                        }
-                        return (r['customer_name'] ?? '').toString().trim().toLowerCase() ==
-                            cName.trim().toLowerCase();
-                      });
-                      final isEstablishedRegular =
-                          (matchedDealer != null && !matchedDealer.isNew) || hasApprovedHistory;
                       final mMark = (matchedDealer != null && matchedDealer.markings.trim().isNotEmpty)
                           ? matchedDealer.markings.trim()
                           : rawMark;
@@ -1352,55 +1356,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(cName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                                  if (isEstablishedRegular) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFE8F5E9),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(color: const Color(0xFF81C784)),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.verified, size: 10, color: Color(0xFF2E7D32)),
-                                          SizedBox(width: 3),
-                                          Text(
-                                            'Regular Dealer',
-                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ] else ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFDEF7EC),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(color: const Color(0xFF31C48D)),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.star, size: 10, color: Color(0xFF046C4E)),
-                                          SizedBox(width: 3),
-                                          Text(
-                                            'New Dealer',
-                                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E)),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                              Text(cName, style: const TextStyle(fontWeight: FontWeight.w600)),
                               _buildSpecialInstructionBadge(
                                 context,
                                 req['special_instruction']?.toString(),
@@ -2224,7 +2180,17 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
     if (_markingCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a unique marking for the livestock')),
+        const SnackBar(content: Text('Please enter a unique customer marking')),
+      );
+      return;
+    }
+
+    if (_selectedCustomer?.userId == null && _contactNumberCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter Contact / Phone No. so walk-in updates can be sent via SMS or call'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -2344,9 +2310,6 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
       final reqId = insertedRow['id'];
       final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
-      final destOrOrigin = _isBarangay
-          ? '${_selectedBarangay ?? ''}, ${_selectedMunicipality ?? 'Tabaco City'}, $_selectedProvince'
-          : '${_marketNameCtrl.text.trim()} (Stall: ${_marketStallCtrl.text.trim()})';
 
       // If Separate Facility (Emergency Slaughter), create slaughter_inspection row & notify linked account
       if (_isSeparateFacility) {
@@ -2392,27 +2355,41 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       }
 
       if (mounted) {
+        final savedCustomerName = _customerNameCtrl.text.trim();
+        final savedMarking = _markingCtrl.text.trim();
+        final savedAnimalType = _selectedAnimalType ?? 'Hog';
+        final savedHeadCount = _walkInLot.length;
+        final rootContext = Navigator.of(context, rootNavigator: true).context;
+        final messenger = ScaffoldMessenger.of(context);
+
         widget.onSaved();
-        await showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => _WalkInClaimStubDialog(
-            refNo: refNo,
-            marking: _markingCtrl.text.trim(),
-            customerName: _customerNameCtrl.text.trim(),
-            contactNumber: contactStr,
-            livestockType: _selectedAnimalType ?? 'Hog',
-            animalCount: '${_walkInLot.length}',
-            requestType: _isBarangay ? 'Barangay' : 'Market',
-            destinationOrOrigin: destOrOrigin,
-            isLinkedToAccount: matchedUserId != null,
-            isSeparateFacility: _isSeparateFacility,
-            emergencyCause: _isSeparateFacility ? _selectedEmergencyCause : null,
+        Navigator.pop(context);
+
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text('Walk-in request $refNo saved for $savedCustomerName.'),
+            backgroundColor: const Color(0xFF0F5132),
+            duration: const Duration(seconds: 6),
+            action: contactStr.isNotEmpty
+                ? SnackBarAction(
+                    label: 'Send SMS',
+                    textColor: const Color(0xFFD1FAE5),
+                    onPressed: () {
+                      WalkInSmsHelper.showSmsFeedbackDialog(
+                        context: rootContext,
+                        contactNumber: contactStr,
+                        stage: 'receiving',
+                        refNo: refNo,
+                        customerName: savedCustomerName,
+                        marking: savedMarking,
+                        livestockType: savedAnimalType,
+                        animalCount: savedHeadCount,
+                      );
+                    },
+                  )
+                : null,
           ),
         );
-        if (mounted) {
-          Navigator.pop(context);
-        }
       }
     } catch (e) {
       setState(() => _isSaving = false);
@@ -2480,7 +2457,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildLabel('Contact / Phone No.'),
+                        _buildLabel('Contact / Phone No. *'),
                         const SizedBox(height: 6),
                         _buildTextField(
                           _contactNumberCtrl,
@@ -3023,7 +3000,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Regular Dealer Profile Loaded: ${_selectedCustomer!.name} (Marking: ${_selectedCustomer!.markings}, ${_selectedCustomer!.category.toUpperCase()})',
+                    'Registered Customer Loaded: ${_selectedCustomer!.name} (Marking: ${_selectedCustomer!.markings}, ${_selectedCustomer!.category.toUpperCase()})',
                     style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF2B6CB0)),
                   ),
                 ),
@@ -3150,303 +3127,6 @@ class _RejectDialogState extends State<_RejectDialog> {
           child: const Text('Reject & Notify'),
         ),
       ],
-    );
-  }
-}
-
-class _WalkInClaimStubDialog extends StatefulWidget {
-  final String refNo;
-  final String marking;
-  final String customerName;
-  final String contactNumber;
-  final String livestockType;
-  final String animalCount;
-  final String requestType;
-  final String destinationOrOrigin;
-  final bool isLinkedToAccount;
-  final bool isSeparateFacility;
-  final String? emergencyCause;
-
-  const _WalkInClaimStubDialog({
-    required this.refNo,
-    required this.marking,
-    required this.customerName,
-    required this.contactNumber,
-    required this.livestockType,
-    required this.animalCount,
-    required this.requestType,
-    required this.destinationOrOrigin,
-    required this.isLinkedToAccount,
-    this.isSeparateFacility = false,
-    this.emergencyCause,
-  });
-
-  @override
-  State<_WalkInClaimStubDialog> createState() => _WalkInClaimStubDialogState();
-}
-
-class _WalkInClaimStubDialogState extends State<_WalkInClaimStubDialog> {
-  bool _isPrinting = false;
-
-  Future<void> _printStub() async {
-    setState(() => _isPrinting = true);
-    try {
-      final bytes = await InspectionDocumentsPdfGenerator.generateWalkInClaimStub(
-        refNo: widget.refNo,
-        marking: widget.marking,
-        customerName: widget.customerName,
-        contactNumber: widget.contactNumber,
-        livestockType: widget.livestockType,
-        animalCount: widget.animalCount,
-        requestType: widget.requestType,
-        destinationOrOrigin: widget.destinationOrOrigin,
-      );
-      await Printing.layoutPdf(
-        name: 'WalkIn_ClaimStub_${widget.refNo}.pdf',
-        onLayout: (_) async => bytes,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error printing claim stub: $e'), backgroundColor: Colors.redAccent),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isPrinting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: 540,
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: widget.isSeparateFacility ? const Color(0xFFFFF7ED) : const Color(0xFFEBFFF5),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    widget.isSeparateFacility ? Icons.bolt_rounded : Icons.receipt_long,
-                    color: widget.isSeparateFacility ? const Color(0xFFEA580C) : const Color(0xFF2D6A4F),
-                    size: 26,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.isSeparateFacility
-                            ? 'Immediate Slaughter Receiving Stub'
-                            : 'Walk-In Receiving & Mobile Claim Stub',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A202C)),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.isSeparateFacility
-                            ? 'Customer waiting on-site for immediate processing.'
-                            : 'Print or provide this Reference No. to the walk-in customer.',
-                        style: const TextStyle(fontSize: 12.5, color: Color(0xFF718096)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEBFFF5),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF38A169)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'REFERENCE NO. (CLAIM CODE)',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF276749)),
-                        ),
-                        const SizedBox(height: 4),
-                        SelectableText(
-                          widget.refNo,
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7FAFC),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'LIVESTOCK MARKING TAG',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF4A5568)),
-                        ),
-                        const SizedBox(height: 4),
-                        SelectableText(
-                          widget.marking,
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _stubInfoRow('Customer Name:', widget.customerName),
-            _stubInfoRow('Contact Number:', widget.contactNumber.isNotEmpty ? widget.contactNumber : 'Not provided'),
-            _stubInfoRow('Livestock & Head Count:', '${widget.livestockType} (${widget.animalCount} head/s)'),
-            _stubInfoRow('Classification:', '${widget.requestType} • ${widget.destinationOrOrigin}'),
-            if (widget.isSeparateFacility) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFF7ED),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFEA580C)),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.bolt_rounded, color: Color(0xFFC2410C), size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Separate Facility — Immediate Slaughter (Cause: ${widget.emergencyCause ?? "Non-Infectious"})',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (!widget.isSeparateFacility) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: widget.isLinkedToAccount ? Colors.blue.shade50 : Colors.amber.shade50,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: widget.isLinkedToAccount ? Colors.blue.shade200 : Colors.amber.shade300),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    if (!widget.isLinkedToAccount) ...[
-                      Container(
-                        width: 82,
-                        height: 82,
-                        padding: const EdgeInsets.all(4),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.amber.shade300),
-                        ),
-                        child: Image.asset(
-                          'assets/images/app_qr_code.png',
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) => Icon(Icons.qr_code_2, size: 54, color: Colors.amber.shade900),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                    ] else ...[
-                      Icon(
-                        Icons.verified_user,
-                        size: 24,
-                        color: Colors.blue.shade700,
-                      ),
-                      const SizedBox(width: 10),
-                    ],
-                    Expanded(
-                      child: Text(
-                        widget.isLinkedToAccount
-                            ? 'Automatically linked to ${widget.customerName}\'s Mobile App account! They will receive real-time night slaughter alerts and online billing automatically.'
-                            : 'Scan QR Code to Install the App: Have the walk-in customer scan this QR code to install the Mobile App, sign up, and enter Reference No. ${widget.refNo} under "Claim Walk-In" to receive overnight inspection updates, pay via GCash, and track morning release.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.4,
-                          color: widget.isLinkedToAccount ? Colors.blue.shade900 : Colors.amber.shade900,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _isPrinting ? null : _printStub,
-                  icon: _isPrinting
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.print, size: 18),
-                  label: Text(_isPrinting ? 'Printing...' : 'Print Claim Stub'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF2D6A4F),
-                    side: const BorderSide(color: Color(0xFF2D6A4F)),
-                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D6A4F),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                  ),
-                  child: const Text('Done'),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _stubInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 160,
-            child: Text(label, style: const TextStyle(fontSize: 12.5, color: Color(0xFF718096))),
-          ),
-          Expanded(
-            child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF2D3748))),
-          ),
-        ],
-      ),
     );
   }
 }

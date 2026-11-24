@@ -42,6 +42,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
   Map<String, dynamic>? _payment;
   Map<String, double> _fees = {};
   bool _isWarningOnly = false;
+  bool _hasPickupReadyNotice = false;
 
   @override
   void initState() {
@@ -293,16 +294,43 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
             (penaltyTracking?['overdue_payment_billed_on_receipt'] == true);
         final overduePenalty = isOverdue ? 100.0 : 0.0;
 
-        // Cold Storage ₱150 penalty check (applies if Barangay pickup, notified ready for collection, and past 5:00 PM)
+        // Cold Storage ₱150 penalty check & Pickup Ready Notification check
         final notes = (requestData['release_notes'] ?? '').toString();
+        bool hasPickupReadyNotice = (penaltyTracking != null && penaltyTracking['pickup_notified_at'] != null) ||
+            notes.contains('Notified ready for collection') ||
+            (requestData['pickup_deadline'] != null && requestData['pickup_deadline'].toString().trim().isNotEmpty);
+        if (!hasPickupReadyNotice && isBarangay) {
+          try {
+            final reqIdStr = requestData['id'].toString();
+            final pickupNotifs = await supabase
+                .from('notifications')
+                .select('type, title, data')
+                .eq('user_id', user.id)
+                .order('created_at', ascending: false)
+                .limit(40);
+            for (final n in List<Map<String, dynamic>>.from(pickupNotifs)) {
+              final d = n['data'];
+              if (d is Map && d['request_id']?.toString() == reqIdStr) {
+                final nType = (n['type'] ?? '').toString().toLowerCase();
+                final nTitle = (n['title'] ?? '').toString().toLowerCase();
+                if (nType == 'meat_pickup' ||
+                    nType == 'meat_pickup_reminder' ||
+                    nTitle.contains('ready for collection') ||
+                    nTitle.contains('ready for pickup')) {
+                  hasPickupReadyNotice = true;
+                  break;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
         bool isColdStorageOverdue = penaltyTracking?['cold_storage_billed_on_receipt'] == true ||
             penaltyTracking?['cold_storage_collected_at_release'] == true ||
             notes.contains('Cold storage fee of ₱150.00 collected') ||
             notes.contains('Cold storage fee of \u20b1150.00 collected');
         if (!isColdStorageOverdue && isBarangay && requestData['status'] != 'released') {
-          final hasPickupNotice = (penaltyTracking != null && penaltyTracking['pickup_notified_at'] != null) ||
-              notes.contains('Notified ready for collection') ||
-              (requestData['pickup_deadline'] != null && requestData['pickup_deadline'].toString().isNotEmpty);
+          final hasPickupNotice = hasPickupReadyNotice;
           if (hasPickupNotice) {
             final explicitDeadlineStr = penaltyTracking?['pickup_deadline'] ?? requestData['pickup_deadline'];
             if (explicitDeadlineStr != null) {
@@ -357,6 +385,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           _request = requestData;
           _payment = paymentData;
           _isWarningOnly = isWarningOnly;
+          _hasPickupReadyNotice = hasPickupReadyNotice;
           if (paymentData != null && totalFromPay != null) {
             final vanFee = double.tryParse((paymentData['delivery_van_fee'] ?? deliveryFee).toString()) ?? deliveryFee;
             final computedTotal = subtotal + vanFee;
@@ -799,6 +828,40 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                       ],
                     ),
                   ] else ...[
+                    if (_payment?['amount_tendered'] != null &&
+                        (double.tryParse(_payment!['amount_tendered'].toString()) ?? 0) > 0) ...[
+                      Builder(
+                        builder: (context) {
+                          final tenderedVal = double.tryParse(_payment!['amount_tendered'].toString()) ?? total;
+                          final storedChangeVal = _payment?['change_amount'] != null
+                              ? double.tryParse(_payment!['change_amount'].toString())
+                              : null;
+                          final changeVal = (storedChangeVal != null && storedChangeVal >= 0)
+                              ? storedChangeVal
+                              : (tenderedVal - total).clamp(0.0, double.infinity);
+                          return Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text("CASH TENDERED:", style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                                  Text("\u20b1${tenderedVal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text("CHANGE:", style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF15803D))),
+                                  Text("\u20b1${changeVal.toStringAsFixed(2)}", style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF15803D))),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -813,8 +876,34 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                   if (isBarangay) ...[
                     if ((req['status'] ?? '').toString().trim().toLowerCase() != 'released' &&
                         (req['released_at'] == null || req['released_at'].toString().trim().isEmpty)) ...[
-                      _buildAuthorizedRepresentativeCard(req),
-                      const SizedBox(height: 12),
+                      if (_hasPickupReadyNotice) ...[
+                        _buildAuthorizedRepresentativeCard(req),
+                        const SizedBox(height: 12),
+                      ] else ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF0F9FF),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFBAE6FD)),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.info_outline, size: 16, color: Color(0xFF0369A1)),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Meat Pickup Authorization will appear here once the abattoir notifies you that your meat is ready for collection.',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFF0C4A6E)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                     ],
                   ] else ...[
                     _buildMarketDeliveryInfoCard(),
@@ -847,8 +936,10 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                               const SizedBox(height: 2),
                               Text(
                                 (_payment!['payment_method'].toString().toLowerCase().contains('online') || _payment!['payment_method'].toString().toLowerCase().contains('gcash'))
-                                    ? "Your online payment is being verified. Once confirmed, your Official Receipt and Pickup Authorization will be generated."
-                                    : "Cash-on-Pickup selected. Please settle payment at the cashier counter upon arrival before claiming the carcass from the dispatcher. Once your payment is confirmed, your Official Receipt and Pickup Authorization will be generated.",
+                                    ? "Your online payment is being verified. Once confirmed and your meat is ready for collection, your Meat Pickup Authorization will appear here."
+                                    : (_hasPickupReadyNotice
+                                        ? "Cash-on-Pickup selected and your meat is ready for collection. You or your assigned Authorized Representative below can settle payment at the cashier counter upon arrival before claiming the carcass."
+                                        : "Cash-on-Pickup selected. Once the abattoir notifies you that your meat is ready for collection, your Meat Pickup Authorization will appear here so you can assign an Authorized Representative if needed."),
                                 style: const TextStyle(fontSize: 11, color: Color(0xFF856404)),
                               ),
                             ],
@@ -857,6 +948,15 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                       ],
                     ),
                   ),
+                  if (isBarangay &&
+                      _hasPickupReadyNotice &&
+                      !(_payment!['payment_method'].toString().toLowerCase().contains('online') ||
+                          _payment!['payment_method'].toString().toLowerCase().contains('gcash')) &&
+                      (req['status'] ?? '').toString().trim().toLowerCase() != 'released' &&
+                      (req['released_at'] == null || req['released_at'].toString().trim().isEmpty)) ...[
+                    const SizedBox(height: 12),
+                    _buildAuthorizedRepresentativeCard(req),
+                  ],
                 ] else if (!isPaid) ...[
                   Container(
                     width: double.infinity,
@@ -1088,7 +1188,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                       content: Row(children: [
                         Icon(Icons.check_circle, color: Colors.white, size: 16),
                         SizedBox(width: 8),
-                        Text('Payment reference copied to clipboard!'),
+                        Expanded(child: Text('Payment reference copied to clipboard!')),
                       ]),
                       duration: Duration(seconds: 2),
                       backgroundColor: Color(0xFF2E7D32),
@@ -1433,7 +1533,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                                 content: Row(children: [
                                   Icon(Icons.check_circle, color: Colors.white, size: 18),
                                   SizedBox(width: 8),
-                                  Text('Authorized representative saved for meat pickup!'),
+                                  Expanded(child: Text('Authorized representative saved for meat pickup!')),
                                 ]),
                                 backgroundColor: Color(0xFF15803D),
                               ),
