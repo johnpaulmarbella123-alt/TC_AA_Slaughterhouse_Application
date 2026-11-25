@@ -12,6 +12,7 @@ import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
@@ -75,8 +76,16 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
         setState(() {
           _barangayRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'barangay'));
           _marketRequests = List<Map<String, dynamic>>.from(approved.where((r) => r['request_type'] == 'market'));
-          _verifiedRequests = List<Map<String, dynamic>>.from(verified);
-          _cancelledRequests = List<Map<String, dynamic>>.from(cancelled);
+          _verifiedRequests = List<Map<String, dynamic>>.from(
+            verified.where(
+              (r) => !DailyQueueFilter.isBeforeToday([r['updated_at'], r['created_at']]),
+            ),
+          );
+          _cancelledRequests = List<Map<String, dynamic>>.from(
+            cancelled.where(
+              (r) => !DailyQueueFilter.isBeforeToday([r['cancelled_at'], r['updated_at'], r['created_at']]),
+            ),
+          );
           _isLoading = false;
         });
       }

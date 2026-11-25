@@ -8,6 +8,7 @@ import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
 
@@ -125,10 +126,19 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       _penaltyTrackingMap = trackingMap;
       await _checkAndTriggerColdStoragePenaltyNotifications(enriched, trackingMap);
 
+      final activeVisible = enriched
+          .where(
+            (r) => !DailyQueueFilter.shouldHideFromActiveQueue(
+              r,
+              concludedStatuses: const {'released', 'completed'},
+            ),
+          )
+          .toList();
+
       if (mounted) {
         setState(() {
-          _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
-          _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
+          _marketRequests = activeVisible.where((r) => r['request_type'] == 'market').toList();
+          _barangayRequests = activeVisible.where((r) => r['request_type'] == 'barangay').toList();
           _isLoading = false;
         });
       }

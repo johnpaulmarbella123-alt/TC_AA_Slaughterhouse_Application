@@ -169,6 +169,18 @@ In response to operational field testing and stakeholder validation at the Tabac
 
 ---
 
+## System Architecture
+
+In modern software engineering, system architecture serves as the fundamental structural framework that governs how software applications are designed, executed, and maintained over time. According to Campoverde-Molina et al. (2021), software architecture represents a structured set of patterns and guidelines that define the logical layout of a system, orchestrating the interaction between various technical components and ensuring alignment across development teams. Rather than focusing merely on isolated coding implementations, system architecture provides a holistic blueprint that balances functional capabilities with critical non-functional requirements such as scalability, security, maintainability, and universal accessibility (Campoverde-Molina et al., 2021).
+
+Applied to the **Operation Management Application for AA Slaughterhouse of Tabaco City**, the system adopts a decoupled, cloud-native multi-tier architecture that cleanly separates client presentation, serverless business logic, real-time synchronization, and relational data persistence:
+
+1. **Presentation Tier (Cross-Platform Clients & Web Distribution):** Consists of the native Android **Customer Mobile Application** (`mobile_app`, distributed via the Vercel static portal at `https://tabaco-abattoir-app.vercel.app`) for remote slaughter bookings, permit uploads, live tracking, PayMongo GCash checkout, and whistleblower reporting, alongside the role-based **Administrative Operations Console** (`admin_panel`, hosted on Vercel at `https://web-ten-sooty-86.vercel.app`) tailored for Administrators, Receiving Clerks, Veterinary Meat Inspectors, and Municipal Cashiers.
+2. **Application & Integration Tier (Serverless Edge Functions & External Gateways):** Executed on Supabase Deno Edge Functions (`paymongo-webhook`, `send-walkin-sms`, and checkout handlers) to isolate sensitive API credentials, verify cryptographic PayMongo payment webhooks, and dispatch JWT-authenticated manual Walk-In SMS alerts via Semaphore (`TCAASlaught` Sender ID) with automatic fallback to the TextBee Android gateway.
+3. **Real-Time Synchronization & Data Persistence Tier (Supabase Cloud):** Centered on **PostgreSQL 15+** with strict ACID transactions, **GoTrue JWT Authentication**, database-enforced **Row-Level Security (RLS)** (`public.is_admin()` / `public.is_staff()`), encrypted binary **Storage Buckets** (`request-documents`, `report-evidence`, `avatars`), and **Supabase Postgres Realtime** (`supabase_realtime` publication with `REPLICA IDENTITY FULL`) feeding the multiplexed `AdminRealtimeHub` WebSocket channel for sub-second updates across all Admin and Clerk stations.
+
+---
+
 ## System Design
 
 The system design explains the core components, structure, and data flow of the proposed Operation Management Application for AA Slaughterhouse of Tabaco City. It provides a comprehensive roadmap for how the system functions to meet municipal abattoir needs.

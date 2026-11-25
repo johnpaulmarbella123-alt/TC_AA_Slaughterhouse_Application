@@ -12,6 +12,7 @@ import '../services/audit_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/receipt_pdf_generator.dart';
 import '../services/staff_notification_service.dart';
+import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
 
@@ -134,10 +135,19 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
 
       await _checkAndTriggerOverduePaymentPenaltyNotifications(enriched, trackingMap);
 
+      final activeVisible = enriched
+          .where(
+            (r) => !DailyQueueFilter.shouldHideFromActiveQueue(
+              r,
+              concludedStatuses: const {'paid', 'released', 'completed'},
+            ),
+          )
+          .toList();
+
       if (mounted) {
         setState(() {
-          _barangayRequests = enriched.where((r) => r['request_type'] == 'barangay').toList();
-          _marketRequests = enriched.where((r) => r['request_type'] == 'market').toList();
+          _barangayRequests = activeVisible.where((r) => r['request_type'] == 'barangay').toList();
+          _marketRequests = activeVisible.where((r) => r['request_type'] == 'market').toList();
           _isLoading = false;
         });
       }

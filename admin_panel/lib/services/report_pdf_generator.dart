@@ -640,10 +640,12 @@ class ReportPdfGenerator {
         disposition = 'Rejected / Taken Back by Owner';
       }
 
-      String findings = req['veterinary_findings']?.toString() ??
-          req['condemnation_reason']?.toString() ??
-          req['process_notes']?.toString() ??
-          'Health abnormality detected during inspection';
+      String findings = (req['veterinary_findings']?.toString() ??
+              req['condemnation_reason']?.toString() ??
+              req['process_notes']?.toString() ??
+              'Health abnormality detected during inspection')
+          .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+          .trim();
       if (findings.isEmpty || findings == 'null') {
         findings = 'Did not meet health & inspection standards';
       }

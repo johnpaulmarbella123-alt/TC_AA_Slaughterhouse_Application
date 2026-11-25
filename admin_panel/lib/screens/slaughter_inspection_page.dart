@@ -13,6 +13,7 @@ import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/animals_in_lot_editor.dart';
 import '../widgets/walk_in_sms_helper.dart';
@@ -26,14 +27,93 @@ class SlaughterInspectionPage extends StatefulWidget {
 
 class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   final supabase = Supabase.instance.client;
-  List<Map<String, dynamic>> _barangayRequests = [];
-  List<Map<String, dynamic>> _marketRequests = [];
+  List<Map<String, dynamic>> _allRequests = [];
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
   String _filterStage = 'All';
+  String _selectedBucketFilter = 'all'; // 'all', 'ante_mortem', 'slaughter_ops', 'post_mortem', 'weighing', 'completed', 'failed'
+  String _typeFilter = 'all'; // 'all', 'barangay', 'market'
   Timer? _pollingTimer;
+  Timer? _autoStageTicker;
   StreamSubscription<String>? _realtimeSub;
   final Set<String> _shownAnteMortemAlertIds = {};
+  final Set<String> _updatingAutoStageIds = {};
+  final ScrollController _tableScrollController = ScrollController();
+
+  static const List<String> _autoSlaughterStages = [
+    'Stunning',
+    'Bleeding',
+    'Scalding/Dehairing',
+    'Evisceration',
+  ];
+
+  static DateTime? _extractAmPassedAt(Map<String, dynamic> req) {
+    final direct = req['ante_mortem_passed_at']?.toString();
+    if (direct != null && direct.isNotEmpty) {
+      final parsed = DateTime.tryParse(direct);
+      if (parsed != null) return parsed.toUtc();
+    }
+    final notes = (req['process_notes'] ?? '').toString();
+    final m = RegExp(r'\[AM_PASSED_AT:([^\]]+)\]').firstMatch(notes);
+    if (m != null && m.group(1) != null) {
+      final parsed = DateTime.tryParse(m.group(1)!.trim());
+      if (parsed != null) return parsed.toUtc();
+    }
+    final created = req['inspection_created_at']?.toString();
+    if (created != null && created.isNotEmpty) {
+      final parsed = DateTime.tryParse(created);
+      if (parsed != null) return parsed.toUtc();
+    }
+    return null;
+  }
+
+  static bool _isEligibleForAutoSlaughter(Map<String, dynamic> req) {
+    final anti = (req['anti_mortem'] ?? 'Pending').toString();
+    if (anti != 'Passed') return false;
+    final post = (req['post_mortem'] ?? 'Pending').toString().toUpperCase();
+    if (post != 'PENDING' && post.isNotEmpty) return false;
+    final status = (req['status'] ?? '').toString().toLowerCase();
+    if ([
+      'releasable',
+      'mic_generated',
+      'paid',
+      'released',
+      'completed',
+      'anti_mortem_failed',
+      'pickup_scheduled',
+      'taken_back',
+      'post_mortem_failed',
+      'condemned',
+      'delay_error',
+    ].contains(status)) {
+      return false;
+    }
+    final stage = (req['process_stage'] ?? '').toString();
+    if ([
+      'Post-Mortem Inspection',
+      'Weighing',
+      'Separate Facility (Weighing)',
+      'Complete',
+      'Condemned',
+      'Technical Error/Delay',
+    ].contains(stage)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Returns `(targetStage, nextStageLabel, secondsRemainingToNext)` for an auto-advancing lot.
+  static (String stage, String? nextStage, int secondsLeft) _computeAutoStageState(DateTime startUtc) {
+    final elapsedSec = DateTime.now().toUtc().difference(startUtc).inSeconds;
+    if (elapsedSec < 300) {
+      return ('Stunning', 'Bleeding', (300 - elapsedSec).clamp(0, 300));
+    } else if (elapsedSec < 600) {
+      return ('Bleeding', 'Scalding/Dehairing', (600 - elapsedSec).clamp(0, 300));
+    } else if (elapsedSec < 900) {
+      return ('Scalding/Dehairing', 'Evisceration', (900 - elapsedSec).clamp(0, 300));
+    }
+    return ('Evisceration', null, 0);
+  }
 
   @override
   void initState() {
@@ -57,14 +137,81 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         _checkAnteMortemAlerts();
       }
     });
+    // Tick every 5 seconds to update live countdowns and auto-persist crossed 5-minute stages
+    _autoStageTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) {
+        _tickAutoSlaughterProgression();
+      }
+    });
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _autoStageTicker?.cancel();
     _realtimeSub?.cancel();
     _searchController.dispose();
+    _tableScrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _tickAutoSlaughterProgression() async {
+    bool hasAnyActiveAuto = false;
+    final List<Map<String, dynamic>> dueUpdates = [];
+
+    for (final r in _allRequests) {
+      if (!_isEligibleForAutoSlaughter(r)) continue;
+      final startUtc = _extractAmPassedAt(r);
+      if (startUtc == null) continue;
+
+      final computed = _computeAutoStageState(startUtc);
+      if (computed.$2 != null) {
+        hasAnyActiveAuto = true;
+      }
+      final currentStageRaw = (r['process_stage'] ?? '').toString();
+      final normalizedCurrent = currentStageRaw == 'Scalding/Plucking'
+          ? 'Scalding/Dehairing'
+          : currentStageRaw;
+
+      // Only advance forward along the auto sequence, never backward if inspector advanced manually
+      final curIdx = _autoSlaughterStages.indexOf(normalizedCurrent);
+      final targetIdx = _autoSlaughterStages.indexOf(computed.$1);
+      final shouldAdvance = (curIdx == -1 &&
+              (normalizedCurrent.isEmpty ||
+                  normalizedCurrent == 'Pending' ||
+                  normalizedCurrent == 'Ante-Mortem' ||
+                  normalizedCurrent == 'Anti-Mortem' ||
+                  normalizedCurrent == 'Preparation')) ||
+          (curIdx >= 0 && targetIdx > curIdx);
+
+      if (shouldAdvance) {
+        r['process_stage'] = computed.$1;
+        hasAnyActiveAuto = true;
+        final idKey = r['id']?.toString() ?? '';
+        if (idKey.isNotEmpty && !_updatingAutoStageIds.contains(idKey)) {
+          dueUpdates.add({'id': r['id'], 'idKey': idKey, 'stage': computed.$1});
+        }
+      }
+    }
+
+    if (hasAnyActiveAuto && mounted) {
+      setState(() {});
+    }
+
+    for (final item in dueUpdates) {
+      final idKey = item['idKey'] as String;
+      _updatingAutoStageIds.add(idKey);
+      try {
+        await supabase
+            .from('slaughter_inspection')
+            .update({'process_stage': item['stage']})
+            .eq('request_id', item['id']);
+      } catch (e) {
+        debugPrint('Auto-stage persist notice for req $idKey: $e');
+      } finally {
+        _updatingAutoStageIds.remove(idKey);
+      }
+    }
   }
 
   Future<void> _loadRequests({bool silent = false}) async {
@@ -132,8 +279,16 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           r['condemnation_reason'] = inspection['condemnation_reason'];
           r['veterinary_findings'] = inspection['veterinary_findings'];
           r['inspection_created_at'] = inspection['created_at'];
+          r['ante_mortem_passed_at'] = inspection['ante_mortem_passed_at'];
           r['passed_count'] = inspection['passed_count'] ?? r['passed_count'];
           r['condemned_count'] = inspection['condemned_count'] ?? r['condemned_count'];
+        }
+        // Enforce Ante-Mortem stage while ante-mortem inspection is still pending
+        final rawAm = (r['anti_mortem'] ?? 'Pending').toString();
+        final rawStage = (r['process_stage'] ?? '').toString();
+        if ((rawAm.isEmpty || rawAm == 'Pending') &&
+            (rawStage.isEmpty || rawStage == 'Pending' || rawStage == 'Preparation')) {
+          r['process_stage'] = 'Ante-Mortem';
         }
         if (r['passed_count'] == null || r['condemned_count'] == null) {
           final notesStr = (r['process_notes'] ?? '').toString();
@@ -157,12 +312,31 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         return r;
       }).toList();
       
+      final visibleRequests = activeRequests
+          .where(
+            (r) => !DailyQueueFilter.shouldHideFromActiveQueue(
+              r,
+              concludedStatuses: const {
+                'releasable',
+                'mic_generated',
+                'paid',
+                'released',
+                'completed',
+                'condemned',
+                'post_mortem_failed',
+                'taken_back',
+              },
+              treatCompleteStageAsConcluded: true,
+            ),
+          )
+          .toList();
+
       if (mounted) {
         setState(() {
-          _barangayRequests = activeRequests.where((r) => r['request_type'] == 'barangay').toList();
-          _marketRequests = activeRequests.where((r) => r['request_type'] == 'market').toList();
+          _allRequests = visibleRequests;
           _isLoading = false;
         });
+        _tickAutoSlaughterProgression();
       }
     } catch (e) {
       debugPrint('SlaughterInspection load error: $e');
@@ -182,17 +356,74 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     }
   }
 
+  /// Classifies each request into one of the 6 top tracker stages:
+  /// `'ante_mortem'`, `'slaughter_ops'`, `'post_mortem'`, `'weighing'`, `'completed'`, `'failed'`
+  String _stageBucket(Map<String, dynamic> r) {
+    final status = (r['status'] ?? '').toString().toLowerCase();
+    final anti = (r['anti_mortem'] ?? 'Pending').toString();
+    final post = (r['post_mortem'] ?? 'Pending').toString();
+    final stageRaw = (r['process_stage'] ?? 'Ante-Mortem').toString();
+    final stage = stageRaw == 'Scalding/Plucking' ? 'Scalding/Dehairing' : stageRaw;
+    final weight = double.tryParse((r['carcass_weight'] ?? '').toString());
+
+    // 1. Failed / Condemned (Ante-Mortem OR Post-Mortem)
+    if (status == 'anti_mortem_failed' ||
+        status == 'pickup_scheduled' ||
+        status == 'taken_back' ||
+        status == 'post_mortem_failed' ||
+        status == 'condemned' ||
+        anti == 'Failed' ||
+        post == 'Failed' ||
+        stage == 'Condemned') {
+      return 'failed';
+    }
+
+    // 2. Completed
+    if (stage == 'Complete' ||
+        ['releasable', 'mic_generated', 'paid', 'released', 'completed'].contains(status)) {
+      return 'completed';
+    }
+
+    // 3. Separate Facility or Post-Mortem Passed awaiting weight -> Weighing
+    if (stage == 'Weighing' ||
+        stage == 'Separate Facility (Weighing)' ||
+        anti == 'Separate Facility' ||
+        (post == 'Passed' && (weight == null || weight <= 0))) {
+      return 'weighing';
+    }
+
+    // 4. Ante-Mortem still pending
+    if (anti.isEmpty || anti == 'Pending' || stage == 'Ante-Mortem' || stage == 'Anti-Mortem') {
+      return 'ante_mortem';
+    }
+
+    // 5. Reached Evisceration or Post-Mortem Inspection -> Post-Mortem
+    if (stage == 'Evisceration' || stage == 'Post-Mortem Inspection') {
+      return 'post_mortem';
+    }
+
+    // 6. Active floor slaughter operations (Preparation, Stunning, Bleeding, Scalding/Dehairing, Delay)
+    return 'slaughter_ops';
+  }
+
   List<Map<String, dynamic>> _filteredList(List<Map<String, dynamic>> list) {
     final q = _searchController.text.toLowerCase().trim();
     return list.where((r) {
       final name = (r['customer_name'] ?? '').toString().toLowerCase();
       final ref = _refNo(r).toLowerCase();
-      final stage = (r['process_stage'] ?? '').toString();
-      
-      bool matchesSearch = q.isEmpty || name.contains(q) || ref.contains(q);
-      bool matchesFilter = _filterStage == 'All' || stage == _filterStage;
-      
-      return matchesSearch && matchesFilter;
+      final rawStage = (r['process_stage'] ?? 'Ante-Mortem').toString();
+      final normalizedStage = rawStage == 'Scalding/Plucking' ? 'Scalding/Dehairing' : rawStage;
+      final reqType = (r['request_type'] ?? 'barangay').toString().toLowerCase();
+
+      final matchesSearch = q.isEmpty || name.contains(q) || ref.contains(q);
+      final matchesType = _typeFilter == 'all' || reqType == _typeFilter;
+      final matchesStageDropdown = _filterStage == 'All' ||
+          rawStage == _filterStage ||
+          normalizedStage == _filterStage;
+      final matchesBucket = _selectedBucketFilter == 'all' ||
+          _stageBucket(r) == _selectedBucketFilter;
+
+      return matchesSearch && matchesType && matchesStageDropdown && matchesBucket;
     }).toList();
   }
 
@@ -229,19 +460,15 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _buildFilterRow(),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 20),
                           _buildStatsCards(),
-                          const SizedBox(height: 32),
+                          const SizedBox(height: 16),
+                          _buildStageFilterButtons(),
+                          const SizedBox(height: 16),
                           _buildTableCard(
-                            title: 'Barangay Slaughter & Inspection Records',
-                            subtitle: 'Track slaughter process stages and post-mortem inspection results',
-                            requests: _filteredList(_barangayRequests),
-                          ),
-                          const SizedBox(height: 24),
-                          _buildTableCard(
-                            title: 'Market Slaughter & Inspection Records',
-                            subtitle: 'Track slaughter process stages and post-mortem inspection results',
-                            requests: _filteredList(_marketRequests),
+                            title: 'Slaughter & Inspection Records',
+                            subtitle: 'Unified barangay and market workflow — ante-mortem inspection, automated 5-minute slaughter stages, post-mortem, weighing, and MIC generation',
+                            requests: _filteredList(_allRequests),
                           ),
                         ],
                       ),
@@ -295,11 +522,47 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   }
 
   Widget _buildFilterRow() {
-    return Row(
+    Widget buildTypeChip(String key, String label) {
+      final selected = _typeFilter == key;
+      return InkWell(
+        onTap: () => setState(() => _typeFilter = key),
+        borderRadius: BorderRadius.circular(6),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 140),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              color: selected ? const Color(0xFF0F5132) : const Color(0xFF64748B),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        // Search (Compact 250px width, 36px height)
+        // Search (Compact 260px width, 36px height)
         SizedBox(
-          width: 250,
+          width: 260,
           height: 36,
           child: TextField(
             controller: _searchController,
@@ -308,33 +571,68 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             textAlignVertical: TextAlignVertical.center,
             decoration: InputDecoration(
               isDense: true,
-              hintText: 'Search by reference number...',
+              hintText: 'Search reference # or customer...',
               hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
               prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
               prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
               filled: true,
-              fillColor: const Color(0xFFEDF2F7),
+              fillColor: Colors.white,
               contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF0F5132), width: 1.4),
+              ),
             ),
           ),
         ),
-        const SizedBox(width: 12),
-        // Dropdown Button (Compact 36px height)
+        // Unified Category Quick Filter (All | Barangay | Market)
+        Container(
+          height: 36,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEDF2F7),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              buildTypeChip('all', 'All Types'),
+              buildTypeChip('barangay', 'Barangay'),
+              buildTypeChip('market', 'Market'),
+            ],
+          ),
+        ),
+        // Detailed Process Stage Dropdown
         Container(
           height: 36,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFEDF2F7),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: _filterStage,
               isDense: true,
               icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
-              items: ['All', 'Separate Facility (Weighing)', 'Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay']
+              items: const [
+                'All',
+                'Ante-Mortem',
+                'Stunning',
+                'Bleeding',
+                'Scalding/Dehairing',
+                'Evisceration',
+                'Post-Mortem Inspection',
+                'Weighing',
+                'Separate Facility (Weighing)',
+                'Complete',
+                'Technical Error/Delay',
+              ]
                   .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
                   .toList(),
               onChanged: (val) {
@@ -343,13 +641,26 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             ),
           ),
         ),
+        if (_selectedBucketFilter != 'all' || _typeFilter != 'all' || _filterStage != 'All' || _searchController.text.isNotEmpty)
+          TextButton.icon(
+            onPressed: () {
+              setState(() {
+                _selectedBucketFilter = 'all';
+                _typeFilter = 'all';
+                _filterStage = 'All';
+                _searchController.clear();
+              });
+            },
+            icon: const Icon(Icons.restart_alt, size: 16, color: Color(0xFF475569)),
+            label: const Text('Reset Filters', style: TextStyle(fontSize: 12.5, color: Color(0xFF475569))),
+          ),
       ],
     );
   }
 
   Widget _buildStatsCards() {
     int inProcess = 0, complete = 0, micGen = 0, total = 0;
-    for (var r in [..._barangayRequests, ..._marketRequests]) {
+    for (final r in _allRequests) {
       total++;
       final stage = r['process_stage']?.toString() ?? '';
       if (stage == 'Complete') {
@@ -357,7 +668,12 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       } else {
         inProcess++;
       }
-      if ((r['status'] ?? '') == 'mic_generated' || (r['process_notes']?.toString().contains('MIC Generated') ?? false) || r['status'] == 'paid' || r['status'] == 'released') micGen++;
+      if ((r['status'] ?? '') == 'mic_generated' ||
+          (r['process_notes']?.toString().contains('MIC Generated') ?? false) ||
+          r['status'] == 'paid' ||
+          r['status'] == 'released') {
+        micGen++;
+      }
     }
 
     return Row(
@@ -401,8 +717,10 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500)),
-                if (icon != null) Icon(icon, size: 16, color: accent)
-                else Container(width: 10, height: 10, decoration: BoxDecoration(color: accent, shape: BoxShape.circle)),
+                if (icon != null)
+                  Icon(icon, size: 16, color: accent)
+                else
+                  Container(width: 10, height: 10, decoration: BoxDecoration(color: accent, shape: BoxShape.circle)),
               ],
             ),
             const SizedBox(height: 8),
@@ -413,8 +731,121 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     );
   }
 
+  Widget _buildStageFilterButtons() {
+    int anteCount = 0;
+    int opsCount = 0;
+    int postCount = 0;
+    int weighCount = 0;
+    int compCount = 0;
+    int failCount = 0;
+
+    for (final r in _allRequests) {
+      switch (_stageBucket(r)) {
+        case 'ante_mortem':
+          anteCount++;
+          break;
+        case 'slaughter_ops':
+          opsCount++;
+          break;
+        case 'post_mortem':
+          postCount++;
+          break;
+        case 'weighing':
+          weighCount++;
+          break;
+        case 'completed':
+          compCount++;
+          break;
+        case 'failed':
+          failCount++;
+          break;
+      }
+    }
+
+    final buttons = [
+      (key: 'all', label: 'All', count: _allRequests.length, accent: const Color(0xFF0F5132)),
+      (key: 'ante_mortem', label: 'Ante-Mortem', count: anteCount, accent: const Color(0xFF2563EB)),
+      (key: 'slaughter_ops', label: 'Slaughter Ops', count: opsCount, accent: const Color(0xFFD97706)),
+      (key: 'post_mortem', label: 'Post-Mortem', count: postCount, accent: const Color(0xFF0D9488)),
+      (key: 'weighing', label: 'Weighing', count: weighCount, accent: const Color(0xFF7C3AED)),
+      (key: 'completed', label: 'Completed', count: compCount, accent: const Color(0xFF16A34A)),
+      (key: 'failed', label: 'Failed', count: failCount, accent: const Color(0xFFDC2626)),
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: buttons.map((b) {
+        final isSelected = _selectedBucketFilter == b.key;
+        return InkWell(
+          onTap: () {
+            setState(() {
+              _selectedBucketFilter = (isSelected && b.key != 'all') ? 'all' : b.key;
+            });
+          },
+          borderRadius: BorderRadius.circular(20),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: isSelected ? b.accent : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isSelected ? b.accent : const Color(0xFFE2E8F0),
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: b.accent.withValues(alpha: 0.22),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  b.label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                    color: isSelected ? Colors.white : const Color(0xFF334155),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.white.withValues(alpha: 0.22)
+                        : (b.count > 0
+                            ? b.accent.withValues(alpha: 0.12)
+                            : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    b.count.toString(),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: isSelected
+                          ? Colors.white
+                          : (b.count > 0 ? b.accent : const Color(0xFF94A3B8)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildTableCard({required String title, required String subtitle, required List<Map<String, dynamic>> requests}) {
-    final scrollController = ScrollController();
+    final scrollController = _tableScrollController;
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -491,9 +922,12 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                 ],
                 rows: requests.map((req) {
                   final ref = _refNo(req);
-                  final stage = req['process_stage'] ?? 'Pending';
+                  final rawStage = (req['process_stage'] ?? 'Ante-Mortem').toString();
+                  final stage = rawStage == 'Scalding/Plucking' ? 'Scalding/Dehairing' : rawStage;
+                  final antiMortem = (req['anti_mortem'] ?? 'Pending').toString();
                   final postMortem = req['post_mortem'] ?? 'PENDING';
                   final status = req['status'] ?? '';
+                  final isMarketRow = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
                   final isDelayed = status == 'delay_error';
                   final isAntiMortemFailed = status == 'anti_mortem_failed' || status == 'pickup_scheduled' || status == 'taken_back';
                   final isPostMortemFailed = status == 'post_mortem_failed';
@@ -501,9 +935,43 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                   final isCondemned = req['condemnation_reason'] != null || isCondemnedStatus;
                   final isCondemnationAcknowledged = req['condemnation_acknowledged'] == true || isCondemnedStatus;
                   final customerResponse = req['anti_mortem_response']?.toString();
-                  final isSeparateFacility = (req['anti_mortem']?.toString() == 'Separate Facility') ||
+                  final isSeparateFacility = (antiMortem == 'Separate Facility') ||
                       stage.contains('Separate Facility') ||
                       (req['process_notes']?.toString().contains('SEPARATE FACILITY') ?? false);
+                  final statusLower = status.toString().toLowerCase();
+                  final bool isInspectionDone = stage == 'Complete' ||
+                      [
+                        'releasable',
+                        'mic_generated',
+                        'paid',
+                        'released',
+                        'completed',
+                        'condemned',
+                        'post_mortem_failed',
+                        'taken_back',
+                      ].contains(statusLower);
+                  final bool isUnstarted = (antiMortem.isEmpty || antiMortem == 'Pending') &&
+                      !isSeparateFacility &&
+                      !isAntiMortemFailed &&
+                      !isPostMortemFailed &&
+                      !isCondemnedStatus &&
+                      !isInspectionDone;
+
+                  String? autoCountdownLabel;
+                  if (_isEligibleForAutoSlaughter(req)) {
+                    final startUtc = _extractAmPassedAt(req);
+                    if (startUtc != null) {
+                      final comp = _computeAutoStageState(startUtc);
+                      if (comp.$2 != null) {
+                        final mins = comp.$3 ~/ 60;
+                        final secs = comp.$3 % 60;
+                        autoCountdownLabel =
+                            'Auto → ${comp.$2} in ${mins}m ${secs.toString().padLeft(2, '0')}s';
+                      } else if (stage == 'Evisceration') {
+                        autoCountdownLabel = 'Ready for Post-Mortem';
+                      }
+                    }
+                  }
 
                   bool isScheduledForFutureDate() {
                     final pref = req['preferred_date']?.toString();
@@ -526,7 +994,38 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(req['customer_name']?.toString() ?? '—', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                req['customer_name']?.toString() ?? '—',
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: isMarketRow ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: isMarketRow ? const Color(0xFFBFDBFE) : const Color(0xFFA7F3D0),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Text(
+                                isMarketRow ? 'Market' : 'Barangay',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: isMarketRow ? const Color(0xFF1D4ED8) : const Color(0xFF047857),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
                         _buildSpecialInstructionBadge(
                           context,
                           req['special_instruction']?.toString(),
@@ -639,8 +1138,25 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                               ? Colors.green
                               : (stage.contains('Separate Facility')
                                   ? const Color(0xFFC2410C)
-                                  : ((stage == 'Ante-Mortem' || stage == 'Anti-Mortem') ? Colors.red : Colors.grey)),
+                                  : ((stage == 'Ante-Mortem' || stage == 'Anti-Mortem')
+                                      ? const Color(0xFF2563EB)
+                                      : (_autoSlaughterStages.contains(stage)
+                                          ? const Color(0xFFD97706)
+                                          : Colors.blueGrey))),
                         ),
+                        if (autoCountdownLabel != null) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            autoCountdownLabel,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: stage == 'Evisceration'
+                                  ? const Color(0xFF0D9488)
+                                  : const Color(0xFFB45309),
+                            ),
+                          ),
+                        ],
                         if (isSeparateFacility && !stage.contains('Separate Facility')) ...[
                           const SizedBox(height: 2),
                           const Text(
@@ -1026,15 +1542,33 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                     child: const Text('Pending Arrival', style: TextStyle(fontSize: 11.5)),
                                   ),
                                 )
-                              : OutlinedButton(
-                                  onPressed: () => _openUpdateDialog(req),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                                    minimumSize: const Size(0, 32),
-                                    side: BorderSide(color: Colors.grey.shade300),
-                                  ),
-                                  child: const Text('Update', style: TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
-                                ),
+                              : isUnstarted
+                                  ? ElevatedButton.icon(
+                                      onPressed: () => _openUpdateDialog(req),
+                                      icon: const Icon(Icons.assignment_outlined, size: 14, color: Colors.white),
+                                      label: const Text(
+                                        'Open Inspection',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF0F5132),
+                                        elevation: 0,
+                                        padding: const EdgeInsets.symmetric(horizontal: 11),
+                                        minimumSize: const Size(0, 32),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                      ),
+                                    )
+                                  : isInspectionDone
+                                      ? const SizedBox.shrink()
+                                      : OutlinedButton(
+                                          onPressed: () => _openUpdateDialog(req),
+                                          style: OutlinedButton.styleFrom(
+                                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                                            minimumSize: const Size(0, 32),
+                                            side: BorderSide(color: Colors.grey.shade300),
+                                          ),
+                                          child: const Text('Update', style: TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
+                                        ),
                           if (isPostMortemFailed || isCondemnedStatus || isCondemned) ...[
                             const SizedBox(width: 6),
                             OutlinedButton(
@@ -1057,7 +1591,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                               child: Text('Slip', style: TextStyle(fontSize: 12, color: Colors.red.shade700)),
                             ),
                           ],
-                          if (isAntiMortemFailed) ...[
+                          if (isAntiMortemFailed && statusLower != 'taken_back') ...[
                             const SizedBox(width: 6),
                             ElevatedButton.icon(
                               icon: const Icon(Icons.fact_check_outlined, size: 13),
@@ -1276,7 +1810,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             if (alert['acknowledged'] == true) continue;
             if (_shownAnteMortemAlertIds.contains(idStr)) continue;
 
-            final req = [..._barangayRequests, ..._marketRequests].firstWhere(
+            final req = _allRequests.firstWhere(
               (r) => r['id'].toString() == idStr,
               orElse: () => <String, dynamic>{},
             );
@@ -1745,20 +2279,31 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       final defaultInspector = AppSettingsService.instance.configuredInspectors.isNotEmpty
           ? AppSettingsService.instance.configuredInspectors.first
           : 'Dr. Maria Clara Reyes';
-      final resolvedNotes = notes.isNotEmpty
+      final nowUtcIso = DateTime.now().toUtc().toIso8601String();
+      final resolvedNotesBase = notes.isNotEmpty
           ? 'Cleared after confinement and observation: $notes'
           : 'Cleared after confinement and observation. Resumed active slaughter at Stunning stage.';
-      final inspData = {
+      final resolvedNotes = '[AM_PASSED_AT:$nowUtcIso] $resolvedNotesBase';
+      final inspData = <String, dynamic>{
         'request_id': reqId,
         'anti_mortem': 'Passed',
         'process_stage': 'Stunning',
+        'ante_mortem_passed_at': nowUtcIso,
         'inspector_name': defaultInspector,
         'process_notes': resolvedNotes,
       };
-      if (existingInsp != null) {
-        await supabase.from('slaughter_inspection').update(inspData).eq('request_id', reqId);
-      } else {
-        await supabase.from('slaughter_inspection').insert(inspData);
+      Future<void> saveClearedInsp(Map<String, dynamic> p) async {
+        if (existingInsp != null) {
+          await supabase.from('slaughter_inspection').update(p).eq('request_id', reqId);
+        } else {
+          await supabase.from('slaughter_inspection').insert(p);
+        }
+      }
+      try {
+        await saveClearedInsp(inspData);
+      } catch (_) {
+        inspData.remove('ante_mortem_passed_at');
+        await saveClearedInsp(inspData);
       }
 
       // 3. Notify customer
@@ -2103,18 +2648,26 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     final type = widget.request['livestock_type']?.toString();
     final weight = double.tryParse(_carcassCtrl.text.trim());
 
+    // 0. While Ante-Mortem is Pending, lock process stage at Ante-Mortem
+    if (_antiMortem == 'Pending') {
+      _processStage = 'Ante-Mortem';
+      return;
+    }
+
     // 1. If Ante-Mortem is Separate Facility, bypass standard floor stages to 'Separate Facility (Weighing)'
     if (_antiMortem == 'Separate Facility') {
       if (_processStage != 'Complete') {
         _processStage = 'Separate Facility (Weighing)';
       }
     } else if (_antiMortem == 'Passed' || _isPartialBatch) {
-      if ((_processStage == 'Ante-Mortem' || _processStage == 'Anti-Mortem') || _processStage == 'Preparation') {
+      if (_processStage == 'Ante-Mortem' ||
+          _processStage == 'Anti-Mortem' ||
+          _processStage == 'Preparation') {
         _processStage = 'Stunning';
       }
     }
 
-    // 2. Only auto-mark Complete if weight is entered & within acceptable range AND (Post-Mortem passes or partial batch has healthy heads)
+    // 2. Early override / completion: auto-mark Complete if weight is entered & within acceptable range AND (Post-Mortem passes or partial batch has healthy heads)
     if (weight != null && _isWeightInRange(weight, type, count) && (_postMortem == 'Passed' || _isPartialBatch)) {
       _processStage = 'Complete';
     } else if (_processStage == 'Complete' && (weight == null || !_isWeightInRange(weight, type, count))) {
@@ -2130,9 +2683,26 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     final validAntiMortem = ['Pending', 'Passed', 'Failed', 'Separate Facility'];
     final rawAntiMortem = req['anti_mortem']?.toString() ?? 'Pending';
     _antiMortem = validAntiMortem.contains(rawAntiMortem) ? rawAntiMortem : 'Pending';
-    final validStages = ['Separate Facility (Weighing)', 'Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay'];
-    final reqStage = req['process_stage'] ?? 'Preparation';
-    _processStage = validStages.contains(reqStage) ? reqStage : 'Preparation';
+    final validStages = [
+      'Separate Facility (Weighing)',
+      'Ante-Mortem',
+      'Preparation',
+      'Stunning',
+      'Bleeding',
+      'Scalding/Dehairing',
+      'Evisceration',
+      'Post-Mortem Inspection',
+      'Weighing',
+      'Complete',
+      'Technical Error/Delay',
+    ];
+    final rawReqStage = (req['process_stage'] ?? 'Ante-Mortem').toString();
+    final normalizedReqStage = rawReqStage == 'Scalding/Plucking' ? 'Scalding/Dehairing' : rawReqStage;
+    if (_antiMortem == 'Pending') {
+      _processStage = 'Ante-Mortem';
+    } else {
+      _processStage = validStages.contains(normalizedReqStage) ? normalizedReqStage : 'Stunning';
+    }
     _postMortem = req['post_mortem'] ?? 'Pending';
     if (req['carcass_weight'] != null) _carcassCtrl.text = req['carcass_weight'].toString();
 
@@ -2157,7 +2727,12 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
     }
     _inspectorCtrl.text = _selectedInspector ?? '';
 
-    if (req['process_notes'] != null) _notesCtrl.text = req['process_notes'].toString();
+    if (req['process_notes'] != null) {
+      _notesCtrl.text = req['process_notes']
+          .toString()
+          .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+          .trim();
+    }
     if (req['condemnation_reason'] != null && req['condemnation_reason'].toString().trim().isNotEmpty) {
       final rawReason = req['condemnation_reason'].toString().trim();
       _condemnationCtrl.text = rawReason;
@@ -2450,6 +3025,27 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           'emergency_cause': _emergencyCause,
           'facility': 'Separate Facility',
         };
+      } else if (_antiMortem == 'Passed' && _processStage != 'Complete') {
+        final wasNotStarted = (widget.request['status'] ?? '').toString() == 'doc_verified' ||
+            (widget.request['anti_mortem'] ?? 'Pending').toString() == 'Pending';
+        newStatus = 'slaughter_started';
+        if (wasNotStarted) {
+          final livestockType = widget.request['livestock_type'] ?? 'Livestock';
+          final animalCount = widget.request['animal_count'] ?? 1;
+          final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+          notifTitle = 'Ante-Mortem Passed — Slaughter Started';
+          notifMessage =
+              'Your $animalCount head(s) of $livestockType ($refNo) passed ante-mortem veterinary inspection and is now proceeding through slaughter operations ($_processStage).';
+          notifType = 'slaughter_started';
+          notifData = {
+            'request_id': reqId,
+            'reference_no': refNo,
+            'livestock_type': livestockType,
+            'process_stage': _processStage,
+          };
+        }
+      } else if (_antiMortem == 'Pending') {
+        _processStage = 'Ante-Mortem';
       }
 
       final bool isImmediateSlaughterWalkIn = _antiMortem == 'Separate Facility' ||
@@ -2560,9 +3156,20 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       }
 
       final delayReason = _delayReasonCtrl.text.trim();
-      String processNotes = _notesCtrl.text.trim()
+      final existingAmPassed = _SlaughterInspectionPageState._extractAmPassedAt(widget.request);
+      final String? resolvedAmPassedIso = (_antiMortem == 'Passed' || isPartialAnteConfinement)
+          ? (existingAmPassed?.toIso8601String() ?? DateTime.now().toUtc().toIso8601String())
+          : null;
+
+      String processNotes = _notesCtrl.text
+          .trim()
+          .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
           .replaceAll(RegExp(r'\[PARTIAL BATCH:[^\]]+\]\s*\|?\s*', caseSensitive: false), '')
           .trim();
+      if (resolvedAmPassedIso != null) {
+        final amTag = '[AM_PASSED_AT:$resolvedAmPassedIso]';
+        processNotes = processNotes.isEmpty ? amTag : '$amTag | $processNotes';
+      }
       if (isPartialBatch) {
         final partialTag = '[PARTIAL BATCH: $passedCount Passed, $condemnedCount Condemned]';
         processNotes = processNotes.isEmpty ? partialTag : '$partialTag | $processNotes';
@@ -2595,6 +3202,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         'process_notes': processNotes,
         'condemnation_reason': (_healthIssueDetected || (isPartialBatch && !isPartialAnteConfinement)) ? _condemnationCtrl.text : null,
         'veterinary_findings': (_antiMortem == 'Failed' && !isPartialAnteConfinement) ? _notesCtrl.text : null,
+        'ante_mortem_passed_at': ?resolvedAmPassedIso,
         if (isPartialAnteConfinement) ...{
           'passed_count': passedCount,
           'condemned_count': 0,
@@ -2615,6 +3223,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       try {
         await saveInspection(inspectionData);
       } catch (_) {
+        inspectionData.remove('ante_mortem_passed_at');
         inspectionData.remove('passed_count');
         inspectionData.remove('condemned_count');
         await saveInspection(inspectionData);
@@ -2914,49 +3523,56 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
               ),
               const SizedBox(height: 20),
               
-              if ((widget.request['special_instruction'] ?? '').toString().trim().isNotEmpty) ...[
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.only(bottom: 20),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFF59E0B)),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Icon(Icons.speaker_notes, color: Color(0xFFB45309), size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Customer Special Instructions:',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12.5,
-                                color: Color(0xFF92400E),
+              Builder(
+                builder: (_) {
+                  final cleanedInstr = (widget.request['special_instruction'] ?? '')
+                      .toString()
+                      .replaceAll('[WALK_IN]', '')
+                      .trim();
+                  if (cleanedInstr.isEmpty) return const SizedBox.shrink();
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFF59E0B)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.speaker_notes, color: Color(0xFFB45309), size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Customer Special Instructions:',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12.5,
+                                  color: Color(0xFF92400E),
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              (widget.request['special_instruction'] ?? '').toString().trim(),
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Color(0xFF78350F),
-                                height: 1.35,
+                              const SizedBox(height: 4),
+                              Text(
+                                cleanedInstr,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF78350F),
+                                  height: 1.35,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                      ],
+                    ),
+                  );
+                },
+              ),
               
               const Text('Ante-Mortem Result', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF4A5568))),
               const SizedBox(height: 6),
@@ -3066,8 +3682,20 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                             child: DropdownButton<String>(
                               isExpanded: true,
                               value: _processStage,
-                              items: ['Separate Facility (Weighing)', 'Ante-Mortem', 'Preparation', 'Stunning', 'Bleeding', 'Scalding/Plucking', 'Evisceration', 'Post-Mortem Inspection', 'Weighing', 'Complete', 'Technical Error/Delay'].map((e) => DropdownMenuItem(
-                                value: e, 
+                              items: const [
+                                'Separate Facility (Weighing)',
+                                'Ante-Mortem',
+                                'Preparation',
+                                'Stunning',
+                                'Bleeding',
+                                'Scalding/Dehairing',
+                                'Evisceration',
+                                'Post-Mortem Inspection',
+                                'Weighing',
+                                'Complete',
+                                'Technical Error/Delay',
+                              ].map((e) => DropdownMenuItem(
+                                value: e,
                                 child: Container(
                                   width: double.infinity,
                                   padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -3078,26 +3706,42 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
                                   child: Text(e, style: TextStyle(color: e == 'Technical Error/Delay' ? Colors.white : Colors.black87)),
                                 ),
                               )).toList(),
-                              onChanged: (v) => setState(() {
-                                if (v == 'Complete') {
-                                  final weight = double.tryParse(_carcassCtrl.text.trim());
-                                  if (weight == null || weight <= 0) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Warning: Carcass weight is required before marking as Complete.'),
-                                        backgroundColor: Colors.orange,
-                                      ),
-                                    );
-                                    _processStage = 'Weighing';
-                                    return;
-                                  }
-                                }
-                                _processStage = v!;
-                                if (_processStage == 'Complete' && _postMortem == 'Pending') {
-                                  _postMortem = 'Passed';
-                                }
-                              }),
+                              onChanged: _antiMortem == 'Pending'
+                                  ? null
+                                  : (v) => setState(() {
+                                        if (v == 'Complete') {
+                                          final weight = double.tryParse(_carcassCtrl.text.trim());
+                                          if (weight == null || weight <= 0) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('Warning: Carcass weight is required before marking as Complete.'),
+                                                backgroundColor: Colors.orange,
+                                              ),
+                                            );
+                                            _processStage = 'Weighing';
+                                            return;
+                                          }
+                                        }
+                                        _processStage = v!;
+                                        if (_processStage == 'Complete' && _postMortem == 'Pending') {
+                                          _postMortem = 'Passed';
+                                        }
+                                      }),
                             ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _antiMortem == 'Pending'
+                              ? 'Locked at Ante-Mortem until Ante-Mortem Result is marked Passed.'
+                              : (_antiMortem == 'Passed' && _processStage != 'Complete'
+                                  ? 'Auto-advances every 5 mins: Stunning → Bleeding → Scalding/Dehairing → Evisceration.'
+                                  : 'Reflects active inspection or weighing stage.'),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _antiMortem == 'Pending'
+                                ? const Color(0xFF64748B)
+                                : const Color(0xFF0F5132),
                           ),
                         ),
                       ],
