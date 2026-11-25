@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../widgets/animals_in_lot_editor.dart';
 import '../widgets/walk_in_sms_helper.dart';
@@ -39,45 +40,31 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   // Add scroll controllers for horizontal scrolling
   final ScrollController _approvedScrollController = ScrollController();
   final ScrollController _pendingScrollController = ScrollController();
-  RealtimeChannel? _requestsChannel;
+  StreamSubscription<String>? _realtimeSub;
   Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
-    _subscribeRequests();
-    // Auto-poll every 3 seconds so incoming requests appear automatically in real-time
+    _realtimeSub = AdminRealtimeHub.instance.stream.listen((table) {
+      if (!mounted) return;
+      if (table == 'requests') {
+        _loadRequests(silent: true);
+      } else if (table == 'regular_dealers') {
+        RegularDealersService.instance.reload();
+      }
+    });
+    // Safety fallback poll every 15s in case WebSocket temporarily sleeps
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _loadRequests(silent: true);
     });
   }
 
-  void _subscribeRequests() {
-    try {
-      _requestsChannel = supabase
-          .channel('public:admin-receiving-requests')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'requests',
-            callback: (payload) {
-              debugPrint('RECEIVING: Requests change detected, reloading...');
-              if (mounted) _loadRequests(silent: true);
-            },
-          )
-          .subscribe();
-    } catch (e) {
-      debugPrint('Realtime error in ReceivingRequestsPage: $e');
-    }
-  }
-
   @override
   void dispose() {
     _pollingTimer?.cancel();
-    if (_requestsChannel != null) {
-      supabase.removeChannel(_requestsChannel!);
-    }
+    _realtimeSub?.cancel();
     _searchController.dispose();
     _approvedScrollController.dispose();
     _pendingScrollController.dispose();
@@ -1946,6 +1933,24 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   String? _selectedAnimalType;
   final List<String> _animalTypes = ['Cattle', 'Carabao', 'Hog', 'Goat', 'Sheep'];
 
+  String _currentOriginLabel() {
+    final brgy = _selectedBarangay?.trim() ?? '';
+    final mun = _selectedMunicipality?.trim() ?? '';
+    if (brgy.isNotEmpty && mun.isNotEmpty) return '$brgy, $mun';
+    if (mun.isNotEmpty) return mun;
+    return 'Tabaco City';
+  }
+
+  void _syncOriginToUneditedHeads() {
+    final nextOrigin = _currentOriginLabel();
+    for (final head in _walkInLot) {
+      if (!head.isOriginCustom || head.origin.trim().isEmpty) {
+        head.origin = nextOrigin;
+        head.isOriginCustom = false;
+      }
+    }
+  }
+
   List<_CustomerLookupItem> _lookupDirectory = [];
   _CustomerLookupItem? _selectedCustomer;
   bool _isMarkingLocked = false;
@@ -1968,7 +1973,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
   Future<void> _loadRegisteredCustomers() async {
     try {
       final dealersService = RegularDealersService.instance;
-      await dealersService.init();
+      await dealersService.reload();
       final allDealers = dealersService.allDealers;
 
       // 1. Fetch recent requests to extract past phone, address, and animal types
@@ -2113,11 +2118,18 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         // Barangay customer
         if (item.municipality != null && item.municipality!.isNotEmpty) {
           _selectedMunicipality = item.municipality;
+          final matchedMun = _municipalities.cast<Map>().where(
+            (m) => (m['name'] ?? '').toString().toLowerCase() == item.municipality!.toLowerCase(),
+          );
+          if (matchedMun.isNotEmpty) {
+            _selectedMunicipalityCode = matchedMun.first['code']?.toString();
+          }
           _loadBarangays(_selectedMunicipalityCode ?? "050517000");
         }
         if (item.barangay != null && item.barangay!.isNotEmpty) {
           _selectedBarangay = item.barangay;
         }
+        _syncOriginToUneditedHeads();
       } else {
         // Market customer
         if (item.storeName != null && item.storeName!.isNotEmpty) {
@@ -2483,10 +2495,26 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         markings: registered.markings,
         category: registered.category,
         phone: registered.phone,
+        municipality: _selectedMunicipality,
+        barangay: _selectedBarangay,
+        stallNumber: _marketStallCtrl.text.trim().isNotEmpty ? _marketStallCtrl.text.trim() : null,
+        storeName: _marketNameCtrl.text.trim().isNotEmpty ? _marketNameCtrl.text.trim() : null,
+        usualAnimalType: _selectedAnimalType,
         userId: registered.userId,
         isRegularDealer: true,
       );
-      _onCustomerSelected(item);
+      setState(() {
+        _selectedCustomer = item;
+        _customerNameCtrl.text = item.name;
+        if (item.markings.isNotEmpty) {
+          _markingCtrl.text = item.markings;
+          _isMarkingLocked = true;
+        }
+        if (item.phone != null && item.phone!.isNotEmpty) {
+          _contactNumberCtrl.text = item.phone!;
+        }
+        _isBarangay = item.category != 'market';
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2494,7 +2522,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               const Icon(Icons.verified_user, color: Colors.white, size: 18),
               const SizedBox(width: 8),
               Expanded(
-                child: Text('${registered.name} registered in Meat Dealers Directory (Mark: ${registered.markings}).'),
+                child: Text('${registered.name} registered in Meat Dealers Directory (Mark: ${registered.markings}). You can now save the request.'),
               ),
             ]),
             backgroundColor: const Color(0xFF0F5132),
@@ -3041,9 +3069,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               // ── Animals in Lot (Per-Head with Ear-Tag #) ──
               AnimalsInLotEditor(
                 items: _walkInLot,
-                defaultOrigin: _selectedBarangay != null && _selectedMunicipality != null
-                    ? '$_selectedBarangay, $_selectedMunicipality'
-                    : (_selectedMunicipality ?? 'Tabaco City'),
+                defaultOrigin: _currentOriginLabel(),
                 onChanged: (updated) => setState(() => _walkInLot = updated),
               ),
               const SizedBox(height: 16),
@@ -3182,6 +3208,27 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  if (!_isRegisteredDealer) ...[
+                    Expanded(
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, size: 15, color: Color(0xFFD97706)),
+                          const SizedBox(width: 6),
+                          const Expanded(
+                            child: Text(
+                              'Register dealer above to enable saving',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
                   OutlinedButton(
                     onPressed: _isSaving ? null : () => Navigator.pop(context),
                     style: OutlinedButton.styleFrom(
@@ -3257,6 +3304,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                 setState(() {
                   _selectedMunicipality = value;
                   _selectedMunicipalityCode = selected['code'] as String;
+                  _selectedBarangay = null;
+                  _syncOriginToUneditedHeads();
                 });
                 _loadBarangays(_selectedMunicipalityCode!);
               },
@@ -3285,7 +3334,10 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               onChanged: _selectedMunicipality == null
                   ? null
                   : (value) {
-                      setState(() => _selectedBarangay = value);
+                      setState(() {
+                        _selectedBarangay = value;
+                        _syncOriginToUneditedHeads();
+                      });
                     },
             ),
     ];

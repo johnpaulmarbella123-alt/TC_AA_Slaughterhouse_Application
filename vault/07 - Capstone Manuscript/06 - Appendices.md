@@ -1,21 +1,18 @@
 ---
-title: "Appendices - Capstone Manuscript"
+title: "Appendices and Curriculum Vitae - Operation Management Application for AA Slaughterhouse of Tabaco City"
 category: "Capstone Manuscript"
-created: 2026-09-26
-last_updated: 2026-09-26
+format: "IMRaD"
+section: "APPENDICES"
+last_updated: 2026-11-25
 tags:
   - capstone
+  - imrad
   - appendices
-  - data-dictionary
-  - user-manual
-  - sus
 ---
 
-# Appendices
+# APPENDICES
 
----
-
-## Appendix A: Formal Communication Letter
+## Appendix A: Communication Letter
 
 ```
 POLYTECHNIC INSTITUTE OF TABACO
@@ -67,7 +64,9 @@ City Veterinarian, Tabaco City Slaughterhouse
 
 ---
 
-## Appendix B: Master Technical Data Dictionary
+---
+
+## Appendix B: Data Dictionary
 
 ### 1. Table: `requests` (Slaughter Intake Bookings)
 
@@ -160,7 +159,68 @@ City Veterinarian, Tabaco City Slaughterhouse
 
 ---
 
-## Appendix C: System User's Manual Guide
+### 2. Table: `slaughter_inspection` (Ante-Mortem, Post-Mortem & Condemnation Records)
+
+| Field Name | Data Type | Constraint | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `UUID` | `PRIMARY KEY` | Unique inspection record identifier. |
+| `request_id` | `BIGINT` | `FOREIGN KEY -> requests.id` | Links clinical inspection findings to the parent slaughter lot. |
+| `anti_mortem` | `TEXT` | `NOT NULL` | Live animal inspection status (`Passed`, `Suspect`, `Failed`). |
+| `post_mortem` | `TEXT` | `NULLABLE` | Dressed carcass inspection status (`Passed`, `Partial Condemnation`, `Condemned`). |
+| `carcass_weight` | `NUMERIC(10,2)` | `DEFAULT 0` | Certified dressed carcass weight in kilograms from calibrated scale. |
+| `process_stage` | `TEXT` | `NULLABLE` | Live slaughter-line tracking stage (`Stunning`, `Scalding`, `Evisceration`, `Weighing`, `Completed`). |
+| `condemnation_slip_no` | `TEXT` | `NULLABLE` | Formal condemnation slip reference (`CS-YYYY-####`) when parts or whole carcass are condemned. |
+| `condemnation_type` | `TEXT` | `NULLABLE` | `Partial Condemnation` or `Whole Condemnation`. |
+| `condemned_part` | `TEXT` | `NULLABLE` | Specific organ or carcass portion condemned (e.g., Liver, Lungs, Whole Carcass). |
+| `condemned_weight` | `NUMERIC(10,2)` | `DEFAULT 0` | Weight (kg) of condemned meat/organs ordered for incineration. |
+| `condemnation_reason` | `TEXT` | `NULLABLE` | Veterinary pathology diagnosis justifying condemnation. |
+| `inspector_name` | `TEXT` | `NULLABLE` | Accredited NMIS meat inspector who certified the examination. |
+| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Inspection timestamp. |
+
+### 5. Additional Billing Columns on `payments`
+
+| Field Name | Data Type | Constraint | Description |
+| :--- | :--- | :--- | :--- |
+| `amount_tendered` | `NUMERIC(10,2)` | `NULLABLE` | Exact cash amount handed by the customer at the cashiering counter or on pickup. |
+| `change_amount` | `NUMERIC(10,2)` | `NULLABLE` | Auto-calculated change returned to the customer (`amount_tendered - total_amount`). |
+
+### 6. Table: `regular_dealers` (Official Meat Dealers Directory)
+
+| Field Name | Data Type | Constraint | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `UUID` | `PRIMARY KEY` | Unique dealer registry identifier. |
+| `dealer_number` | `INT` | `UNIQUE(category, dealer_number)` | Sequential registry number per dealer category (`barangay` or `market`). |
+| `name` | `TEXT` | `NOT NULL` | Official registered full name of the meat dealer. |
+| `markings` | `TEXT` | `NOT NULL` | Permanent assigned carcass marking tag (e.g., `CHOR`, `JB24`). |
+| `category` | `TEXT` | `CHECK IN ('market','barangay')` | Dealer classification. |
+| `phone` | `TEXT` | `NULLABLE` | 11-digit mobile number used for Walk-In SMS notifications. |
+| `user_id` | `UUID` | `FOREIGN KEY -> auth.users.id` | Optional link to a registered mobile app account. |
+| `is_active` | `BOOLEAN` | `DEFAULT TRUE` | Active standing in the Tabaco City Meat Dealers Directory. |
+| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Registration timestamp. |
+
+### 7. Table: `staff_notifications` (Real-Time Role-Based Staff Bell Alerts)
+
+| Field Name | Data Type | Constraint | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `BIGSERIAL` | `PRIMARY KEY` | Sequential notification identifier. |
+| `target_role` | `TEXT` | `NOT NULL` | Recipient role (`Admin`, `Clerk`, `Inspector`, `Cashier`). |
+| `type` | `TEXT` | `NOT NULL` | Event category (`new_request`, `doc_uploaded`, `payment_received`, `separate_facility`). |
+| `title` | `TEXT` | `NOT NULL` | Short notification headline shown in the bell popover. |
+| `message` | `TEXT` | `NOT NULL` | Actionable operational description with reference number. |
+| `reference_no` | `TEXT` | `NULLABLE` | Associated slaughter request reference number. |
+| `read_by` | `TEXT[]` | `DEFAULT '{}'` | List of staff emails who have acknowledged the alert. |
+| `created_at` | `TIMESTAMPTZ` | `DEFAULT NOW()` | Event creation timestamp. |
+
+### 8. Table: `nmic_transmissions` & `audit_logs` (Statutory Compliance & Security Trail)
+
+| Table | Key Fields | Purpose |
+| :--- | :--- | :--- |
+| `nmic_transmissions` | `id`, `report_type`, `period_label`, `recipient_email`, `transmittal_subject`, `sent_by`, `status`, `created_at` | Immutable log of official NMIS Daily, Weekly, Monthly, and POSM-F034 reports transmitted to regulatory authorities. |
+| `audit_logs` | `id`, `action`, `module`, `actor_email`, `actor_role`, `target_id`, `target_ref`, `details (JSONB)`, `created_at` | Tamper-evident administrative audit trail recording every approval, inspection, payment verification, dealer update, and release event. |
+
+---
+
+## Appendix C: User's Manual
 
 ### 1. Title Page
 **Project Title**: Operation Management Application for AA Slaughterhouse of Tabaco City  
@@ -263,7 +323,9 @@ The system architecture utilizes a high-performance multi-platform topology:
 
 ---
 
-## Appendix D: HIPO Chart (Hierarchy plus Input-Process-Output)
+---
+
+## Appendix D: HIPO Chart
 
 ### 1. Visual Table of Contents (VTOC)
 
@@ -330,7 +392,9 @@ graph TD
 
 ---
 
-## Appendix E: Project Implementation Gantt Chart
+---
+
+## Appendix E: Gantt Chart
 
 ```mermaid
 gantt
@@ -386,6 +450,8 @@ gantt
 
 ---
 
+---
+
 ## Appendix F: Interview Questionnaire
 
 ### I. Information Requirements Assessment Questionnaire
@@ -418,7 +484,9 @@ gantt
 
 ---
 
-## Appendix G: System Usability Scale (SUS)
+---
+
+### III. System Usability Scale (SUS) Evaluation Instrument
 
 The System Usability Scale (SUS) is an internationally recognized, 10-item Likert scale instrument designed to evaluate the subjective usability and learnability of software systems (Brooke, 1996).
 
@@ -454,7 +522,9 @@ Scale:
 
 ---
 
-## Appendix H: SUS Result
+---
+
+## Appendix G: SUS Result
 
 ### 1. Demographic Profile of Respondents ($N = 46$)
 
@@ -492,7 +562,37 @@ Scale:
 
 ---
 
-## Appendix I: User Interfaces
+---
+
+## Appendix H: System Demonstration and Testing
+
+### 1. Live System Demonstration Protocol (Final Defense & On-Site UAT)
+
+During stakeholder User Acceptance Testing (UAT) and live panel demonstration at the Tabaco City "AA" Slaughterhouse, the complete end-to-end operational pipeline was executed across three live environments: (1) Android Mobile Customer App (`TC_AA_Slaughterhouse_App.apk`), (2) Flutter Web Administrative Operations Console (`https://web-ten-sooty-86.vercel.app`), and (3) Supabase Cloud Backend (`jacgcceaxblwgdxaeaqk`).
+
+| Demo Phase | Actor / Role | Demonstrated Workflow Steps | Verified System Output |
+| :---: | :--- | :--- | :--- |
+| **1** | Meat Dealer (Mobile) | Download APK via `tabaco-abattoir-app.vercel.app`, sign in, book slaughter lot with per-head details, upload VHC & Shipping Permit | Booking created (`pending_intake`); appears in Admin/Clerk Receiving in **<1 second** via Realtime |
+| **2** | Receiving Clerk (Web) | Review incoming request or create Walk-In entry (verifying Meat Dealers Directory registration & live Barangay/Municipality origin sync) | Permanent marking locked; request approved and routed to Document Verification |
+| **3** | Document Verifier (Web) | Inspect uploaded VHC/Permit images and approve compliance | Status advances to `doc_verified`; customer notified in Mobile App |
+| **4** | Meat Inspector (Web/Tablet) | Log Ante-Mortem status (`Passed`), advance slaughter stages, log Post-Mortem findings & carcass weight, test Condemnation Slip (`CS-YYYY-####`) | MIC certified (`releasable`); Condemnation Slip generated if pathology flagged |
+| **5** | Cashier (Web) & Customer (Mobile) | Settle via Cash (recording Cash Tendered & auto-calculated Change Due) or PayMongo GCash checkout; optionally send manual Walk-In SMS | Official Receipt (`RCP-YYYY-####`) generated with crisp `₱` formatting; status updated to `paid` |
+| **6** | Releasing Officer (Web) | Notify customer ("Meat Ready for Collection"), verify Pickup Authorization / QR pass, mark batch `released` | Pickup card appears on customer phone only after notice, then closes upon final release |
+| **7** | Admin Supervisor (Web) | Open Executive Dashboard & Reports & Records; export legal-size (8.5" × 14") NMIS Daily Production PDF | Accurate cumulative KPIs, satisfaction rate, revenue totals, and print-ready NMIS legal PDF |
+
+### 2. User Acceptance Testing (UAT) Sign-Off Summary
+
+| Evaluation Domain | Test Cases Executed | Passed | Failed | Pass Rate |
+| :--- | :---: | :---: | :---: | :---: |
+| Authentication, RBAC & RLS Security | 3 | 3 | 0 | **100%** |
+| Mobile Booking, Permits & Offline Guard | 3 | 3 | 0 | **100%** |
+| Receiving, Dealer Registry & Real-Time Sync | 3 | 3 | 0 | **100%** |
+| Veterinary Inspection & Condemnation Slips | 2 | 2 | 0 | **100%** |
+| Billing, PayMongo GCash, SMS & PDF Export | 4 | 4 | 0 | **100%** |
+| APK Distribution Portal (`tabaco-abattoir-app.vercel.app`) | 1 | 1 | 0 | **100%** |
+| **Total** | **16** | **16** | **0** | **100%** |
+
+### 3. System User Interfaces Demonstrated
 
 ### 1. Customer Mobile Application Suite (Flutter Android/iOS)
 1. **User Authentication & OTP Login**:
@@ -534,7 +634,9 @@ Scale:
 
 ---
 
-## Appendix J: Source Code
+---
+
+## Appendix I: Source Code
 
 ### 1. Monorepo Repository Structure
 ```
@@ -650,7 +752,9 @@ USING (
 
 ---
 
-## Curriculum Vitae
+---
+
+# CURRICULUM VITAE
 
 ### MELCH JOHN PAUL B. MARBELLA
 - **Address**: Purok 3, Buang, Tabaco City, Albay, Philippines

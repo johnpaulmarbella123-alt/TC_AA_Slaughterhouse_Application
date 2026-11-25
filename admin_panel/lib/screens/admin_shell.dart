@@ -12,6 +12,7 @@ import 'meat_releasing_page.dart';
 import 'reports_records_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/staff_notification_service.dart';
 import '../widgets/dialog_blur_observer.dart';
 import '../widgets/lucide_sidebar_icons.dart';
@@ -81,8 +82,11 @@ class _AdminShellState extends State<AdminShell> {
         }
       }
 
-      // Start staff bell notifications (admin/clerk/inspector) once session is verified
-      if (mounted) StaffNotificationService.instance.start();
+      // Start staff bell notifications & shared real-time transaction hub once session is verified
+      if (mounted) {
+        StaffNotificationService.instance.start();
+        AdminRealtimeHub.instance.start();
+      }
     });
   }
 
@@ -998,6 +1002,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
   }
 
   Future<void> _handleLogout(BuildContext context) async {
+    AdminRealtimeHub.instance.stop();
     StaffNotificationService.instance.stop();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('keepMeLoggedIn', false);

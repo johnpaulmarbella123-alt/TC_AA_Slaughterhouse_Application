@@ -5,8 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
-import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
@@ -26,6 +26,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
   Timer? _pollingTimer;
+  StreamSubscription<String>? _realtimeSub;
   final Set<String> _notifiedPickupReadyIds = {};
   final Set<String> _notifyingPickupIds = {};
   final Set<String> _sentColdStoragePenaltyNotifIds = {};
@@ -35,7 +36,13 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   void initState() {
     super.initState();
     _loadRequests();
-    // Auto-poll every 3 seconds so paid orders appear automatically
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      {'requests', 'payments', 'slaughter_inspection'},
+      () {
+        if (mounted) _loadRequests(silent: true);
+      },
+    );
+    // Safety fallback poll every 15s in case WebSocket temporarily sleeps
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadRequests(silent: true);
     });
@@ -43,6 +50,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _pollingTimer?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -1453,27 +1461,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             'amount': amount,
             'pickup_deadline': deadline.toIso8601String(),
           },
-        );
-      }
-
-      // Auto-send TextBee SMS to walk-in customer when meat is ready for pickup
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
-      if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
-        final smsText = WalkInSmsHelper.buildDefaultMessage(
-          stage: 'releasing',
-          refNo: ref,
-          customerName: (req['customer_name'] ?? 'Customer').toString(),
-          marking: (req['marking'] ?? '').toString(),
-          livestockType: (req['livestock_type'] ?? '').toString(),
-          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
-        );
-        await WalkInSmsService.sendSms(
-          phone: walkInPhone,
-          message: smsText,
-          stage: 'releasing',
-          refNo: ref,
-          customerName: (req['customer_name'] ?? 'Customer').toString(),
-          requestId: reqIdStr,
         );
       }
 

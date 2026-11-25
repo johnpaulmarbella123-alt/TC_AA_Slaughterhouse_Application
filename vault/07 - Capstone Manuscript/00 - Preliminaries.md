@@ -75,21 +75,21 @@ President, Polytechnic Institute of Tabaco
 
 ---
 
-## Certification of Editor
-
-This is to certify that the undergraduate thesis entitled **"OPERATION MANAGEMENT APPLICATION FOR AA SLAUGHTERHOUSE OF TABACO CITY"**, prepared and submitted by Melch John Paul B. Marbella, Andrie B. Barasona, and Jonathan M. Bino for the undergraduate research in Information Technology has been edited by the undersigned.
-
-`__________________________`  
-Language Editor  
-
----
-
 ## Acceptance Sheet
 
 This thesis titled **"OPERATION MANAGEMENT APPLICATION FOR AA SLAUGHTERHOUSE OF TABACO CITY"**, after having been recommended and approved, is hereby accepted by the Polytechnic Institute of Tabaco.
 
 **JAIME Ll. GUARDINO**  
 President, Polytechnic Institute of Tabaco  
+
+---
+
+## Certification of Editor
+
+This is to certify that the undergraduate thesis entitled **"OPERATION MANAGEMENT APPLICATION FOR AA SLAUGHTERHOUSE OF TABACO CITY"**, prepared and submitted by Melch John Paul B. Marbella, Andrie B. Barasona, and Jonathan M. Bino for the undergraduate research in Information Technology has been edited by the undersigned.
+
+`__________________________`  
+Language Editor  
 
 ---
 
@@ -133,85 +133,88 @@ The study concluded that the Operation Management Application for the AA Slaught
 
 ## Table of Contents
 
-PRELIMINARIES
+**PRELIMINARIES**
 - Title Page ....................................................................................................................... i
 - Recommendation for Final Defense ................................................................................. ii
 - Certification of Final Rating ............................................................................................. iii
 - Approval Sheet ............................................................................................................... iv
-- Certification of Editor ..................................................................................................... v
-- Acceptance Sheet ............................................................................................................ vi
+- Acceptance Sheet ............................................................................................................ v
+- Certification of Editor ..................................................................................................... vi
 - Acknowledgement .......................................................................................................... vii
-- Abstract .......................................................................................................................... viii
-- Table of Contents ............................................................................................................ ix
-- List of Figures ................................................................................................................. xii
-- List of Tables .................................................................................................................. xiii
+- Abstract .......................................................................................................................... ix
+- Table of Contents ............................................................................................................ xiii
+- List of Tables .................................................................................................................. xvi
+- List of Figures ................................................................................................................. xix
 
-CHAPTER 1: INTRODUCTION
+**INTRODUCTION**
 - Background of the Study ................................................................................................. 1
-- Company Profile ............................................................................................................. 4
-- Scope and Delimitation of the Study ............................................................................... 7
-- Significance of the Study ................................................................................................. 10
-- Statement of the Problem ................................................................................................ 11
-- Objectives of the Study .................................................................................................... 11
-- Definition of Terms ......................................................................................................... 12
+- Review of Related Studies ............................................................................................... 5
+- Company Profile/Organization Profile ............................................................................ 10
+- Rationale of the Study ..................................................................................................... 13
+- Statement of the Problem ................................................................................................ 15
+- Objectives of the Study .................................................................................................... 18
+- Scope and Delimitation ................................................................................................... 20
+- Significance of the Study ................................................................................................. 23
+- Conceptual Design .......................................................................................................... 25
+- System Technical Background ......................................................................................... 28
+- Definition of Terms ......................................................................................................... 30
 
-CHAPTER 2: REVIEW OF RELATED LITERATURE AND TECHNICAL BACKGROUND
-- Review of Related Literature and Systems ...................................................................... 14
-- Conceptual Design .......................................................................................................... 16
-- Technical Background & Software Development Methodology ........................................ 17
+**METHODS**
+- Software Development Methodology .............................................................................. 35
+- Data Gathering Techniques ............................................................................................. 38
+- Sources of Data ............................................................................................................... 40
+- Technologies and Development Used ............................................................................. 43
+- Tools for Data Analysis ................................................................................................... 48
 
-CHAPTER 3: METHODS
-- Software Development Methodology .............................................................................. 19
-- Data Gathering Techniques ............................................................................................. 21
-- Sources of Data ............................................................................................................... 22
-- Tools for Data Analysis ................................................................................................... 23
+**RESULTS**
+- Information Requirements ............................................................................................... 50
+- Features of the Developed System .................................................................................. 52
+- System Design ................................................................................................................ 60
+- Physical Design .............................................................................................................. 62
+- System Implementation ................................................................................................... 65
+- Recommended Hardware and Software Requirements ..................................................... 68
+- System Testing ............................................................................................................... 70
+- User Acceptance Level .................................................................................................... 72
 
-CHAPTER 4: RESULTS
-- Information Requirements ............................................................................................... 25
-- Features of Proposed System .......................................................................................... 28
-- System Design (Conceptual and Logical Design) .............................................................. 38
-- Physical Design & Architectural Design ........................................................................... 57
-- Recommended Hardware and Software Requirements ..................................................... 65
-- User Acceptance Level (SUS Evaluation) ........................................................................ 74
+**DISCUSSION**
+- Summary ......................................................................................................................... 75
+- Findings .......................................................................................................................... 78
+- Conclusions .................................................................................................................... 80
+- Recommendations .......................................................................................................... 85
 
-CHAPTER 5: DISCUSSION
-- Findings .......................................................................................................................... 84
-- Conclusions .................................................................................................................... 88
-- Recommendations ........................................................................................................... 89
-- Areas for Further Studies ................................................................................................ 89
+**REFERENCES** ................................................................................................................. 87
 
-REFERENCES ................................................................................................................... 90
+**APPENDICES**
+- A. Communication Letter ................................................................................................ 90
+- B. Data Dictionary .......................................................................................................... 93
+- C. User's Manual ............................................................................................................ 95
+- D. HIPO Chart ................................................................................................................. 98
+- E. Gantt Chart ................................................................................................................ 100
+- F. Interview Questionnaire ............................................................................................... 102
+- G. SUS Result ................................................................................................................. 105
+- H. System Demonstration and Testing ............................................................................. 108
+- I. Source Code ................................................................................................................ 110
 
-APPENDICES
-- Appendix A: Formal Communication Letter ..................................................................... 93
-- Appendix B: Master Technical Data Dictionary ................................................................ 96
-- Appendix C: System User’s Manual Guide ...................................................................... 102
-- Appendix D: HIPO Chart ................................................................................................. 106
-- Appendix E: Project Implementation Gantt Chart ............................................................. 108
-- Appendix F: Interview Questionnaire .............................................................................. 110
-- Appendix G: System Usability Scale (SUS) Questionnaire ................................................. 112
-- Appendix H: SUS Evaluation Results ............................................................................... 113
-- Appendix I: User Interface Screen Catalog ...................................................................... 114
-- Appendix J: Source Code Repository & Setup ................................................................. 115
-
-CURRICULUM VITAE ...................................................................................................... 116
+**CURRICULUM VITAE** ...................................................................................................... 111
 
 ---
 
 ## List of Tables
 
-| Table | Title | Page |
-| :---: | :--- | :---: |
-| **1** | Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements | 25 |
-| **2** | Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements | 26 |
-| **3** | Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements | 27 |
-| **4** | Development Tools Used | 65 |
-| **5** | Recommended Software Requirements | 66 |
-| **6** | Recommended Hardware Requirements | 68 |
-| **7** | Demographic Breakdown of Evaluation Participants ($N = 46$) | 74 |
-| **8** | SUS Item Response Analysis ($N = 46$) | 76 |
-| **9** | Usability vs Learnability Subscale Breakdown | 78 |
-| **10**| SUS Score Distribution by Stakeholder Group | 80 |
+| Table | Title |
+| :---: | :--- |
+| **1** | Comparative Analysis of Related Systems |
+| **2** | Technologies and Development Tools Used |
+| **3** | Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements |
+| **4** | Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements |
+| **5** | Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements |
+| **6** | Recommended Software Requirements |
+| **7** | Recommended Hardware Requirements |
+| **8** | System Testing and Verification Matrix (Functional, Security, Real-Time, and Integration) |
+| **9** | Demographic Breakdown of Evaluation Participants ($N = 46$) |
+| **10** | SUS Item Response Analysis ($N = 46$) |
+| **11** | Usability vs. Learnability Subscale Breakdown |
+| **12** | SUS Score Distribution by Stakeholder Group |
 
 ---
 

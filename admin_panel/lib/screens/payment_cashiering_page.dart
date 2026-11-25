@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:printing/printing.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/receipt_pdf_generator.dart';
@@ -29,6 +30,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   final _searchController = TextEditingController();
   String _filterStatus = 'All';
   Timer? _pollingTimer;
+  StreamSubscription<String>? _realtimeSub;
   final Set<String> _sentOverduePaymentPenaltyNotifIds = {};
   final Set<String> _sentColdStoragePenaltyNotifIds = {};
   final Set<String> _sendingReceiptIds = {};
@@ -40,7 +42,13 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   void initState() {
     super.initState();
     _loadRequests();
-    // Auto-poll every 3 seconds so payments made on mobile reflect immediately
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      {'requests', 'payments', 'slaughter_inspection'},
+      () {
+        if (mounted) _loadRequests(silent: true);
+      },
+    );
+    // Safety fallback poll every 15s in case WebSocket temporarily sleeps
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       _loadRequests(silent: true);
     });
@@ -48,6 +56,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _pollingTimer?.cancel();
     _searchController.dispose();
     super.dispose();

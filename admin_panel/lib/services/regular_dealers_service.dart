@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'app_settings_service.dart';
 import 'audit_log_service.dart';
 
 class RegularDealer {
@@ -917,6 +918,8 @@ class RegularDealersService {
     required String category,
     String? phone,
   }) async {
+    await AppSettingsService.instance.ensureAdminAuthSession();
+
     final cleanCategory = category.toLowerCase().contains('market') ? 'market' : 'barangay';
     final cleanName = name.trim().toUpperCase();
     final cleanMarking = markings.trim().toUpperCase();
@@ -928,41 +931,60 @@ class RegularDealersService {
       throw Exception('Marking "$cleanMarking" is already assigned to ${existingMarking.name}.');
     }
 
-    final maxNumber = _dealers
+    // Query true max dealer_number directly from Supabase to avoid UNIQUE(category, dealer_number) conflicts
+    int maxNumber = _dealers
         .where((d) => d.category == cleanCategory)
         .fold<int>(0, (max, d) => d.dealerNumber > max ? d.dealerNumber : max);
-    final nextNumber = maxNumber + 1;
-
-    String? generatedId;
-    String createdAt = DateTime.now().toIso8601String();
-
-    // 1. Insert directly into public.regular_dealers table in Supabase
     try {
-      final insertData = <String, dynamic>{
-        'dealer_number': nextNumber,
-        'name': cleanName,
-        'markings': cleanMarking,
-        'category': cleanCategory,
-        'is_active': true,
-      };
-      if (cleanPhone != null && cleanPhone.isNotEmpty) {
-        insertData['phone'] = cleanPhone;
-      }
-
-      final res = await supabase.from('regular_dealers').insert(insertData).select().single();
-      if (res['id'] != null) {
-        generatedId = res['id'].toString();
-      }
-      if (res['created_at'] != null) {
-        createdAt = res['created_at'].toString();
+      final maxRow = await supabase
+          .from('regular_dealers')
+          .select('dealer_number')
+          .eq('category', cleanCategory)
+          .order('dealer_number', ascending: false)
+          .limit(1)
+          .maybeSingle();
+      final dbMax = (maxRow?['dealer_number'] as num?)?.toInt() ?? 0;
+      if (dbMax > maxNumber) {
+        maxNumber = dbMax;
       }
     } catch (e) {
-      debugPrint('Error inserting into regular_dealers table: $e');
+      debugPrint('Notice fetching max dealer_number from Supabase: $e');
     }
+    final nextNumber = maxNumber + 1;
+
+    // 1. Insert directly into public.regular_dealers table in Supabase (never swallow failures)
+    final insertData = <String, dynamic>{
+      'dealer_number': nextNumber,
+      'name': cleanName,
+      'markings': cleanMarking,
+      'category': cleanCategory,
+      'is_active': true,
+    };
+    if (cleanPhone != null && cleanPhone.isNotEmpty) {
+      insertData['phone'] = cleanPhone;
+    }
+
+    final Map<String, dynamic> res;
+    try {
+      final inserted = await supabase
+          .from('regular_dealers')
+          .insert(insertData)
+          .select()
+          .single();
+      res = Map<String, dynamic>.from(inserted);
+    } catch (e) {
+      debugPrint('Error inserting into regular_dealers table: $e');
+      throw Exception(
+        'Could not save dealer to Supabase database. Please ensure you are signed in as Admin/Staff and RLS migration is applied. ($e)',
+      );
+    }
+
+    final generatedId = res['id']?.toString();
+    final createdAt = res['created_at']?.toString() ?? DateTime.now().toIso8601String();
 
     final newDealer = RegularDealer(
       id: generatedId ?? 'dlr-${DateTime.now().millisecondsSinceEpoch}',
-      dealerNumber: nextNumber,
+      dealerNumber: (res['dealer_number'] as num?)?.toInt() ?? nextNumber,
       name: cleanName,
       markings: cleanMarking,
       category: cleanCategory,
@@ -986,6 +1008,8 @@ class RegularDealersService {
 
   /// Updates an existing dealer and propagates Admin marking/name changes to requests & profiles
   Future<void> updateDealer(RegularDealer updated) async {
+    await AppSettingsService.instance.ensureAdminAuthSession();
+
     final idx = _dealers.indexWhere((d) => d.id == updated.id);
     if (idx >= 0) {
       final previous = _dealers[idx];
@@ -994,18 +1018,8 @@ class RegularDealersService {
         markings: updated.markings.trim().toUpperCase(),
         phone: updated.phone?.trim(),
       );
-      _dealers[idx] = cleanUpdated;
-      await _saveLocalCache();
-      await _syncToSupabase();
-      AuditLogService.instance.log(
-        action: 'dealer_updated',
-        module: 'Meat Dealers',
-        targetId: cleanUpdated.id,
-        targetRef: cleanUpdated.markings,
-        details: {'name': cleanUpdated.name, 'category': cleanUpdated.category},
-      );
 
-      // Update public.regular_dealers table
+      // Update public.regular_dealers table first so DB failures are surfaced
       try {
         await supabase.from('regular_dealers').update({
           'name': cleanUpdated.name,
@@ -1016,7 +1030,19 @@ class RegularDealersService {
         }).eq('id', cleanUpdated.id);
       } catch (e) {
         debugPrint('Error updating regular_dealers table: $e');
+        throw Exception('Could not update dealer in Supabase database: $e');
       }
+
+      _dealers[idx] = cleanUpdated;
+      await _saveLocalCache();
+      await _syncToSupabase();
+      AuditLogService.instance.log(
+        action: 'dealer_updated',
+        module: 'Meat Dealers',
+        targetId: cleanUpdated.id,
+        targetRef: cleanUpdated.markings,
+        details: {'name': cleanUpdated.name, 'category': cleanUpdated.category},
+      );
 
       final newMark = cleanUpdated.markings;
       final uId = cleanUpdated.userId;
@@ -1045,6 +1071,8 @@ class RegularDealersService {
 
   /// Deletes a dealer from active roster, regular_dealers table, and cascade-cleans associated requests
   Future<void> deleteDealer(String id) async {
+    await AppSettingsService.instance.ensureAdminAuthSession();
+
     final target = _dealers.firstWhere(
       (d) => d.id == id,
       orElse: () => RegularDealer(

@@ -10,6 +10,9 @@ class AnimalLotItem {
   String origin;
   String sex; // '', 'Male', 'Female'
   double? liveWeight;
+  /// In-memory flag indicating the user manually edited this head's origin
+  /// so dropdown auto-sync will not overwrite it.
+  bool isOriginCustom;
 
   AnimalLotItem({
     required this.headNo,
@@ -18,6 +21,7 @@ class AnimalLotItem {
     this.origin = '',
     this.sex = '',
     this.liveWeight,
+    this.isOriginCustom = false,
   });
 
   factory AnimalLotItem.fromJson(Map<String, dynamic> json, int fallbackIndex) {
@@ -113,6 +117,45 @@ class AnimalsInLotEditor extends StatefulWidget {
 }
 
 class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
+  final List<TextEditingController> _originControllers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _syncOriginControllers();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnimalsInLotEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncOriginControllers();
+  }
+
+  void _syncOriginControllers() {
+    while (_originControllers.length < widget.items.length) {
+      final idx = _originControllers.length;
+      _originControllers.add(TextEditingController(text: widget.items[idx].origin));
+    }
+    while (_originControllers.length > widget.items.length) {
+      _originControllers.removeLast().dispose();
+    }
+    for (int i = 0; i < widget.items.length; i++) {
+      final desired = widget.items[i].origin;
+      if (_originControllers[i].text != desired) {
+        _originControllers[i].text = desired;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _originControllers) {
+      c.dispose();
+    }
+    _originControllers.clear();
+    super.dispose();
+  }
+
   Widget _buildReadOnlyDetail(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -159,6 +202,9 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
 
   void _removeHead(int index) {
     if (widget.items.length <= 1) return;
+    if (index >= 0 && index < _originControllers.length) {
+      _originControllers.removeAt(index).dispose();
+    }
     final next = List<AnimalLotItem>.from(widget.items)..removeAt(index);
     for (int i = 0; i < next.length; i++) {
       next[i].headNo = i + 1;
@@ -322,11 +368,16 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
                   children: [
                     Expanded(
                       child: TextFormField(
-                        initialValue: item.origin,
-                        onChanged: (v) => item.origin = v,
+                        controller: _originControllers[i],
+                        onChanged: (v) {
+                          item.origin = v;
+                          final trimmed = v.trim();
+                          item.isOriginCustom =
+                              trimmed.isNotEmpty && trimmed != widget.defaultOrigin.trim();
+                        },
                         decoration: InputDecoration(
                           labelText: 'Origin (Brgy/Mun)',
-                          hintText: 'Tabaco City',
+                          hintText: widget.defaultOrigin.isNotEmpty ? widget.defaultOrigin : 'Tabaco City',
                           isDense: true,
                           filled: true,
                           fillColor: Colors.white,

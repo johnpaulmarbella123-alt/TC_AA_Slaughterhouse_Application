@@ -19,6 +19,17 @@ function normalizePhPhone(raw: string): string {
   return digits;
 }
 
+function normalizePhPhoneForSemaphore(e164Phone: string): string {
+  const digits = e164Phone.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("639")) {
+    return `0${digits.substring(2)}`;
+  }
+  if (digits.length === 11 && digits.startsWith("09")) {
+    return digits;
+  }
+  return digits;
+}
+
 Deno.serve(async (req: Request) => {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
@@ -93,26 +104,105 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 4. Read TextBee credentials from Supabase secrets
-    const apiKey = Deno.env.get("TEXTBEE_API_KEY") || "";
-    const deviceId = Deno.env.get("TEXTBEE_DEVICE_ID") || "";
+    // 4. Determine SMS provider (Semaphore primary if configured, else TextBee fallback)
+    const forcedProvider = (Deno.env.get("SMS_PROVIDER") || "").trim().toLowerCase();
+    const semaphoreApiKey = (Deno.env.get("SEMAPHORE_API_KEY") || "").trim();
+    const rawSenderName = (Deno.env.get("SEMAPHORE_SENDER_NAME") || "").trim();
+    const textBeeApiKey = (Deno.env.get("TEXTBEE_API_KEY") || "").trim();
+    const textBeeDeviceId = (Deno.env.get("TEXTBEE_DEVICE_ID") || "").trim();
 
-    if (!apiKey || !deviceId) {
+    const useSemaphore =
+      forcedProvider === "semaphore" ||
+      (forcedProvider !== "textbee" && semaphoreApiKey.length > 0);
+
+    if (useSemaphore) {
+      if (!semaphoreApiKey) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Semaphore SMS is selected, but SEMAPHORE_API_KEY secret is missing in Supabase.",
+          }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (rawSenderName.length > 11) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: `SEMAPHORE_SENDER_NAME ("${rawSenderName}") exceeds the 11-character Philippine telco limit.`,
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const semaphoreNumber = normalizePhPhoneForSemaphore(recipient);
+      const semaphorePayload: Record<string, string> = {
+        apikey: semaphoreApiKey,
+        number: semaphoreNumber,
+        message,
+      };
+      if (rawSenderName.length > 0) {
+        semaphorePayload.sendername = rawSenderName;
+      }
+
+      const semRes = await fetch("https://api.semaphore.co/api/v4/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(semaphorePayload),
+      });
+
+      const semText = await semRes.text();
+      let semData: unknown = semText;
+      try {
+        semData = JSON.parse(semText);
+      } catch {
+        // keep raw text
+      }
+
+      if (!semRes.ok) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            provider: "semaphore",
+            error: `Semaphore API error (${semRes.status})`,
+            details: semData,
+          }),
+          { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          provider: "semaphore",
+          senderName: rawSenderName || "Semaphore",
+          recipient: semaphoreNumber,
+          providerResponse: semData,
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 5. Fallback: TextBee Gateway API
+    if (!textBeeApiKey || !textBeeDeviceId) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "TextBee SMS is not configured yet (set TEXTBEE_API_KEY and TEXTBEE_DEVICE_ID secrets in Supabase).",
+          error:
+            "SMS gateway is not configured yet (set SEMAPHORE_API_KEY or TEXTBEE_API_KEY + TEXTBEE_DEVICE_ID secrets in Supabase).",
         }),
         { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // 5. Call TextBee Gateway API
-    const textBeeUrl = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(deviceId)}/send-sms`;
+    const textBeeUrl = `https://api.textbee.dev/api/v1/gateway/devices/${encodeURIComponent(textBeeDeviceId)}/send-sms`;
     const tbRes = await fetch(textBeeUrl, {
       method: "POST",
       headers: {
-        "x-api-key": apiKey,
+        "x-api-key": textBeeApiKey,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -133,6 +223,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: false,
+          provider: "textbee",
           error: `TextBee API error (${tbRes.status})`,
           details: tbData,
         }),
@@ -143,6 +234,8 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
+        provider: "textbee",
+        senderName: "SIM",
         recipient,
         providerResponse: tbData,
       }),

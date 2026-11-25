@@ -1,20 +1,18 @@
 ---
-title: "Chapter 3 - Methodology"
+title: "Methods - Operation Management Application for AA Slaughterhouse of Tabaco City"
 category: "Capstone Manuscript"
-chapter: 3
-created: 2026-09-26
-last_updated: 2026-09-26
+format: "IMRaD"
+section: "METHODS"
+last_updated: 2026-11-25
 tags:
   - capstone
-  - chapter-3
-  - methodology
-  - research-design
-  - sus
+  - imrad
+  - methods
 ---
 
 # METHODS
 
-This chapter outlines the methodology employed by the researchers to plan, design, develop, deploy, and evaluate the proposed system. It details the software development life cycle model, data gathering techniques, primary data sources, and analytical tools utilized throughout the study.
+This section outlines the methodology employed by the researchers to plan, design, develop, deploy, and evaluate the proposed system. It details the software development life cycle model, data gathering techniques, primary data sources, technologies and development tools used, and analytical instruments utilized throughout the study.
 
 ---
 
@@ -53,6 +51,8 @@ Cutover Stage. The final phase of the methodology encompassed system deployment,
 
 ---
 
+---
+
 ## Data Gathering Techniques
 
 Techniques for the data gathering are the methods used by the researchers to collect information essential in answering the objective of the study. In these techniques, the researchers used survey questionnaires and interviews to collect information from the stakeholders and users of the system and conducted an interview. The researchers also conducted research using reliable online sources to collect additional information.
@@ -67,6 +67,8 @@ Document Analysis. Document analysis involves reviewing existing physical record
 
 ---
 
+---
+
 ## Sources of Data
 
 The data utilized in this study were divided into primary and secondary sources, gathered from the following key participants and references:
@@ -76,6 +78,34 @@ Tabaco City "AA" Slaughterhouse. Primary operational data were gathered directly
 Commercial Meat Dealers & Backyard Livestock Raisers. Primary client-side data were collected from commercial stallholders operating in the Tabaco City Public Market and local livestock raisers across Albay barangays. These participants provided direct insights regarding livestock transport practices, digital booking preferences, experiences with payment channels (Cash vs. GCash), and requirements for meat release gate passes.
 
 The Internet & Statutory Publications. The internet and government repositories served as essential secondary data sources. The researchers reviewed Republic Act No. 9296 (The Meat Inspection Code of the Philippines), Republic Act No. 10536, DA-NMIS administrative orders, Food and Agriculture Organization (FAO) biosecurity guidelines, World Health Organization (WHO) meat hygiene publications, and Bangko Sentral ng Pilipinas (BSP) digital payment reports to establish statutory compliance benchmarks for the proposed platform.
+
+---
+
+---
+
+## Technologies and Development Used
+
+The development of the **Operation Management Application for AA Slaughterhouse of Tabaco City** utilized a modern, cloud-native cross-platform technology stack selected for real-time reliability, strict relational data integrity, regulatory PDF accuracy, and zero-friction deployment across mobile and desktop environments.
+
+### Core Frameworks, Cloud Services, and Integrations
+
+| Category | Technology / Tool | Version / Tier | Operational Role in the System |
+| :--- | :--- | :--- | :--- |
+| **Mobile Client Framework** | Flutter SDK & Dart | Flutter 3.x / Dart 3.11+ | Compiles the native Android Customer Mobile Application (`TC_AA_Slaughterhouse_App.apk`) for remote bookings, permit uploads, live tracking, GCash checkout, and whistleblower reporting. |
+| **Admin Console Framework** | Flutter Web | Flutter 3.x (HTML/CanvasKit) | Powers the role-based Operations Console (`admin_panel`) for Admin, Receiving Clerk, Meat Inspector, and Cashier workflows. |
+| **Primary Database & BaaS** | Supabase Cloud (PostgreSQL) | PostgreSQL 15+ | Hosts all normalized relational tables (`requests`, `slaughter_inspection`, `payments`, `profiles`, `regular_dealers`, `staff_notifications`, `reports`, `audit_logs`, `nmic_transmissions`) with enforced Row-Level Security (RLS). |
+| **Authentication & Security** | Supabase GoTrue Auth + JWT | OAuth / JWT | Provides email/password authentication, persistent session recovery, and role-based access enforcement (`public.is_admin()`, `public.is_staff()`). |
+| **Real-Time Synchronization** | Supabase Realtime (WebSockets) | Postgres Changes (`supabase_realtime`) | Delivers sub-second live updates across Admin, Clerk, and Inspector consoles via the shared `AdminRealtimeHub` multiplexed channel. |
+| **Serverless Backend Logic** | Supabase Edge Functions (Deno) | Deno TypeScript Runtime | Executes server-side PayMongo checkout creation, cryptographic webhook verification (`paymongo-webhook`), and staff-authenticated Walk-In SMS dispatch (`send-walkin-sms`). |
+| **Digital Payment Gateway** | PayMongo API | REST API v1 (GCash / Maya) | Processes cashless municipal slaughter tariff payments with automated server-to-server webhook verification and official receipt generation. |
+| **Walk-In SMS Notification Gateway** | Semaphore SMS / TextBee Gateway | A2P REST API v4 / Android SIM | Dispatches manual walk-in SMS notifications for receiving, inspection, payment, and meat pickup using a registered Philippine Sender ID (`TCAASlaught`) with automatic fallback to the abattoir's TextBee Android gateway. |
+| **Statutory PDF & Receipt Engine** | `pdf` & `printing` + Local Unicode TTFs | Dart PDF + `Segoe UI` / `Consolas` | Generates 80mm official receipts (including Cash Tendered & Change Due), Condemnation Slips (`CS-YYYY-####`), and legal-size (8.5" × 14") NMIS Daily Production Reports with full `₱` (`U+20B1`) glyph fidelity. |
+| **Cloud Web Hosting & Distribution** | Vercel Cloud & GitHub Releases | Edge CDN | Hosts the Admin Operations Console (`web-ten-sooty-86.vercel.app`) and the dedicated Customer APK Download Portal (`tabaco-abattoir-app.vercel.app`). |
+| **Address & Geo-Directory API** | PSGC Cloud API + Albay Bundled Cache | REST JSON | Provides authoritative Province, City/Municipality, and Barangay dropdowns across Albay with instant offline fallback for Tabaco City barangays. |
+| **Development & Version Control** | Visual Studio Code, Android Studio, Git & GitHub | Latest Stable | Used for monorepo source control (`admin_panel/`, `mobile_app/`, `apk_landing/`, `supabase/`), static analysis (`flutter analyze`), and release builds. |
+| **UI/UX Prototyping** | Figma | Web Workspace | Used during RAD User Design workshops to validate wet-floor ergonomics, role dashboards, and modal workflows with abattoir personnel. |
+
+Table 2. Technologies and Development Tools Used
 
 ---
 

@@ -1,23 +1,16 @@
 ---
-title: "Results - Capstone Manuscript"
+title: "Results - Operation Management Application for AA Slaughterhouse of Tabaco City"
 category: "Capstone Manuscript"
-chapter: 4
-created: 2026-09-26
-last_updated: 2026-10-22
+format: "IMRaD"
+section: "RESULTS"
+last_updated: 2026-11-25
 tags:
   - capstone
+  - imrad
   - results
-  - system-design
-  - architecture
-  - evaluation
-  - sus
 ---
 
 # RESULTS
-
-This chapter presents the completed architectural implementation, functional modules, physical topology, database schemas, and psychometric evaluation of the live Operation Management Application for AA Slaughterhouse of Tabaco City deployed on Supabase and Vercel.
-
----
 
 ## Information Requirements
 
@@ -77,6 +70,8 @@ The Municipal Tariff & Billing Requirements category encompasses the dynamic fee
 | Ante-Mortem Inspection Fee (₱40.00) | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) & Printable PDF | Customer Feedback Ratings (1–5★) & Comments (`reviews`) |
 | Post-Mortem Rate (₱5.00 × Carcass Weight kg) | Total Fee, Balance (`0.00` when settled) & Cashier Audit Record | Illegal Slaughter Report Details, Location, Photo Evidence & Case Status (`reports`) |
 | Delivery Van Fee (₱60.00, Market) & Cold Storage Fee (₱150.00) | Automated Customer Receipt & Staff Bell Notifications | Legal-Size NMIS Daily Production PDF & Resend Email Transmittal Log (`nmic_transmissions`) |
+
+---
 
 ---
 
@@ -158,6 +153,19 @@ Figure 17. Meat Releasing & Dispatch Confirmation Console
 Figure 18 shows the **Illegal Slaughter Whistleblower Reporting & Investigation Console**, providing a citizen reporting channel with anonymous toggling, GPS geolocation capture, and photo evidence upload, paired with an administrative case investigation dashboard.
 
 Figure 18. Illegal Slaughter Whistleblower Reporting & Investigation Console
+
+---
+
+### Recent Production Enhancements Implemented
+
+In response to operational field testing and stakeholder validation at the Tabaco City "AA" Slaughterhouse, the following production modules were integrated into the final deployed system:
+
+1. **Mandatory Meat Dealers Directory Enforcement & Per-Head Origin Synchronization**: Before any walk-in slaughter request can be saved in the Receiving Console, the system verifies that the dealer is registered in the authoritative `public.regular_dealers` directory (offering an inline **Register Walk-In Meat Dealer** modal that persists immediately to Supabase with collision-free `dealer_number` assignment). Per-head `Origin (Brgy/Mun)` fields automatically synchronize live with the selected City/Municipality and Barangay while remaining individually editable per head.
+2. **Structured Condemnation Slip Generation (`CS-YYYY-####`)**: Inside Slaughter & Inspection, inspectors can toggle a checkbox-gated **Record Condemnation Slip** card to log Partial or Whole Condemnation, condemned organ/part, condemned weight (kg), and veterinary pathology reason, generating an auditable condemnation slip directly linked to the lot.
+3. **Cash Tendered & Auto-Calculated Change Due**: The Payment & Cashiering console captures exact `amount_tendered` and auto-calculates `change_amount` (with quick-amount chips and insufficient-cash validation) for both walk-in cash settlements and Cash-on-Pickup verifications, printing both values on official PDF receipts and mobile customer receipts.
+4. **Manual Walk-In Customer SMS Notifications**: Staff can trigger stage-specific SMS notifications (Receiving, Inspection, Payment, and Meat Pickup Ready) with inline loading (`Sending...`) and confirmation (`Sent ✓`) states through the `send-walkin-sms` Supabase Edge Function supporting Semaphore (`TCAASlaught`) and TextBee.
+5. **Full Real-Time Transaction Synchronization (`AdminRealtimeHub`)**: All Admin, Clerk, and Inspector screens—Dashboard, Receiving, Document Verification, Slaughter & Inspection, Cashiering, Meat Releasing, Reports & Records, and the Staff Notification Bell—receive instant (<1s) Postgres Realtime updates via a single auto-reconnecting WebSocket channel.
+6. **Branded Mobile Startup, Offline Connectivity Guard, and Web APK Portal**: The Android mobile application displays a branded City of Tabaco seal splash loader and a zero-plugin `NoInternetOverlay` with automatic recovery when connectivity drops, distributed via a dedicated mobile-friendly web portal (`https://tabaco-abattoir-app.vercel.app`).
 
 ---
 
@@ -698,6 +706,8 @@ Figure 24. Package Diagram
 
 ---
 
+---
+
 ## Physical Design
 
 ### Software Design Pattern
@@ -828,6 +838,30 @@ Figure 27. Deployment Diagram
 
 ---
 
+---
+
+## System Implementation
+
+The system was implemented using a phased, cloud-first deployment strategy designed to minimize infrastructure overhead for the Local Government Unit of Tabaco City while maintaining high availability, strict role-based security, and zero-downtime updates.
+
+### 1. Cloud Backend & Database Deployment (Supabase)
+All relational schemas, triggers, and security policies were deployed to the production Supabase Cloud project (`jacgcceaxblwgdxaeaqk`) running PostgreSQL 15+. Deployment was executed through versioned SQL migrations (`supabase/migrations/`) covering:
+- Core operational tables (`requests`, `slaughter_inspection`, `payments`, `profiles`, `regular_dealers`, `reports`, `notifications`, `staff_notifications`, `nmic_transmissions`, `audit_logs`, and `system_settings`).
+- Hardened Row-Level Security (RLS) policies utilizing `SECURITY DEFINER` helper functions (`public.is_admin()` and `public.is_staff()`) to ensure customers can access only their own records while authorized Admin, Clerk, Inspector, and Cashier personnel can execute their designated workflows.
+- Supabase Realtime publication (`supabase_realtime`) with `REPLICA IDENTITY FULL` enabled on `requests`, `payments`, and `slaughter_inspection` for sub-second cross-station synchronization.
+- Serverless Deno Edge Functions deployed to Supabase Edge Runtime for PayMongo checkout/webhook processing and JWT-authenticated Walk-In SMS notifications (`send-walkin-sms`), with all API keys stored strictly in encrypted Supabase Function Secrets.
+
+### 2. Administrative Operations Console Deployment (Vercel Web)
+The Flutter Web Admin Operations Console (`admin_panel`) was compiled with bundled Unicode TrueType fonts (`assets/fonts/segoeui*.ttf` and `consola*.ttf`) for accurate `₱` PDF rendering and deployed to Vercel's global Edge CDN (`https://web-ten-sooty-86.vercel.app`). Role-based routing automatically adapts the workspace layout upon sign-in for Admin, Receiving Clerk, Meat Inspector, and Cashier accounts.
+
+### 3. Customer Mobile Application Packaging & Distribution
+The Flutter Android Customer Portal (`mobile_app`) was compiled into a signed release APK (`TC_AA_Slaughterhouse_App.apk`) and published via GitHub Releases, paired with a dedicated, lightweight static landing page (`apk_landing/`) hosted on Vercel at `https://tabaco-abattoir-app.vercel.app`. Meat dealers and backyard livestock raisers scan a QR code or open the link from Messenger/Chrome to download and install the application directly without Play Store delays.
+
+### 4. Operational Cutover & Stakeholder Onboarding
+Prior to full cutover, the researchers conducted hands-on orientation sessions with Tabaco City Slaughterhouse personnel covering: (a) walk-in dealer registration in the Meat Dealers Directory, (b) permit verification and ear-tag assignment, (c) tablet-based ante-mortem/post-mortem logging and Condemnation Slip issuance, (d) Cash Tendered/Change Due cashiering and PayMongo GCash reconciliation, and (e) one-click legal-size NMIS PDF report generation.
+
+---
+
 ## Recommended Hardware and Software Requirements
 
 The client-side functions as a flexible, accessible mobile interface designed for broad compatibility, allowing backyard farmers and commercial meat dealers to engage with the slaughterhouse from any location. It requires standard modern smartphone operating systems and stable internet connectivity, enabling users to operate on Android and iOS devices. This setup supports the necessary payment integrations—specifically GCash via the PayMongo payment gateway—to ensure a seamless, convenient booking and payment experience without requiring specialized hardware.
@@ -902,6 +936,43 @@ At the physical abattoir facility, frontline administrative and inspection works
 | Display                                   | 1280 × 720 resolution (HD) or higher                                                                                                                                                                                                                                                                                                                                                                           |
 | Camera                                    | 8 MP or higher rear camera with autofocus for permit scanning                                                                                                                                                                                                                                                                                                                                                  |
 | Network Connection                        | Stable 4G LTE / 5G mobile data or Wi-Fi connection                                                                                                                                                                                                                                                                                                                                                             |
+
+---
+
+---
+
+## System Testing
+
+Comprehensive software verification and validation were conducted prior to stakeholder acceptance evaluation to confirm functional accuracy, database security, real-time synchronization, and cross-platform stability.
+
+### Testing Strategy
+1. **Static Code Analysis & Build Verification**: Both `admin_panel` and `mobile_app` were continuously validated using `flutter analyze --no-fatal-infos --no-fatal-warnings`, achieving **0 errors and 0 warnings**, alongside clean production web (`flutter build web`) and Android release APK (`flutter build apk --release`) builds.
+2. **Functional & End-to-End Integration Testing**: Every stage of the slaughterhouse lifecycle—from customer mobile booking and permit upload through receiving triage, document verification, ante-mortem/post-mortem inspection, billing/PayMongo checkout, meat releasing, and NMIS PDF export—was verified end-to-end against the live Supabase Cloud backend.
+3. **Security & Role-Based Access Control (RLS) Testing**: Unauthorized cross-user reads, anonymous writes to `payments` or `regular_dealers`, and unauthenticated Edge Function invocations were tested to verify HTTP 401/403 rejections and Postgres RLS enforcement.
+4. **Real-Time & Connectivity Resilience Testing**: Multi-browser/mobile concurrency tests verified sub-second delivery of new requests and payment status updates across Admin and Clerk consoles via `AdminRealtimeHub`, as well as offline detection and automatic recovery via the mobile `NoInternetOverlay`.
+
+### System Testing and Verification Matrix
+
+| Test ID | Module | Test Scenario | Expected Result | Status |
+| :---: | :--- | :--- | :--- | :---: |
+| **TC-01** | Authentication & RBAC | Sign in with Admin, Clerk, Inspector, and Customer credentials | Each role routes exclusively to permitted views; unauthorized routes blocked | **Passed** |
+| **TC-02** | Mobile Booking | Submit Barangay & Market slaughter request with per-head details and permits | Row persisted in `requests`, permits uploaded to Storage, status set to `pending_intake` | **Passed** |
+| **TC-03** | Real-Time Sync | Submit mobile request while Admin & Clerk consoles are open without refreshing | New request appears automatically in Receiving & Dashboard within ~1 second | **Passed** |
+| **TC-04** | Meat Dealers Directory | Attempt walk-in entry for unregistered dealer, then register via inline modal | Save blocked until registered; registration persists to `public.regular_dealers` and unlocks Save | **Passed** |
+| **TC-05** | Per-Head Origin Sync | Select `City of Legazpi` and `Bgy. 4 - Sagpon Pob.` in New Receiving Entry | Unedited heads auto-update to `Bgy. 4 - Sagpon Pob., City of Legazpi`; custom head edits preserved | **Passed** |
+| **TC-06** | Document Verification | Approve/reject uploaded VHC and Livestock Shipping Permit | Status transitions to `doc_verified` or `rejected` with instant customer notification | **Passed** |
+| **TC-07** | Ante-Mortem Inspection | Mark lot as Passed vs. Failed/Suspect | Passed advances to slaughter floor; Failed locks lot out and alerts customer/management | **Passed** |
+| **TC-08** | Post-Mortem & Condemnation | Toggle Record Condemnation Slip, enter condemned part/weight/reason | Generates `CS-YYYY-####` Condemnation Slip and persists pathology details to `slaughter_inspection` | **Passed** |
+| **TC-09** | Cashiering (Cash) | Enter Cash Tendered less than vs. greater than Total Due | Insufficient cash blocked; valid cash computes exact Change Due and saves `amount_tendered`/`change_amount` | **Passed** |
+| **TC-10** | Cashiering (PayMongo) | Complete GCash checkout via PayMongo hosted link | `paymongo-webhook` verifies signature, marks request `paid`, and updates Cashiering in real time | **Passed** |
+| **TC-11** | PDF Receipt & NMIC Reports | Print Official Receipt and legal-size (8.5" × 14") NMIS Production Report | Renders cleanly with crisp `₱` currency glyphs (zero black boxes) and accurate totals | **Passed** |
+| **TC-12** | Meat Pickup Authorization | View mobile receipt before vs. after Admin sends "Ready for Collection" notice | Pickup Authorization card remains hidden until notice is sent, then hides again once `released` | **Passed** |
+| **TC-13** | Walk-In SMS Dispatch | Trigger manual Walk-In SMS from Cashiering and Releasing | Edge Function authenticates staff JWT, dispatches SMS via Semaphore/TextBee, button updates to `Sent ✓` | **Passed** |
+| **TC-14** | Illegal Slaughter Reporting | Submit geotagged report with photo from Mobile App | Appears in Admin Reports & Records alert badge and Whistleblower Console | **Passed** |
+| **TC-15** | Offline / Connectivity Guard | Disable mobile data/Wi-Fi while using Mobile App, then reconnect | Displays full-screen `NoInternetOverlay` and automatically dismisses upon reconnection | **Passed** |
+| **TC-16** | APK Download Portal | Open `https://tabaco-abattoir-app.vercel.app` from Android Chrome & Messenger | Returns HTTP 200 and downloads `TC_AA_Slaughterhouse_App.apk` cleanly | **Passed** |
+
+Table 8. System Testing and Verification Matrix (Functional, Security, Real-Time, and Integration)
 
 ---
 

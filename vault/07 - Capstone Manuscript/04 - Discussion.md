@@ -1,18 +1,24 @@
 ---
-title: "Discussion - Capstone Manuscript"
+title: "Discussion - Operation Management Application for AA Slaughterhouse of Tabaco City"
 category: "Capstone Manuscript"
-chapter: 5
-created: 2026-09-26
-last_updated: 2026-10-22
+format: "IMRaD"
+section: "DISCUSSION"
+last_updated: 2026-11-25
 tags:
   - capstone
+  - imrad
   - discussion
-  - findings
-  - conclusions
-  - recommendations
 ---
 
 # DISCUSSION
+
+## Summary
+
+This capstone study designed, developed, deployed, and evaluated the **Operation Management Application for AA Slaughterhouse of Tabaco City** to modernize the paper-bound operational workflows of the municipal abattoir located in Zone 5 San Carlos, Tabaco City, Albay. Guided by the Rapid Application Development (RAD) methodology, the researchers conducted stakeholder interviews, on-site operational observations, and statutory document analysis under Republic Act No. 9296 (The Meat Inspection Code of the Philippines) and Republic Act No. 10536 to establish comprehensive information requirements across livestock intake, veterinary inspection, municipal cashiering, meat releasing, and regulatory reporting.
+
+The resulting cloud-native platform integrates a cross-platform Flutter Android Customer Mobile Application (`mobile_app`), a role-based Flutter Web Administrative Operations Console (`admin_panel`) deployed on Vercel, a dedicated Android APK distribution portal (`tabaco-abattoir-app.vercel.app`), and a Supabase Cloud PostgreSQL 15+ backend fortified with Row-Level Security (RLS), sub-second Postgres Realtime synchronization (`AdminRealtimeHub`), PayMongo GCash checkout webhooks, serverless Walk-In SMS notifications (`send-walkin-sms`), and Unicode-compliant NMIS legal PDF reporting. Following rigorous functional, security, and real-time verification across 16 end-to-end test scenarios (100% pass rate), the system was evaluated by a purposive sample of $N = 46$ stakeholders—comprising slaughterhouse management, veterinary meat inspectors, operations clerks/cashiers, abattoir butchers, and commercial meat dealers—using the standardized System Usability Scale (SUS), achieving an overall composite score of **86.60 / 100 (Grade A+, "Excellent")**.
+
+---
 
 ## Findings
 
@@ -85,7 +91,7 @@ Based on the empirical findings, architectural implementation, and operational e
 
 ---
 
-## Areas for Further Studies
+### Areas for Further Studies
 
 To build upon the foundations established by this capstone research, future researchers and software developers may explore the following technical extensions:
 

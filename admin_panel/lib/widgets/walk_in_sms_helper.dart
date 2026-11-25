@@ -122,6 +122,7 @@ class WalkInSmsHelper {
     );
 
     bool isSending = false;
+    bool isSent = false;
 
     await showDialog<void>(
       context: context,
@@ -288,7 +289,7 @@ class WalkInSmsHelper {
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton.icon(
-                      onPressed: isSending
+                      onPressed: (isSending || isSent)
                           ? null
                           : () async {
                               setDialogState(() => isSending = true);
@@ -301,16 +302,16 @@ class WalkInSmsHelper {
                                 requestId: requestId,
                               );
                               if (ctx.mounted) {
-                                setDialogState(() => isSending = false);
-                                if (result.success) Navigator.pop(ctx);
+                                setDialogState(() {
+                                  isSending = false;
+                                  if (result.success) isSent = true;
+                                });
                               }
-                              if (context.mounted) {
+                              if (!result.success && context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
                                     content: Text(result.message),
-                                    backgroundColor: result.success
-                                        ? const Color(0xFF0F5132)
-                                        : Colors.redAccent,
+                                    backgroundColor: Colors.redAccent,
                                   ),
                                 );
                               }
@@ -321,10 +322,17 @@ class WalkInSmsHelper {
                               height: 14,
                               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                             )
-                          : const Icon(Icons.send_rounded, size: 16),
-                      label: Text(isSending ? 'Sending...' : 'Send SMS Now'),
+                          : Icon(
+                              isSent ? Icons.check_circle_outline : Icons.send_rounded,
+                              size: 16,
+                            ),
+                      label: Text(isSending ? 'Sending...' : (isSent ? 'Sent \u2713' : 'Send SMS Now')),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F5132),
+                        backgroundColor: isSent ? const Color(0xFF15803D) : const Color(0xFF0F5132),
+                        disabledBackgroundColor: isSent
+                            ? const Color(0xFF15803D)
+                            : const Color(0xFF0F5132).withValues(alpha: 0.7),
+                        disabledForegroundColor: Colors.white,
                         foregroundColor: Colors.white,
                       ),
                     ),

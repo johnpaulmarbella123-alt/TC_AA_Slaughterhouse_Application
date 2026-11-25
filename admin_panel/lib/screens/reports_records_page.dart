@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'illegal_slaughter_reports_view.dart';
 import 'audit_logs_tab.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/csv_export_helper.dart';
 import '../services/report_pdf_generator.dart';
 import '../services/regular_dealers_service.dart';
@@ -43,6 +44,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
   // Real-time alert polling state for Illegal Slaughter Reports
   Timer? _alertTimer;
+  StreamSubscription<String>? _realtimeSub;
   int _unreviewedIllegalReports = 0;
   Map<String, dynamic>? _latestIllegalReport;
 
@@ -68,6 +70,18 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         if (mounted) setState(() => _nmicTransmissionsList = list);
       });
     });
+    _realtimeSub = AdminRealtimeHub.instance.stream.listen((table) {
+      if (!mounted) return;
+      if (table == 'requests' || table == 'payments' || table == 'slaughter_inspection') {
+        _loadData(silent: true);
+      } else if (table == 'regular_dealers') {
+        RegularDealersService.instance.reload().then((_) {
+          if (mounted) setState(() {});
+        });
+      } else if (table == 'reports') {
+        _loadIllegalReportAlerts();
+      }
+    });
     _alertTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       _loadIllegalReportAlerts();
     });
@@ -85,6 +99,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _alertTimer?.cancel();
     super.dispose();
   }
@@ -188,8 +203,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   // ════════════════════════════════════════════
   //  LOAD DATA (ALL REQUESTS ENRICHED)
   // ════════════════════════════════════════════
-  Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+  Future<void> _loadData({bool silent = false}) async {
+    if (!silent && mounted) setState(() => _isLoading = true);
     try {
       final data = await supabase
           .from('requests')

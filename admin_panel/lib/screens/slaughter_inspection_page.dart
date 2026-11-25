@@ -10,8 +10,8 @@ import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
-import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/animals_in_lot_editor.dart';
@@ -32,14 +32,22 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   final TextEditingController _searchController = TextEditingController();
   String _filterStage = 'All';
   Timer? _pollingTimer;
-  RealtimeChannel? _realtimeChannel;
+  StreamSubscription<String>? _realtimeSub;
   final Set<String> _shownAnteMortemAlertIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
-    _subscribeRealtime();
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      {'requests', 'slaughter_inspection'},
+      () {
+        if (mounted) {
+          _loadRequests(silent: true);
+          _checkAnteMortemAlerts();
+        }
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAnteMortemAlerts();
     });
@@ -51,37 +59,10 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     });
   }
 
-  void _subscribeRealtime() {
-    try {
-      _realtimeChannel = supabase.channel('public:slaughter_inspection_realtime')
-        ..onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'requests',
-          callback: (payload) {
-            if (mounted) _loadRequests(silent: true);
-          },
-        )
-        ..onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'slaughter_inspection',
-          callback: (payload) {
-            if (mounted) _loadRequests(silent: true);
-          },
-        )
-        ..subscribe();
-    } catch (e) {
-      debugPrint('Realtime subscription error in SlaughterInspection: $e');
-    }
-  }
-
   @override
   void dispose() {
     _pollingTimer?.cancel();
-    if (_realtimeChannel != null) {
-      supabase.removeChannel(_realtimeChannel!);
-    }
+    _realtimeSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -2776,27 +2757,6 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
           referenceNo: staffRefNo,
           dedupKey: 'req_${reqId}_ready_for_payment',
         );
-
-        // Auto-send TextBee SMS to walk-in customer when billing is ready
-        final walkInPhone = (widget.request['contact_number'] ?? '').toString().trim();
-        if (!isImmediateSlaughterWalkIn && walkInPhone.isNotEmpty) {
-          final smsText = WalkInSmsHelper.buildDefaultMessage(
-            stage: 'payment',
-            refNo: staffRefNo,
-            customerName: staffCustLabel,
-            marking: (widget.request['marking'] ?? '').toString(),
-            livestockType: (widget.request['livestock_type'] ?? '').toString(),
-            animalCount: isPartialBatch ? passedCount : _totalHeads,
-          );
-          await WalkInSmsService.sendSms(
-            phone: walkInPhone,
-            message: smsText,
-            stage: 'payment',
-            refNo: staffRefNo,
-            customerName: staffCustLabel,
-            requestId: reqId.toString(),
-          );
-        }
       } else if (newStatus == 'anti_mortem_failed' ||
           newStatus == 'post_mortem_failed' ||
           newStatus == 'condemned' ||

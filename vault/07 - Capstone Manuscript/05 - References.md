@@ -1,3 +1,5 @@
+# REFERENCES
+
 ---
 title: "References - Capstone Manuscript"
 category: "Capstone Manuscript"

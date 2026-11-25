@@ -9,6 +9,7 @@ import '../services/document_upload_helper.dart';
 import '../services/notification_service.dart';
 import '../services/staff_notification_service.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../widgets/staff_notification_bell.dart';
@@ -30,43 +31,29 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
   final ScrollController _barangayScrollCtrl = ScrollController();
   final ScrollController _marketScrollCtrl = ScrollController();
   final TextEditingController _searchController = TextEditingController();
-  RealtimeChannel? _realtimeChannel;
+  StreamSubscription<String>? _realtimeSub;
   Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadRequests();
-    _subscribeRealtime();
-    // Auto-poll every 3 seconds so approved requests appear automatically
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      {'requests'},
+      () {
+        if (mounted) _loadRequests(silent: true);
+      },
+    );
+    // Safety fallback poll every 15s in case WebSocket temporarily sleeps
     _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) _loadRequests(silent: true);
     });
   }
 
-  void _subscribeRealtime() {
-    try {
-      _realtimeChannel = supabase.channel('public:doc_verification_realtime')
-        ..onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'requests',
-          callback: (payload) {
-            if (mounted) _loadRequests(silent: true);
-          },
-        )
-        ..subscribe();
-    } catch (e) {
-      debugPrint('Realtime subscription error in DocVerification: $e');
-    }
-  }
-
   @override
   void dispose() {
     _pollingTimer?.cancel();
-    if (_realtimeChannel != null) {
-      supabase.removeChannel(_realtimeChannel!);
-    }
+    _realtimeSub?.cancel();
     _barangayScrollCtrl.dispose();
     _marketScrollCtrl.dispose();
     _searchController.dispose();

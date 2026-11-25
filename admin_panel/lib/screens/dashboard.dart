@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_settings_service.dart';
+import '../services/admin_realtime_hub.dart';
 import '../widgets/staff_notification_bell.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -85,11 +86,21 @@ class _DashboardPageState extends State<DashboardPage> {
   final TextEditingController _searchCtrl = TextEditingController();
 
   final Set<String> _shownAnteMortemAlertIds = {};
+  StreamSubscription<String>? _realtimeSub;
 
   @override
   void initState() {
     super.initState();
     _loadAllDashboardData();
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      {'requests', 'payments', 'slaughter_inspection', 'reports'},
+      () {
+        if (mounted) {
+          _loadAllDashboardData(silent: true);
+          _checkAnteMortemAlerts();
+        }
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAnteMortemAlerts();
     });
@@ -315,6 +326,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _refreshTimer?.cancel();
     _clockTimer?.cancel();
     _searchCtrl.dispose();
