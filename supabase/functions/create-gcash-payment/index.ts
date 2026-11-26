@@ -2,6 +2,18 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.8";
 
 const PAYMONGO_API = "https://api.paymongo.com/v1";
+const XENDIT_API = "https://api.xendit.co/v2";
+
+function mapXenditChannel(channel: string, method: string): string {
+  const s = `${channel} ${method}`.toLowerCase();
+  if (s.includes("gcash")) return "GCash";
+  if (s.includes("maya") || s.includes("paymaya")) return "Maya";
+  if (s.includes("grab")) return "GrabPay";
+  if (s.includes("shopee")) return "ShopeePay";
+  if (s.includes("qrph") || s.includes("qr_ph") || s.includes("qr")) return "QR Ph";
+  if (s.includes("card") || s.includes("visa") || s.includes("master")) return "Card";
+  return "Online Payment";
+}
 
 Deno.serve(async (req: Request) => {
   const corsHeaders = {
@@ -19,7 +31,8 @@ Deno.serve(async (req: Request) => {
     // ─── 1. Authenticate Caller via Supabase JWT ───
     const authHeader = req.headers.get("Authorization");
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
+    const supabaseServiceKey =
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     let user: any = null;
@@ -29,17 +42,16 @@ Deno.serve(async (req: Request) => {
       user = userData?.user;
     }
 
-    const secretKey = Deno.env.get("PAYMONGO_SECRET_KEY");
-    if (!secretKey) {
-      return new Response(
-        JSON.stringify({ error: "PayMongo secret key not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // ─── 2. Determine Active Payment Gateway via Env Vars ───
+    const gatewayEnv = (Deno.env.get("PAYMENT_GATEWAY") || "").trim().toLowerCase();
+    const xenditSecretKey = (Deno.env.get("XENDIT_SECRET_KEY") || "").trim();
+    const paymongoSecretKey = (Deno.env.get("PAYMONGO_SECRET_KEY") || "").trim();
 
-    const paymongoAuthHeader = "Basic " + btoa(secretKey + ":");
+    const useXendit =
+      gatewayEnv === "xendit" ||
+      (gatewayEnv !== "paymongo" && xenditSecretKey.length > 0);
 
-    // Helper function to check status of a checkout session or payment link
+    // ─── Helper: Check status for either Xendit or PayMongo ───
     async function checkStatus(linkId: string, reqIdParam: string | number | null) {
       if (!linkId && reqIdParam) {
         const { data: pRec } = await supabase
@@ -56,12 +68,99 @@ Deno.serve(async (req: Request) => {
         return new Response(
           JSON.stringify({
             status: "not_found",
-            message: "No PayMongo checkout session or link found for this request. Please verify the customer's payment reference directly in your PayMongo merchant portal, then click Verify & Confirm below.",
+            message:
+              "No online checkout session found for this request. Please verify the customer's payment reference directly in your merchant portal, then click Verify & Confirm below.",
           }),
           { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
+      const isXenditRef =
+        linkId.startsWith("xnd_") ||
+        (useXendit && !linkId.startsWith("cs_") && !linkId.startsWith("link_"));
+
+      // ─── XENDIT STATUS CHECK ───
+      if (isXenditRef) {
+        if (!xenditSecretKey) {
+          return new Response(
+            JSON.stringify({ error: "XENDIT_SECRET_KEY secret is not configured in Supabase" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const rawInvoiceId = linkId.startsWith("xnd_") ? linkId.slice(4) : linkId;
+        const xenditRes = await fetch(`${XENDIT_API}/invoices/${encodeURIComponent(rawInvoiceId)}`, {
+          method: "GET",
+          headers: {
+            Authorization: "Basic " + btoa(xenditSecretKey + ":"),
+          },
+        });
+
+        const xenditData = await xenditRes.json();
+        if (!xenditRes.ok) {
+          return new Response(
+            JSON.stringify({
+              error: "Failed to check payment status",
+              details: xenditData?.message || "Unknown Xendit error",
+            }),
+            { status: xenditRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const rawStatus = String(xenditData?.status || "").toUpperCase();
+        const resolvedStatus =
+          rawStatus === "PAID" || rawStatus === "SETTLED"
+            ? "paid"
+            : rawStatus === "EXPIRED"
+              ? "archived"
+              : "unpaid";
+
+        const detectedMethod = mapXenditChannel(
+          String(xenditData?.payment_channel || ""),
+          String(xenditData?.payment_method || "")
+        );
+
+        if (resolvedStatus === "paid") {
+          const extMatch = String(xenditData?.external_id || "").match(/tcaa-req-(\d+)/);
+          const reqId =
+            (extMatch && extMatch[1] ? Number(extMatch[1]) : null) ||
+            (reqIdParam ? Number(reqIdParam) : null);
+
+          if (reqId) {
+            try {
+              await supabase
+                .from("payments")
+                .update({
+                  payment_method: detectedMethod,
+                  transaction_ref: linkId,
+                })
+                .eq("request_id", reqId);
+            } catch (dbErr) {
+              console.error("Record Xendit transaction ref error:", dbErr);
+            }
+          }
+        }
+
+        return new Response(
+          JSON.stringify({
+            link_id: linkId,
+            status: resolvedStatus,
+            detected_method: detectedMethod,
+            payments: resolvedStatus === "paid" ? [xenditData] : [],
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // ─── PAYMONGO STATUS CHECK (Fallback) ───
+      if (!paymongoSecretKey) {
+        return new Response(
+          JSON.stringify({ error: "PayMongo secret key not configured" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const paymongoAuthHeader = "Basic " + btoa(paymongoSecretKey + ":");
       const isCheckoutSession = linkId.startsWith("cs_");
       const endpoint = isCheckoutSession
         ? `${PAYMONGO_API}/checkout_sessions/${linkId}`
@@ -93,20 +192,25 @@ Deno.serve(async (req: Request) => {
       const remarks = (attr.remarks || "") as string;
       const metadata = attr.metadata || {};
 
-      const hasPaidItem = Array.isArray(payments) && payments.some((p: Record<string, unknown>) => {
-        const directStatus = p?.status;
-        const attrStatus = (p?.attributes as Record<string, unknown>)?.status;
-        const dataAttrStatus = ((p?.data as Record<string, unknown>)?.attributes as Record<string, unknown>)?.status;
-        return [directStatus, attrStatus, dataAttrStatus].some(
-          (s) => String(s || "").toLowerCase() === "paid"
-        );
-      });
+      const hasPaidItem =
+        Array.isArray(payments) &&
+        payments.some((p: Record<string, unknown>) => {
+          const directStatus = p?.status;
+          const attrStatus = (p?.attributes as Record<string, unknown>)?.status;
+          const dataAttrStatus = (
+            (p?.data as Record<string, unknown>)?.attributes as Record<string, unknown>
+          )?.status;
+          return [directStatus, attrStatus, dataAttrStatus].some(
+            (s) => String(s || "").toLowerCase() === "paid"
+          );
+        });
 
       const isSucceeded = String(paymentIntentStatus || "").toLowerCase() === "succeeded";
 
-      const resolvedStatus = (String(status || "").toLowerCase() === "paid" || hasPaidItem || isSucceeded)
-        ? "paid"
-        : status;
+      const resolvedStatus =
+        String(status || "").toLowerCase() === "paid" || hasPaidItem || isSucceeded
+          ? "paid"
+          : status;
 
       let detectedMethod = "Online Payment";
       if (Array.isArray(payments) && payments.length > 0) {
@@ -134,11 +238,13 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Record transaction reference and detected payment method, but require clerk verification
       if (resolvedStatus === "paid") {
         const reqIdFromMeta = metadata.request_id ? Number(metadata.request_id) : null;
         const reqMatch = remarks.match(/request_id:(\d+)/);
-        const reqId = reqIdFromMeta || (reqMatch && reqMatch[1] ? Number(reqMatch[1]) : null) || (reqIdParam ? Number(reqIdParam) : null);
+        const reqId =
+          reqIdFromMeta ||
+          (reqMatch && reqMatch[1] ? Number(reqMatch[1]) : null) ||
+          (reqIdParam ? Number(reqIdParam) : null);
 
         if (reqId) {
           try {
@@ -158,7 +264,7 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           link_id: linkId,
-          status: resolvedStatus,  // "unpaid", "paid", "archived"
+          status: resolvedStatus,
           detected_method: detectedMethod,
           payments: payments,
         }),
@@ -170,7 +276,6 @@ Deno.serve(async (req: Request) => {
     if (req.method === "POST") {
       const body = await req.json();
 
-      // Check if this is a check status request via POST
       if (body.action === "check" || (body.link_id && !body.amount)) {
         return await checkStatus(body.link_id || "", body.request_id || null);
       }
@@ -185,11 +290,10 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // ─── 2. Server-Side Fee Verification & Authorization ───
-      // Verify request exists
+      // ─── 3. Server-Side Fee Verification & Authorization ───
       const { data: reqData, error: reqErr } = await supabase
         .from("requests")
-        .select("id, user_id, status")
+        .select("id, user_id, status, customer_name")
         .eq("id", request_id)
         .maybeSingle();
 
@@ -200,28 +304,26 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Check user role for staff or request ownership if user is authenticated
       let isStaff = false;
       if (user) {
         const userEmail = (user.email || "").toLowerCase();
-
-        // 1. Check profiles table
         const { data: profile } = await supabase
           .from("profiles")
           .select("role")
           .eq("id", user.id)
           .maybeSingle();
-        if (profile?.role && ["admin", "inspector", "cashier", "clerk"].includes(profile.role.toLowerCase())) {
+        if (
+          profile?.role &&
+          ["admin", "inspector", "cashier", "clerk"].includes(profile.role.toLowerCase())
+        ) {
           isStaff = true;
         }
 
-        // 2. Check user metadata
         const metaRole = (user.user_metadata?.role || "").toLowerCase();
         if (["admin", "inspector", "cashier", "clerk"].includes(metaRole)) {
           isStaff = true;
         }
 
-        // 3. Check system_settings -> staff_accounts
         if (!isStaff && userEmail) {
           try {
             const { data: staffSetting } = await supabase
@@ -234,15 +336,19 @@ Deno.serve(async (req: Request) => {
               const match = staffSetting.value.find(
                 (s: any) => (s?.email || "").toLowerCase() === userEmail && s?.isActive !== false
               );
-              if (match) {
-                isStaff = true;
-              }
+              if (match) isStaff = true;
             }
-          } catch (_) { }
+          } catch (_) {}
         }
 
-        // 4. Default admin accounts or domain check
-        if (!isStaff && (userEmail.includes("tcaaslaughterhouse") || userEmail.endsWith("@tabaco.gov.ph") || userEmail.includes("admin") || userEmail.includes("clerk") || userEmail.includes("inspector"))) {
+        if (
+          !isStaff &&
+          (userEmail.includes("tcaaslaughterhouse") ||
+            userEmail.endsWith("@tabaco.gov.ph") ||
+            userEmail.includes("admin") ||
+            userEmail.includes("clerk") ||
+            userEmail.includes("inspector"))
+        ) {
           isStaff = true;
         }
 
@@ -254,7 +360,6 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Check if a payment entry exists with authoritative total
       const { data: paymentRecord } = await supabase
         .from("payments")
         .select("total_amount, status")
@@ -262,7 +367,6 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       if (paymentRecord && paymentRecord.total_amount) {
-        // Enforce authoritative database amount to prevent client tampering
         requestedAmount = Number(paymentRecord.total_amount);
       }
 
@@ -273,10 +377,92 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // PayMongo expects amount in centavos (integer)
+      // ─── XENDIT CREATE INVOICE (PHP) ───
+      if (useXendit) {
+        if (!xenditSecretKey) {
+          return new Response(
+            JSON.stringify({
+              error: "Xendit is selected as PAYMENT_GATEWAY, but XENDIT_SECRET_KEY is not set in Supabase Secrets.",
+            }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const externalId = `tcaa-req-${request_id}-${Date.now()}`;
+        const roundedAmount = Math.round(requestedAmount * 100) / 100;
+
+        const xenditRes = await fetch(`${XENDIT_API}/invoices`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Basic " + btoa(xenditSecretKey + ":"),
+          },
+          body: JSON.stringify({
+            external_id: externalId,
+            amount: roundedAmount,
+            currency: "PHP",
+            description:
+              description ||
+              `Tabaco City AA Slaughterhouse Service Fee - Request #${request_id}`,
+            invoice_duration: 86400,
+            items: [
+              {
+                name: "Slaughterhouse Service Fee",
+                quantity: 1,
+                price: roundedAmount,
+              },
+            ],
+          }),
+        });
+
+        const xenditData = await xenditRes.json();
+        if (!xenditRes.ok) {
+          console.error("Xendit error:", JSON.stringify(xenditData));
+          return new Response(
+            JSON.stringify({
+              error: "Failed to create checkout session",
+              details: xenditData?.message || "Unknown Xendit error",
+            }),
+            { status: xenditRes.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const linkId = `xnd_${xenditData.id}`;
+        const checkoutUrl = xenditData.invoice_url;
+        const referenceNumber = xenditData.external_id || externalId;
+
+        try {
+          await supabase
+            .from("payments")
+            .update({ transaction_ref: linkId })
+            .eq("request_id", request_id);
+        } catch (dbErr) {
+          console.warn("Could not save Xendit transaction_ref to payments:", dbErr);
+        }
+
+        return new Response(
+          JSON.stringify({
+            link_id: linkId,
+            checkout_url: checkoutUrl,
+            reference_number: referenceNumber,
+            status: "unpaid",
+            amount_verified: roundedAmount,
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // ─── PAYMONGO CREATE CHECKOUT SESSION (Fallback) ───
+      if (!paymongoSecretKey) {
+        return new Response(
+          JSON.stringify({ error: "PayMongo secret key not configured" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const paymongoAuthHeader = "Basic " + btoa(paymongoSecretKey + ":");
       const amountInCentavos = Math.round(requestedAmount * 100);
 
-      // Create a PayMongo Checkout Session enabling all payment methods (GCash, Maya, Cards, GrabPay, QR Ph)
       const paymongoRes = await fetch(`${PAYMONGO_API}/checkout_sessions`, {
         method: "POST",
         headers: {
@@ -326,7 +512,6 @@ Deno.serve(async (req: Request) => {
       const referenceNumber = paymongoData.data.attributes.reference_number;
       const status = paymongoData.data.attributes.status;
 
-      // Persist transaction_ref to payments table so it can be queried by request_id
       try {
         await supabase
           .from("payments")

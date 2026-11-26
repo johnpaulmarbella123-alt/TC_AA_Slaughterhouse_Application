@@ -18,21 +18,78 @@ class WalkInSmsHelper {
     int animalCount = 1,
     String statusSummary = '',
     String amountDue = '',
+    String findings = '',
+    String inspectorName = '',
+    int? passedCount,
+    int? condemnedCount,
+    int? confinementDays,
   }) {
     final headLabel = '$animalCount ${animalCount == 1 ? 'head' : 'heads'}';
     final animalInfo = livestockType.isNotEmpty ? '$headLabel of $livestockType' : headLabel;
     final markPart = marking.isNotEmpty ? ', Marking: $marking' : '';
+    final inspPart = inspectorName.trim().isNotEmpty ? ' Inspector: ${inspectorName.trim()}.' : '';
+    final findingsText = findings.trim().isNotEmpty
+        ? findings.trim()
+        : (statusSummary.trim().isNotEmpty ? statusSummary.trim() : 'Health abnormality detected during inspection');
 
     switch (stage.toLowerCase()) {
       case 'receiving':
         return 'Tabaco City AA Slaughterhouse: Hello $customerName, your walk-in request '
             '(Ref: $refNo$markPart) for $animalInfo has been received. '
             'We will notify you on this number for inspection, billing, and meat release updates.';
+      case 'ante_mortem_failed':
+        final partialPart = (passedCount != null && condemnedCount != null && condemnedCount > 0 && passedCount > 0)
+            ? ' ($condemnedCount of $animalCount head(s) placed in ${confinementDays ?? 2}-day confinement; $passedCount healthy head(s) proceeding to slaughter).'
+            : ' has FAILED ante-mortem inspection and has been placed in facility confinement.';
+        return 'Tabaco City AA Slaughterhouse — ANTE-MORTEM FAILED: Hello $customerName, '
+            'your $animalInfo (Ref: $refNo$markPart)$partialPart '
+            'Findings: $findingsText.$inspPart '
+            'Reply CONFINE to keep under observation or TAKE BACK to arrange retrieval, or text your response to this number.';
+      case 'post_mortem_failed':
+        final pmPartialPart = (passedCount != null && condemnedCount != null && condemnedCount > 0 && passedCount > 0)
+            ? ' ($condemnedCount of $animalCount head(s) affected; $passedCount healthy head(s) cleared).'
+            : ' has FAILED post-mortem veterinary inspection after slaughter.';
+        return 'Tabaco City AA Slaughterhouse — POST-MORTEM FAILED: Hello $customerName, '
+            'your $animalInfo (Ref: $refNo$markPart)$pmPartialPart '
+            'Findings: $findingsText.$inspPart '
+            'Please visit the Tabaco City Abattoir Office to review the official inspection record, or reply to this SMS with your response.';
       case 'inspection':
         final detail = statusSummary.isNotEmpty ? statusSummary : 'Slaughter & inspection update recorded';
         return 'Tabaco City AA Slaughterhouse: Hello $customerName, inspection update for '
             'Ref: $refNo$markPart ($animalInfo) — $detail. '
             'Please contact the Abattoir Office if you have questions.';
+      case 'bill_ready':
+        final wtPart = statusSummary.trim().isNotEmpty ? ' ($statusSummary)' : '';
+        final billAmtPart = amountDue.trim().isNotEmpty ? ' Total fee: $amountDue.' : '';
+        final billAction = findings.trim().isNotEmpty
+            ? findings.trim()
+            : 'Please proceed to the Tabaco City Abattoir Cashier window to settle payment before 5:00 PM.';
+        return 'Tabaco City AA Slaughterhouse — READY FOR PAYMENT: Hello $customerName, '
+            'your $animalInfo (Ref: $refNo$markPart) passed inspection$wtPart.$billAmtPart $billAction';
+      case 'payment_confirmed':
+        final payAmtPart = amountDue.trim().isNotEmpty ? ' of $amountDue' : '';
+        final methodPart = statusSummary.trim().isNotEmpty ? ' via $statusSummary' : '';
+        final nextAction = findings.trim().isNotEmpty
+            ? findings.trim()
+            : 'You may now proceed to the Releasing Bay to claim your meat carcass.';
+        return 'Tabaco City AA Slaughterhouse — PAYMENT CONFIRMED: Hello $customerName, '
+            'your payment$payAmtPart$methodPart for Ref: $refNo$markPart is confirmed. $nextAction';
+      case 'pickup_ready':
+        final pickupDetail = findings.trim().isNotEmpty
+            ? findings.trim()
+            : 'Please claim your carcass at the Releasing Bay before 5:00 PM to avoid the PHP 150.00 Cold Storage fee.';
+        return 'Tabaco City AA Slaughterhouse — READY FOR PICKUP: Hello $customerName, '
+            'your meat carcass (Ref: $refNo$markPart, $animalInfo) is ready for collection. $pickupDetail';
+      case 'out_for_delivery':
+        final driverInfo = statusSummary.trim().isNotEmpty ? ' ($statusSummary)' : '';
+        return 'Tabaco City AA Slaughterhouse — OUT FOR DELIVERY: Hello $customerName, '
+            'your meat order (Ref: $refNo$markPart, $animalInfo) is now out for delivery to your market stall$driverInfo.';
+      case 'released':
+        final releaseDetail = findings.trim().isNotEmpty
+            ? findings.trim()
+            : 'Your meat carcass has been officially released.';
+        return 'Tabaco City AA Slaughterhouse — MEAT RELEASED: Hello $customerName, '
+            'Ref: $refNo$markPart ($animalInfo) — $releaseDetail Thank you!';
       case 'payment':
         final amtPart = amountDue.isNotEmpty ? ' Total fee: $amountDue.' : '';
         return 'Tabaco City AA Slaughterhouse: Hello $customerName, billing for your request '
@@ -60,6 +117,8 @@ class WalkInSmsHelper {
     int animalCount = 1,
     String statusSummary = '',
     String amountDue = '',
+    String findings = '',
+    String inspectorName = '',
     String? requestId,
   }) {
     final phone = contactNumber.trim();
@@ -79,6 +138,8 @@ class WalkInSmsHelper {
           animalCount: animalCount,
           statusSummary: statusSummary,
           amountDue: amountDue,
+          findings: findings,
+          inspectorName: inspectorName,
           requestId: requestId,
         ),
         icon: const Icon(Icons.sms_outlined, size: 18, color: Color(0xFF0F5132)),
@@ -105,6 +166,8 @@ class WalkInSmsHelper {
     int animalCount = 1,
     String statusSummary = '',
     String amountDue = '',
+    String findings = '',
+    String inspectorName = '',
     String? requestId,
   }) async {
     final phone = contactNumber.trim();
@@ -118,6 +181,8 @@ class WalkInSmsHelper {
         animalCount: animalCount,
         statusSummary: statusSummary,
         amountDue: amountDue,
+        findings: findings,
+        inspectorName: inspectorName,
       ),
     );
 

@@ -12,6 +12,7 @@ import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
+import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
@@ -30,7 +31,6 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   List<Map<String, dynamic>> _allRequests = [];
   bool _isLoading = true;
   final TextEditingController _searchController = TextEditingController();
-  String _filterStage = 'All';
   String _selectedBucketFilter = 'all'; // 'all', 'ante_mortem', 'slaughter_ops', 'post_mortem', 'weighing', 'completed', 'failed'
   String _typeFilter = 'all'; // 'all', 'barangay', 'market'
   Timer? _pollingTimer;
@@ -39,6 +39,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
   final Set<String> _shownAnteMortemAlertIds = {};
   final Set<String> _updatingAutoStageIds = {};
   final ScrollController _tableScrollController = ScrollController();
+  Map<String, List<Map<String, dynamic>>> _walkInSmsRepliesByReqId = {};
 
   static const List<String> _autoSlaughterStages = [
     'Stunning',
@@ -120,7 +121,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     super.initState();
     _loadRequests();
     _realtimeSub = AdminRealtimeHub.instance.listen(
-      {'requests', 'slaughter_inspection'},
+      {'requests', 'slaughter_inspection', 'walkin_sms_replies'},
       () {
         if (mounted) {
           _loadRequests(silent: true);
@@ -312,6 +313,21 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
         return r;
       }).toList();
       
+      // Fetch incoming walk-in SMS replies grouped by request_id (graceful if migration not yet run)
+      final Map<String, List<Map<String, dynamic>>> repliesByReq = {};
+      try {
+        final repliesRows = await supabase
+            .from('walkin_sms_replies')
+            .select()
+            .order('received_at', ascending: false)
+            .limit(300);
+        for (final row in List<Map<String, dynamic>>.from(repliesRows)) {
+          final rid = row['request_id']?.toString();
+          if (rid == null || rid.isEmpty) continue;
+          repliesByReq.putIfAbsent(rid, () => []).add(row);
+        }
+      } catch (_) {}
+
       final visibleRequests = activeRequests
           .where(
             (r) => !DailyQueueFilter.shouldHideFromActiveQueue(
@@ -334,6 +350,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
       if (mounted) {
         setState(() {
           _allRequests = visibleRequests;
+          _walkInSmsRepliesByReqId = repliesByReq;
           _isLoading = false;
         });
         _tickAutoSlaughterProgression();
@@ -411,19 +428,14 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     return list.where((r) {
       final name = (r['customer_name'] ?? '').toString().toLowerCase();
       final ref = _refNo(r).toLowerCase();
-      final rawStage = (r['process_stage'] ?? 'Ante-Mortem').toString();
-      final normalizedStage = rawStage == 'Scalding/Plucking' ? 'Scalding/Dehairing' : rawStage;
       final reqType = (r['request_type'] ?? 'barangay').toString().toLowerCase();
 
       final matchesSearch = q.isEmpty || name.contains(q) || ref.contains(q);
       final matchesType = _typeFilter == 'all' || reqType == _typeFilter;
-      final matchesStageDropdown = _filterStage == 'All' ||
-          rawStage == _filterStage ||
-          normalizedStage == _filterStage;
       final matchesBucket = _selectedBucketFilter == 'all' ||
           _stageBucket(r) == _selectedBucketFilter;
 
-      return matchesSearch && matchesType && matchesStageDropdown && matchesBucket;
+      return matchesSearch && matchesType && matchesBucket;
     }).toList();
   }
 
@@ -606,48 +618,12 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
             ],
           ),
         ),
-        // Detailed Process Stage Dropdown
-        Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _filterStage,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
-              items: const [
-                'All',
-                'Ante-Mortem',
-                'Stunning',
-                'Bleeding',
-                'Scalding/Dehairing',
-                'Evisceration',
-                'Post-Mortem Inspection',
-                'Weighing',
-                'Separate Facility (Weighing)',
-                'Complete',
-                'Technical Error/Delay',
-              ]
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
-                  .toList(),
-              onChanged: (val) {
-                if (val != null) setState(() => _filterStage = val);
-              },
-            ),
-          ),
-        ),
-        if (_selectedBucketFilter != 'all' || _typeFilter != 'all' || _filterStage != 'All' || _searchController.text.isNotEmpty)
+        if (_selectedBucketFilter != 'all' || _typeFilter != 'all' || _searchController.text.isNotEmpty)
           TextButton.icon(
             onPressed: () {
               setState(() {
                 _selectedBucketFilter = 'all';
                 _typeFilter = 'all';
-                _filterStage = 'All';
                 _searchController.clear();
               });
             },
@@ -881,8 +857,9 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           ),
           LayoutBuilder(
             builder: (context, constraints) {
+              final bool showActionsColumn = _selectedBucketFilter != 'completed';
               final availableWidth = constraints.maxWidth;
-              final tableWidth = math.max(1150.0, availableWidth);
+              final tableWidth = math.max(showActionsColumn ? 1150.0 : 1020.0, availableWidth);
               final colSpacing = (availableWidth > 1400)
                   ? 34.0
                   : (availableWidth > 1100 ? 24.0 : 16.0);
@@ -908,17 +885,18 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                         dataRowMinHeight: 60,
                         dataRowMaxHeight: 80,
                         columnSpacing: colSpacing,
-                columns: const [
-                  DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Schedule/\nActual', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Process Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Post-Mortem', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Customer\nResponse', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('MIC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                  DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                columns: [
+                  const DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Schedule/\nActual', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Process Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Post-Mortem', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Customer\nResponse', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  const DataColumn(label: Text('MIC', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                  if (showActionsColumn)
+                    const DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
                 ],
                 rows: requests.map((req) {
                   final ref = _refNo(req);
@@ -1208,7 +1186,11 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                           : ((req['user_id'] ?? '').toString().trim().isEmpty ||
                                   (req['special_instruction'] ?? '').toString().contains('[WALK_IN]') ||
                                   (req['contact_number'] ?? '').toString().trim().isNotEmpty)
-                              ? _buildBadge('Walk-in Customer', Colors.grey, light: true)
+                              ? _buildWalkInCustomerResponseCell(
+                                  req,
+                                  isAntiMortemFailed: isAntiMortemFailed,
+                                  isPostMortemFailed: isPostMortemFailed || isCondemnedStatus,
+                                )
                               : (isPostMortemFailed || isCondemnedStatus)
                           ? (isCondemnationAcknowledged
                               ? _buildBadge('Slip Received & Concluded', Colors.green, light: true)
@@ -1509,25 +1491,11 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
                                     )
                                   : _buildBadge('Pending', Colors.blue, light: true),
                     ),
+                    if (showActionsColumn)
                     DataCell(
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
-                            WalkInSmsHelper.buildNotifyButton(
-                              context: context,
-                              contactNumber: req['contact_number'].toString(),
-                              stage: 'inspection',
-                              refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
-                              customerName: (req['customer_name'] ?? 'Customer').toString(),
-                              marking: (req['marking'] ?? '').toString(),
-                              livestockType: (req['livestock_type'] ?? '').toString(),
-                              animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
-                              statusSummary: status.replaceAll('_', ' '),
-                              requestId: req['id']?.toString(),
-                            ),
-                            const SizedBox(width: 6),
-                          ],
                           isFuture && status == 'doc_verified'
                               ? Tooltip(
                                   message: 'Livestock scheduled for a future date. Ante-mortem inspection cannot be logged until animal arrives at the facility.',
@@ -1987,6 +1955,357 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
     );
   }
 
+  Widget _buildWalkInCustomerResponseCell(
+    Map<String, dynamic> req, {
+    required bool isAntiMortemFailed,
+    required bool isPostMortemFailed,
+  }) {
+    final reqIdStr = req['id']?.toString() ?? '';
+    final replies = _walkInSmsRepliesByReqId[reqIdStr] ?? const [];
+    final hasReplies = replies.isNotEmpty;
+    final latest = hasReplies ? replies.first : null;
+    final latestMsg = (latest?['message'] ?? '').toString().trim();
+    final parsedAction = (latest?['parsed_action'] ?? 'reply').toString().toLowerCase();
+
+    String badgeText;
+    Color badgeColor;
+    String subtitle;
+
+    if (hasReplies) {
+      if (parsedAction == 'confine') {
+        badgeText = 'SMS: CONFINE';
+        badgeColor = const Color(0xFF1D4ED8);
+      } else if (parsedAction == 'take_back') {
+        badgeText = 'SMS: TAKE BACK';
+        badgeColor = const Color(0xFFEA580C);
+      } else {
+        final preview = latestMsg.length > 20 ? '${latestMsg.substring(0, 20)}…' : latestMsg;
+        badgeText = 'SMS: "$preview"';
+        badgeColor = const Color(0xFF0F5132);
+      }
+      subtitle = '${replies.length} ${replies.length == 1 ? 'reply' : 'replies'} • Tap to view';
+    } else if (isAntiMortemFailed || isPostMortemFailed) {
+      badgeText = 'Walk-In • Awaiting SMS';
+      badgeColor = const Color(0xFFD97706);
+      subtitle = 'Tap to view / log reply';
+    } else {
+      badgeText = 'Walk-in Customer';
+      badgeColor = Colors.grey;
+      subtitle = 'Tap for SMS replies';
+    }
+
+    return InkWell(
+      onTap: () => _showWalkInSmsRepliesDialog(req),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildBadge(badgeText, badgeColor, light: true),
+            const SizedBox(height: 2),
+            Text(
+              subtitle,
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: hasReplies ? FontWeight.w600 : FontWeight.w400,
+                color: hasReplies ? const Color(0xFF0F5132) : const Color(0xFF64748B),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showWalkInSmsRepliesDialog(Map<String, dynamic> req) {
+    final reqId = req['id'];
+    final reqIdStr = reqId?.toString() ?? '';
+    final refNo = _refNo(req);
+    final customerName = (req['customer_name'] ?? 'Walk-In Customer').toString();
+    final contactNo = (req['contact_number'] ?? '').toString().trim();
+    final status = (req['status'] ?? '').toString().toLowerCase();
+    final manualReplyCtrl = TextEditingController();
+    bool isSavingManual = false;
+    List<Map<String, dynamic>> replies = List<Map<String, dynamic>>.from(
+      _walkInSmsRepliesByReqId[reqIdStr] ?? const [],
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModalState) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          child: Container(
+            width: 540,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD1FAE5),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.forum_outlined, color: Color(0xFF0F5132), size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Walk-In Customer SMS Responses',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '$customerName • $refNo${contactNo.isNotEmpty ? ' • $contactNo' : ''}',
+                            style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 18, color: Color(0xFF64748B)),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: replies.isEmpty
+                      ? Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.mark_chat_unread_outlined, size: 28, color: Color(0xFF94A3B8)),
+                              SizedBox(height: 8),
+                              Text(
+                                'No SMS reply received yet from this walk-in customer.',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Replies sent to your TextBee gateway SIM appear here automatically, or you can log a phone/SMS reply below.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: replies.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 10),
+                          itemBuilder: (_, idx) {
+                            final item = replies[idx];
+                            final msg = (item['message'] ?? '').toString();
+                            final action = (item['parsed_action'] ?? 'reply').toString().toLowerCase();
+                            final source = (item['source'] ?? 'textbee_webhook').toString();
+                            final rawTime = item['received_at']?.toString();
+                            String timeLabel = 'Just now';
+                            if (rawTime != null && rawTime.isNotEmpty) {
+                              final parsedDt = DateTime.tryParse(rawTime)?.toLocal();
+                              if (parsedDt != null) {
+                                timeLabel = DateFormat('MMM d, yyyy • h:mm a').format(parsedDt);
+                              }
+                            }
+                            final actionBadgeColor = action == 'confine'
+                                ? const Color(0xFF1D4ED8)
+                                : (action == 'take_back' ? const Color(0xFFEA580C) : const Color(0xFF0F5132));
+                            final actionLabel = action == 'confine'
+                                ? 'CONFINE'
+                                : (action == 'take_back' ? 'TAKE BACK' : 'SMS REPLY');
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      _buildBadge(actionLabel, actionBadgeColor, light: true),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        source == 'manual_log' ? 'Logged by Staff' : 'Received via SMS',
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        timeLabel,
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SelectableText(
+                                    msg,
+                                    style: const TextStyle(
+                                      fontSize: 13.5,
+                                      color: Color(0xFF0F172A),
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Log Phone / SMS Reply Manually (Fallback)',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: manualReplyCtrl,
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                          hintText: 'e.g. CONFINE — customer agreed to 2-day observation',
+                          hintStyle: const TextStyle(fontSize: 12.5, color: Color(0xFF94A3B8)),
+                          isDense: true,
+                          filled: true,
+                          fillColor: Colors.white,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton(
+                      onPressed: isSavingManual
+                          ? null
+                          : () async {
+                              final txt = manualReplyCtrl.text.trim();
+                              if (txt.isEmpty) return;
+                              setModalState(() => isSavingManual = true);
+                              final upper = txt.toUpperCase();
+                              final parsed = RegExp(r'\b(TAKE\s*BACK|TAKEBACK|PICK\s*UP|PICKUP|RETRIEVE)\b').hasMatch(upper)
+                                  ? 'take_back'
+                                  : (RegExp(r'\b(CONFINE|OBSERVE|KEEP|YES|AGREE|OK)\b').hasMatch(upper)
+                                      ? 'confine'
+                                      : 'reply');
+                              try {
+                                final inserted = await supabase
+                                    .from('walkin_sms_replies')
+                                    .insert({
+                                      'request_id': reqId,
+                                      'sender_phone': contactNo.isNotEmpty ? contactNo : 'walk-in',
+                                      'message': txt,
+                                      'parsed_action': parsed,
+                                      'source': 'manual_log',
+                                    })
+                                    .select()
+                                    .single();
+                                if ((parsed == 'confine' || parsed == 'take_back') &&
+                                    (status == 'anti_mortem_failed' || status == 'delay_error')) {
+                                  await supabase.from('requests').update({
+                                    'anti_mortem_response': parsed,
+                                    'anti_mortem_response_at': DateTime.now().toUtc().toIso8601String(),
+                                  }).eq('id', reqId);
+                                }
+                                manualReplyCtrl.clear();
+                                setModalState(() {
+                                  replies.insert(0, Map<String, dynamic>.from(inserted));
+                                  isSavingManual = false;
+                                });
+                                _loadRequests(silent: true);
+                              } catch (e) {
+                                setModalState(() => isSavingManual = false);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Could not save reply (run walkin_sms_replies SQL migration first): $e'),
+                                      backgroundColor: Colors.redAccent,
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F5132),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: isSavingManual
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Text('Save Reply', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (contactNo.isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          final isAmFail = status == 'anti_mortem_failed' || status == 'pickup_scheduled';
+                          final isPmFail = status == 'post_mortem_failed' || status == 'condemned';
+                          WalkInSmsHelper.showSmsFeedbackDialog(
+                            context: context,
+                            contactNumber: contactNo,
+                            stage: isAmFail
+                                ? 'ante_mortem_failed'
+                                : (isPmFail ? 'post_mortem_failed' : 'inspection'),
+                            refNo: refNo,
+                            customerName: customerName,
+                            marking: (req['marking'] ?? '').toString(),
+                            livestockType: (req['livestock_type'] ?? '').toString(),
+                            animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+                            statusSummary: status.replaceAll('_', ' '),
+                            findings: (req['condemnation_reason'] ?? req['veterinary_findings'] ?? '').toString(),
+                            inspectorName: (req['inspector_name'] ?? '').toString(),
+                            requestId: reqIdStr,
+                          );
+                        },
+                        icon: const Icon(Icons.sms_outlined, size: 15),
+                        label: const Text('Send Follow-Up SMS'),
+                      ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ).then((_) => manualReplyCtrl.dispose());
+  }
+
   Widget _buildAntiMortemStatusBadge(Map<String, dynamic> req, String status, String? customerResponse) {
     if (status == 'taken_back') {
       return Container(
@@ -2227,6 +2546,30 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           'process_notes': reason,
         },
       );
+
+      // Auto-send detailed Post-Mortem / Condemnation SMS for walk-in customers (details only, no slip document)
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (walkInPhone.isNotEmpty) {
+        final refNoStr = _refNo(req);
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'post_mortem_failed',
+          refNo: refNoStr,
+          customerName: (req['customer_name'] ?? 'Customer').toString(),
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: livestockType.toString(),
+          animalCount: (animalCount as num?)?.toInt() ?? 1,
+          findings: reason,
+          inspectorName: inspectorName,
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'post_mortem_failed',
+          refNo: refNoStr,
+          customerName: (req['customer_name'] ?? 'Customer').toString(),
+          requestId: reqId?.toString(),
+        );
+      }
 
       await _loadRequests();
       if (mounted) {
@@ -3429,11 +3772,96 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
         }
       }
 
+      // Auto-send detailed Ante-Mortem Failed or Post-Mortem Failed SMS to walk-in customers
+      // (same relevant details as mobile notifications, without sending the condemnation slip itself)
+      String? walkInSmsFeedback;
+      final walkInPhone = (widget.request['contact_number'] ?? '').toString().trim();
+      final isWalkInFailure = walkInPhone.isNotEmpty &&
+          !isImmediateSlaughterWalkIn &&
+          (isPartialAnteConfinement ||
+              _antiMortem == 'Failed' ||
+              _postMortem == 'Failed' ||
+              isPartialBatch);
+      if (isWalkInFailure) {
+        final isAnteFailSms = isPartialAnteConfinement ||
+            (_antiMortem == 'Failed' && _postMortem != 'Failed' && !_healthIssueDetected);
+        final smsStage = isAnteFailSms ? 'ante_mortem_failed' : 'post_mortem_failed';
+        final smsFindings = isAnteFailSms
+            ? (_notesCtrl.text.trim().isNotEmpty
+                ? _notesCtrl.text.trim()
+                : 'Health abnormality detected during ante-mortem inspection')
+            : (_condemnationCtrl.text.trim().isNotEmpty
+                ? _condemnationCtrl.text.trim()
+                : (_notesCtrl.text.trim().isNotEmpty
+                    ? _notesCtrl.text.trim()
+                    : 'Health issue detected during post-mortem inspection'));
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: smsStage,
+          refNo: staffRefNo,
+          customerName: staffCustLabel,
+          marking: (widget.request['marking'] ?? '').toString(),
+          livestockType: (widget.request['livestock_type'] ?? 'Livestock').toString(),
+          animalCount: _totalHeads,
+          findings: smsFindings,
+          inspectorName: _inspectorCtrl.text.trim(),
+          passedCount: (isPartialAnteConfinement || isPartialBatch) ? passedCount : null,
+          condemnedCount: (isPartialAnteConfinement || isPartialBatch) ? condemnedCount : null,
+          confinementDays: isPartialAnteConfinement ? _confinementDays : null,
+        );
+        final smsRes = await WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: smsStage,
+          refNo: staffRefNo,
+          customerName: staffCustLabel,
+          requestId: reqId?.toString(),
+        );
+        walkInSmsFeedback = smsRes.success
+            ? 'Failure SMS sent to $walkInPhone'
+            : 'Inspection saved (SMS notice: ${smsRes.message})';
+      } else if (walkInPhone.isNotEmpty &&
+          !isImmediateSlaughterWalkIn &&
+          newStatus == 'releasable') {
+        // Auto-send Bill Ready SMS when weighing & post-mortem complete for walk-in customers
+        final weightStr = _carcassCtrl.text.trim();
+        final isMarket = (widget.request['request_type'] ?? '').toString().toLowerCase() == 'market';
+        final billSmsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'bill_ready',
+          refNo: staffRefNo,
+          customerName: staffCustLabel,
+          marking: (widget.request['marking'] ?? '').toString(),
+          livestockType: (widget.request['livestock_type'] ?? 'Livestock').toString(),
+          animalCount: _totalHeads,
+          statusSummary: weightStr.isNotEmpty ? 'Carcass weight: $weightStr kg' : '',
+          findings: isMarket
+              ? 'Please settle payment at the Abattoir Cashier window to clear your meat for market delivery dispatch.'
+              : 'Please settle payment at the Abattoir Cashier window before 5:00 PM to claim your meat carcass.',
+        );
+        final smsRes = await WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: billSmsBody,
+          stage: 'bill_ready',
+          refNo: staffRefNo,
+          customerName: staffCustLabel,
+          requestId: reqId?.toString(),
+        );
+        walkInSmsFeedback = smsRes.success
+            ? 'Bill-ready SMS sent to $walkInPhone'
+            : 'Inspection saved (SMS notice: ${smsRes.message})';
+      }
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: const Text('Process updated successfully'), backgroundColor: Colors.green.shade600),
+          SnackBar(
+            content: Text(
+              walkInSmsFeedback != null
+                  ? 'Process updated • $walkInSmsFeedback'
+                  : 'Process updated successfully',
+            ),
+            backgroundColor: Colors.green.shade600,
+          ),
         );
         // Auto-show Condemnation Slip only when post-mortem failed or health issue condemnation checkbox is checked
         if (_postMortem == 'Failed' || _healthIssueDetected) {

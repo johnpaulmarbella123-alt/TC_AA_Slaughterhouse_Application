@@ -121,7 +121,7 @@ City Veterinarian, Tabaco City Slaughterhouse
 | `payment_method` | `VARCHAR(50)` | `Nullable` | Settlement channel: `'Cash'`, `'GCash'` |
 | `status` | `VARCHAR(50)` | `Not Null` | Settlement status: `'pending'`, `'paid'`, `'cancelled'` |
 | `receipt_number` | `VARCHAR(100)` | `Nullable` | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) |
-| `transaction_ref`| `VARCHAR(255)` | `Nullable` | PayMongo Link ID or GCash transaction reference |
+| `transaction_ref`| `VARCHAR(255)` | `Nullable` | Xendit Invoice ID (`xnd_...`) or e-wallet transaction reference |
 | `payment_date` | `TIMESTAMPTZ` | `Nullable` | Timestamp of confirmed payment |
 | `created_at` | `TIMESTAMPTZ` | `Not Null` | Timestamp of fee assessment calculation |
 
@@ -249,7 +249,7 @@ The system architecture utilizes a high-performance multi-platform topology:
 1. **Customer Mobile App (Flutter Android/iOS)**: Native mobile interface for livestock raisers and meat dealers to submit bookings, upload statutory permits, track live inspection status, pay via GCash, and report illegal slaughter.
 2. **Admin Operations Console (Flutter Web/Desktop)**: Management portal for receiving clerks, veterinary inspectors, cashiers, and supervisors to triage requests, record clinical inspection findings, calculate fees, and compile legal PDF production reports.
 3. **Database & Cloud Backend (Supabase PostgreSQL)**: Relational database enforcing ACID compliance and Row-Level Security.
-4. **Payment Gateway Integration (PayMongo API)**: Direct API integration facilitating cashless GCash transactions.
+4. **Payment Gateway Integration (Xendit API)**: Direct API integration facilitating cashless GCash transactions.
 
 ### 5. Installation Guide
 - **Mobile Client**: Download and install `tc_aa_slaughterhouse.apk` on Android 8.0+ or install via TestFlight on iOS. Grant camera and storage permissions when prompted.
@@ -276,10 +276,10 @@ The system architecture utilizes a high-performance multi-platform topology:
    - Choose distribution channel: **Barangay** (local consumption) or **Market** (commercial market with delivery van).
    - Attach photos of Veterinary Health Certificate (VHC) and Shipping Permit.
    - Pick preferred date and tap **"Submit Request"**. Note the reference number (`MI-YYYY-XXX`).
-3. **Executing Online Checkout with PayMongo (GCash)**:
+3. **Executing Online Checkout with Xendit (GCash)**:
    - When the inspection status reaches **"Ready for Payment"**, tap **"Pay Now"**.
    - Select **"GCash"** -> Tap **"Proceed to Payment"**.
-   - Complete authorization on PayMongo's secure hosted portal.
+   - Complete authorization on Xendit's secure hosted portal.
    - Return to the app to automatically receive the digital **Official Receipt** (`RCP-YYYY-XXX`).
 
 #### 7.2 Point of Sale Cashier & Inspector Operations
@@ -298,7 +298,7 @@ The system architecture utilizes a high-performance multi-platform topology:
 
 ### 8. Error Handling & Troubleshooting
 - **Network Disconnection During Inspection**: The system caches input locally and queues database writes until internet connectivity resumes.
-- **PayMongo Payment Timeout**: If payment authorization is interrupted, the customer can re-open the invoice from the mobile app without re-entering booking details.
+- **Xendit Payment Timeout**: If payment authorization is interrupted, the customer can re-open the invoice from the mobile app without re-entering booking details.
 
 ### 9. Frequently Asked Questions (FAQ)
 1. *Do farmers need to pay before bringing animals to the slaughterhouse?*  
@@ -338,14 +338,14 @@ graph TD
     %% Level 1 Subsystems
     Root --> M1["1.0 Customer Mobile Portal<br/>(Flutter Android/iOS)"]
     Root --> M2["2.0 Admin Operations Console<br/>(Flutter Web/Desktop)"]
-    Root --> M3["3.0 Cloud Services & API Gateway<br/>(Supabase & PayMongo)"]
+    Root --> M3["3.0 Cloud Services & API Gateway<br/>(Supabase & Xendit)"]
 
     %% 1.0 Mobile Modules
     M1 --> M11["1.1 Client Authentication & Profile"]
     M1 --> M12["1.2 Intake Schedule Booking"]
     M1 --> M13["1.3 Statutory Permit Upload"]
     M1 --> M14["1.4 Real-Time Queue & Stage Tracking"]
-    M1 --> M15["1.5 Digital Payment (PayMongo GCash)"]
+    M1 --> M15["1.5 Digital Payment (Xendit GCash)"]
     M1 --> M16["1.6 Citizen Whistleblower Reporting"]
 
     %% 2.0 Admin Modules
@@ -363,7 +363,7 @@ graph TD
     M3 --> M31["3.1 Relational DB (PostgreSQL 15)"]
     M3 --> M32["3.2 Row-Level Security (RLS)"]
     M3 --> M33["3.3 Cloud Storage Buckets"]
-    M3 --> M34["3.4 PayMongo Deno Edge Functions"]
+    M3 --> M34["3.4 Xendit Deno Edge Functions"]
 ```
 
 ---
@@ -383,7 +383,7 @@ graph TD
 #### Module 2.7: Municipal Tariff Billing & Cashiering
 | Input | Process | Output |
 | :--- | :--- | :--- |
-| • Verified dressed carcass weight (kg)<br/>• Intake channel (`Barangay` vs `Market`)<br/>• Payment channel (`Cash` or `GCash`)<br/>• Cash tendered (if physical cash settlement)<br/>• PayMongo webhook payload (if GCash settlement) | 1. Compute Slaughter Fee (₱/kg) + Permit Fee + Transport Fee.<br/>2. Calculate change due for physical cash payments.<br/>3. Verify cryptographic webhook signature for GCash.<br/>4. Generate sequential Official Receipt number (`RCP-YYYY-XXX`).<br/>5. Set balance to ₱0.00 and mark payment state as `paid`. | • Immutable `payments` transaction ledger entry.<br/>• Printable Official Slaughterhouse Receipt.<br/>• Verified digital release gate pass token. |
+| • Verified dressed carcass weight (kg)<br/>• Intake channel (`Barangay` vs `Market`)<br/>• Payment channel (`Cash` or `GCash`)<br/>• Cash tendered (if physical cash settlement)<br/>• Xendit webhook payload (if GCash settlement) | 1. Compute Slaughter Fee (₱/kg) + Permit Fee + Transport Fee.<br/>2. Calculate change due for physical cash payments.<br/>3. Verify cryptographic webhook signature for GCash.<br/>4. Generate sequential Official Receipt number (`RCP-YYYY-XXX`).<br/>5. Set balance to ₱0.00 and mark payment state as `paid`. | • Immutable `payments` transaction ledger entry.<br/>• Printable Official Slaughterhouse Receipt.<br/>• Verified digital release gate pass token. |
 
 #### Module 2.9: NMIS Statutory Legal PDF Production Report Generation
 | Input | Process | Output |
@@ -414,7 +414,7 @@ gantt
     Flutter Mobile Application Frontend     :done, dev1, 2025-09-20, 2025-10-25
     Flutter Admin Management Console        :done, dev2, 2025-09-25, 2025-11-05
     Supabase Database, Auth & Storage Setup :done, dev3, 2025-10-01, 2025-10-20
-    PayMongo Deno Edge Function Integration :done, dev4, 2025-10-20, 2025-11-05
+    Xendit Deno Edge Function Integration :done, dev4, 2025-10-20, 2025-11-05
     Legal PDF Production Report Engine      :done, dev5, 2025-11-01, 2025-11-15
     
     section Cutover & Evaluation
@@ -476,7 +476,7 @@ gantt
    - `[ ] Digital capture and cloud storage of veterinary permits`
    - `[ ] Mobile clinical logging for ante-mortem and post-mortem inspections`
    - `[ ] Automated municipal tariff calculation based on carcass net weight`
-   - `[ ] Cashless payment integration via GCash (PayMongo Gateway)`
+   - `[ ] Cashless payment integration via GCash (Xendit Gateway)`
    - `[ ] Automated legal-size (8.5" x 14") NMIS Daily Production PDF generation`
    - `[ ] Anonymous whistleblower channel for reporting illegal / backyard slaughter`
 4. Suggested interface design and user experience priorities:
@@ -576,7 +576,7 @@ During stakeholder User Acceptance Testing (UAT) and live panel demonstration at
 | **2** | Receiving Clerk (Web) | Review incoming request or create Walk-In entry (verifying Meat Dealers Directory registration & live Barangay/Municipality origin sync) | Permanent marking locked; request approved and routed to Document Verification |
 | **3** | Document Verifier (Web) | Inspect uploaded VHC/Permit images and approve compliance | Status advances to `doc_verified`; customer notified in Mobile App |
 | **4** | Meat Inspector (Web/Tablet) | Log Ante-Mortem status (`Passed`), advance slaughter stages, log Post-Mortem findings & carcass weight, test Condemnation Slip (`CS-YYYY-####`) | MIC certified (`releasable`); Condemnation Slip generated if pathology flagged |
-| **5** | Cashier (Web) & Customer (Mobile) | Settle via Cash (recording Cash Tendered & auto-calculated Change Due) or PayMongo GCash checkout; optionally send manual Walk-In SMS | Official Receipt (`RCP-YYYY-####`) generated with crisp `₱` formatting; status updated to `paid` |
+| **5** | Cashier (Web) & Customer (Mobile) | Settle via Cash (recording Cash Tendered & auto-calculated Change Due) or Xendit GCash checkout; optionally send manual Walk-In SMS | Official Receipt (`RCP-YYYY-####`) generated with crisp `₱` formatting; status updated to `paid` |
 | **6** | Releasing Officer (Web) | Notify customer ("Meat Ready for Collection"), verify Pickup Authorization / QR pass, mark batch `released` | Pickup card appears on customer phone only after notice, then closes upon final release |
 | **7** | Admin Supervisor (Web) | Open Executive Dashboard & Reports & Records; export legal-size (8.5" × 14") NMIS Daily Production PDF | Accurate cumulative KPIs, satisfaction rate, revenue totals, and print-ready NMIS legal PDF |
 
@@ -588,7 +588,7 @@ During stakeholder User Acceptance Testing (UAT) and live panel demonstration at
 | Mobile Booking, Permits & Offline Guard | 3 | 3 | 0 | **100%** |
 | Receiving, Dealer Registry & Real-Time Sync | 3 | 3 | 0 | **100%** |
 | Veterinary Inspection & Condemnation Slips | 2 | 2 | 0 | **100%** |
-| Billing, PayMongo GCash, SMS & PDF Export | 4 | 4 | 0 | **100%** |
+| Billing, Xendit GCash, SMS & PDF Export | 4 | 4 | 0 | **100%** |
 | APK Distribution Portal (`tabaco-abattoir-app.vercel.app`) | 1 | 1 | 0 | **100%** |
 | **Total** | **16** | **16** | **0** | **100%** |
 
@@ -605,8 +605,8 @@ During stakeholder User Acceptance Testing (UAT) and live panel demonstration at
    - Direct camera/gallery capture module for uploading high-resolution photos of Veterinary Health Certificates (VHC) and Shipping Permits.
 5. **Real-Time Slaughter Timeline**:
    - Five-stage visual step progress indicator (*Submitted* $\rightarrow$ *Approved* $\rightarrow$ *In Lairage* $\rightarrow$ *Inspected* $\rightarrow$ *Ready for Releasing*).
-6. **PayMongo GCash Payment Checkout**:
-   - Integrated mobile checkout view redirecting to PayMongo's secure GCash payment authorization screen with automatic callback validation.
+6. **Xendit GCash Payment Checkout**:
+   - Integrated mobile checkout view redirecting to Xendit's secure GCash payment authorization screen with automatic callback validation.
 7. **Whistleblower Incident Reporting**:
    - Form for submitting confidential reports on illegal slaughter with GPS auto-detection, photo evidence attachment, and an anonymous submission switch.
 
@@ -652,21 +652,21 @@ TCAASlaughter_App/
 │   ├── lib/
 │   │   ├── main.dart          # Mobile initialization & routing
 │   │   ├── screens/           # Customer booking, tracking, and reports
-│   │   └── services/          # PayMongo API & Supabase BaaS connectors
+│   │   └── services/          # Xendit API & Supabase BaaS connectors
 ├── supabase/                  # Backend as a Service configuration
 │   ├── functions/
-│   │   └── create-gcash-payment/  # PayMongo Deno serverless edge function
+│   │   └── create-gcash-payment/  # Xendit Deno serverless edge function
 │   └── migrations/            # PostgreSQL schemas, RLS policies & triggers
 └── vault/                     # Research documentation, data maps & manuscript
 ```
 
 ### 2. Core Source Code Excerpts
 
-#### A. PayMongo Payment Intent Edge Function (`supabase/functions/create-gcash-payment/index.ts`)
+#### A. Xendit Invoice Payment Edge Function (`supabase/functions/create-gcash-payment/index.ts`)
 ```typescript
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const PAYMONGO_SECRET_KEY = Deno.env.get("PAYMONGO_SECRET_KEY") ?? "";
+const XENDIT_SECRET_KEY = Deno.env.get("XENDIT_SECRET_KEY") ?? "";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -674,23 +674,20 @@ serve(async (req) => {
   }
 
   try {
-    const { amount, description, remarks } = await req.json();
-    const amountInCentavos = Math.round(Number(amount) * 100);
+    const { request_id, amount, description } = await req.json();
 
-    const response = await fetch("https://api.paymongo.com/v1/links", {
+    const response = await fetch("https://api.xendit.co/v2/invoices", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Basic ${btoa(PAYMONGO_SECRET_KEY + ":")}`,
+        Authorization: `Basic ${btoa(XENDIT_SECRET_KEY + ":")}`,
       },
       body: JSON.stringify({
-        data: {
-          attributes: {
-            amount: amountInCentavos,
-            description: description || "Tabaco City Slaughterhouse Fee",
-            remarks: remarks || "Slaughter Assessment Settlement",
-          },
-        },
+        external_id: `tcaa-req-${request_id}-${Date.now()}`,
+        amount: Math.round(Number(amount)),
+        currency: "PHP",
+        description: description || "Tabaco City Slaughterhouse Fee",
+        payment_methods: ["GCASH", "PAYMAYA", "GRABPAY", "SHOPEEPAY", "QRPH", "CREDIT_CARD"],
       }),
     });
 

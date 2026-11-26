@@ -1,5 +1,12 @@
 {
   "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/TC_AA_Slaughterhouse_App.apk",
+      "destination": "https://github.com/johnpaulmarbella123-alt/app-releases/releases/latest/download/TC_AA_Slaughterhouse_App.apk",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     { "source": "/assets/(.*)", "destination": "/assets/$1" },
     { "source": "/(.*)", "destination": "/index.html" }

@@ -169,8 +169,112 @@ class RegularDealersService {
 
   final supabase = Supabase.instance.client;
   List<RegularDealer> _dealers = [];
+  Set<String> _deletedDealerKeys = {};
   NmicSettings _nmicSettings = NmicSettings();
   bool _isLoaded = false;
+
+  static final RegExp _uuidRegex = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  );
+
+  List<String> _tombstoneKeysFor({String? userId, String? name, String? category}) {
+    final keys = <String>[];
+    final cleanCat = (category ?? '').trim().toLowerCase();
+    final cleanName = (name ?? '').trim().toUpperCase();
+    final cleanUid = (userId ?? '').trim();
+    if (cleanName.isNotEmpty) {
+      if (cleanCat.isNotEmpty) {
+        keys.add('name:$cleanName|cat:$cleanCat');
+      } else {
+        keys.add('name:$cleanName|cat:barangay');
+        keys.add('name:$cleanName|cat:market');
+      }
+    }
+    if (cleanUid.isNotEmpty) {
+      if (cleanCat.isNotEmpty) {
+        keys.add('uid:$cleanUid|cat:$cleanCat');
+      } else {
+        keys.add('uid:$cleanUid|cat:barangay');
+        keys.add('uid:$cleanUid|cat:market');
+      }
+    }
+    return keys;
+  }
+
+  bool _isDealerTombstoned({String? userId, String? name, String? category}) {
+    if (_deletedDealerKeys.isEmpty) return false;
+    final cleanCat = (category ?? '').trim().toLowerCase();
+    final cleanName = (name ?? '').trim().toUpperCase();
+    final cleanUid = (userId ?? '').trim();
+    if (cleanName.isNotEmpty && cleanCat.isNotEmpty && _deletedDealerKeys.contains('name:$cleanName|cat:$cleanCat')) {
+      return true;
+    }
+    if (cleanUid.isNotEmpty && cleanCat.isNotEmpty && _deletedDealerKeys.contains('uid:$cleanUid|cat:$cleanCat')) {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _loadDeletedTombstones() async {
+    final loaded = <String>{..._deletedDealerKeys};
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString('deleted_regular_dealers_cache');
+      if (cached != null && cached.isNotEmpty) {
+        final decoded = jsonDecode(cached);
+        if (decoded is List) {
+          loaded.addAll(decoded.map((e) => e.toString()));
+        }
+      }
+    } catch (_) {}
+    try {
+      final row = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'deleted_regular_dealers')
+          .maybeSingle();
+      if (row != null && row['value'] != null) {
+        final raw = row['value'];
+        final decoded = raw is String ? jsonDecode(raw) : raw;
+        if (decoded is List) {
+          loaded.addAll(decoded.map((e) => e.toString()));
+        }
+      }
+    } catch (e) {
+      debugPrint('loadDeletedTombstones notice: $e');
+    }
+    _deletedDealerKeys = loaded;
+  }
+
+  Future<void> _saveDeletedTombstones() async {
+    final list = _deletedDealerKeys.toList()..sort();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('deleted_regular_dealers_cache', jsonEncode(list));
+    } catch (_) {}
+    try {
+      await supabase.from('system_settings').upsert({
+        'key': 'deleted_regular_dealers',
+        'value': jsonEncode(list),
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('saveDeletedTombstones error: $e');
+    }
+  }
+
+  Future<void> _clearTombstoneFor({String? userId, String? name, String? category}) async {
+    final keys = _tombstoneKeysFor(userId: userId, name: name, category: category);
+    bool removed = false;
+    for (final k in keys) {
+      if (_deletedDealerKeys.remove(k)) {
+        removed = true;
+      }
+    }
+    if (removed) {
+      await _saveDeletedTombstones();
+    }
+  }
 
   List<RegularDealer> get allDealers => List.unmodifiable(_dealers);
   List<RegularDealer> get marketDealers =>
@@ -194,13 +298,18 @@ class RegularDealersService {
   }
 
   Future<void> reload() async {
+    await _loadDeletedTombstones();
+
     // 1. Try to load cached dealers from SharedPreferences
     try {
       final prefs = await SharedPreferences.getInstance();
       final cachedJson = prefs.getString('regular_dealers_cache');
       if (cachedJson != null && cachedJson.isNotEmpty) {
         final List decoded = jsonDecode(cachedJson);
-        _dealers = decoded.map((item) => RegularDealer.fromJson(Map<String, dynamic>.from(item))).toList();
+        _dealers = decoded
+            .map((item) => RegularDealer.fromJson(Map<String, dynamic>.from(item)))
+            .where((d) => !_isDealerTombstoned(userId: d.userId, name: d.name, category: d.category))
+            .toList();
       }
       final nmicJson = prefs.getString('nmic_settings_cache');
       if (nmicJson != null && nmicJson.isNotEmpty) {
@@ -208,24 +317,23 @@ class RegularDealersService {
       }
     } catch (_) {}
 
-    // 2. Fetch from Supabase `regular_dealers` table
+    // 2. Fetch from Supabase `regular_dealers` table AND `system_settings` ('regular_dealers')
+    //    and merge them so manually registered DB rows take priority while synced dealer markings are never lost.
+    List<RegularDealer> tableDealers = [];
+    List<RegularDealer> settingsDealers = [];
+    bool fetchedRemote = false;
+
     try {
       final res = await supabase.from('regular_dealers').select();
-      if (res.isNotEmpty) {
-        _dealers = res.map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r))).toList();
-        if (_deduplicateDealers()) {
-          await _syncToSupabase();
-        }
-        await _saveLocalCache();
-        _isLoaded = true;
-        await syncFromConfirmedProfiles();
-        return;
-      }
+      fetchedRemote = true;
+      tableDealers = res
+          .map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r)))
+          .where((d) => !_isDealerTombstoned(userId: d.userId, name: d.name, category: d.category))
+          .toList();
     } catch (e) {
       debugPrint('regular_dealers table query fallback: $e');
     }
 
-    // 3. Fallback to `system_settings` key 'regular_dealers'
     try {
       final sysRow = await supabase
           .from('system_settings')
@@ -235,19 +343,25 @@ class RegularDealersService {
       if (sysRow != null && sysRow['value'] != null) {
         final rawVal = sysRow['value'];
         final List decoded = rawVal is String ? jsonDecode(rawVal) : rawVal;
-        if (decoded.isNotEmpty) {
-          _dealers = decoded.map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r))).toList();
-          if (_deduplicateDealers()) {
-            await _syncToSupabase();
-          }
-          await _saveLocalCache();
-          _isLoaded = true;
-          await syncFromConfirmedProfiles();
-          return;
-        }
+        fetchedRemote = true;
+        settingsDealers = decoded
+            .map((r) => RegularDealer.fromJson(Map<String, dynamic>.from(r)))
+            .where((d) => !_isDealerTombstoned(userId: d.userId, name: d.name, category: d.category))
+            .toList();
       }
     } catch (e) {
       debugPrint('system_settings regular_dealers fallback: $e');
+    }
+
+    if (fetchedRemote && (tableDealers.isNotEmpty || settingsDealers.isNotEmpty)) {
+      _dealers = [...tableDealers, ...settingsDealers];
+      if (_deduplicateDealers()) {
+        await _syncToSupabase();
+      }
+      await _saveLocalCache();
+      _isLoaded = true;
+      await syncFromConfirmedProfiles();
+      return;
     }
 
     // 4. Do not pre-seed hardcoded default dealers on a fresh system;
@@ -620,10 +734,18 @@ class RegularDealersService {
     bool changed = false;
 
     try {
-      final rows = await supabase
-          .from('profiles')
-          .select('id, display_name, phone, dealer_category, role_confirmed, created_at')
-          .eq('role_confirmed', true);
+      List<dynamic> rows;
+      try {
+        rows = await supabase
+            .from('profiles')
+            .select('id, display_name, phone, dealer_category, assigned_marking, role_confirmed, created_at')
+            .eq('role_confirmed', true);
+      } catch (_) {
+        rows = await supabase
+            .from('profiles')
+            .select('id, display_name, phone, dealer_category, role_confirmed, created_at')
+            .eq('role_confirmed', true);
+      }
 
       for (final row in rows) {
         final rawRole = (row['dealer_category'] ?? '').toString().trim().toLowerCase();
@@ -632,9 +754,17 @@ class RegularDealersService {
         final userId = (row['id'] ?? '').toString().trim();
         final fullName = (row['display_name'] ?? '').toString().trim();
         final phone = (row['phone'] ?? '').toString().trim();
+        final assignedMarking = (row['assigned_marking'] ?? '').toString().trim().toUpperCase();
+        final resolvedMarking = (assignedMarking.isNotEmpty && assignedMarking != 'PENDING')
+            ? assignedMarking
+            : 'PENDING';
         final createdAt = row['created_at']?.toString();
 
         final displayName = (fullName.isNotEmpty ? fullName : (phone.isNotEmpty ? phone : 'CUSTOMER')).toUpperCase();
+
+        if (_isDealerTombstoned(userId: userId, name: displayName, category: rawRole)) {
+          continue;
+        }
 
         final existingIdx = _dealers.indexWhere((d) {
           if (userId.isNotEmpty && d.userId == userId) return true;
@@ -648,11 +778,15 @@ class RegularDealersService {
           final needsUserId = (existing.userId == null || existing.userId!.isEmpty) && userId.isNotEmpty;
           final needsPhone = (existing.phone == null || existing.phone!.isEmpty) && phone.isNotEmpty;
           final needsCategory = existing.category.isEmpty;
-          if (needsUserId || needsPhone || needsCategory) {
+          final existingMarkUpper = existing.markings.trim().toUpperCase();
+          final needsMarking = (existingMarkUpper.isEmpty || existingMarkUpper == 'PENDING') &&
+              resolvedMarking != 'PENDING';
+          if (needsUserId || needsPhone || needsCategory || needsMarking) {
             _dealers[existingIdx] = existing.copyWith(
               userId: needsUserId ? userId : existing.userId,
               phone: needsPhone ? phone : existing.phone,
               category: needsCategory ? rawRole : existing.category,
+              markings: needsMarking ? resolvedMarking : existing.markings,
             );
             changed = true;
           }
@@ -667,7 +801,7 @@ class RegularDealersService {
           id: 'dlr-${DateTime.now().millisecondsSinceEpoch}-$added',
           dealerNumber: maxNumber + 1,
           name: displayName,
-          markings: 'PENDING',
+          markings: resolvedMarking,
           category: rawRole,
           phone: phone.isNotEmpty ? phone : null,
           userId: userId.isNotEmpty ? userId : null,
@@ -806,6 +940,10 @@ class RegularDealersService {
       final createdAt = req['created_at']?.toString();
       final cleanName = rawName.toLowerCase().trim();
 
+      if (_isDealerTombstoned(userId: userId, name: rawName, category: category)) {
+        continue;
+      }
+
       // Find existing dealer by userId or exact name (respecting userId isolation)
       int existingIdx = _dealers.indexWhere((d) {
         if (userId != null &&
@@ -924,6 +1062,9 @@ class RegularDealersService {
     final cleanName = name.trim().toUpperCase();
     final cleanMarking = markings.trim().toUpperCase();
     final cleanPhone = phone?.trim();
+
+    // Clear any prior removal tombstone when an Admin intentionally re-registers this dealer
+    await _clearTombstoneFor(name: cleanName, category: cleanCategory);
 
     // Check duplicate marking in memory
     final existingMarking = findDealerByMarking(cleanMarking);
@@ -1069,7 +1210,8 @@ class RegularDealersService {
     }
   }
 
-  /// Deletes a dealer from active roster, regular_dealers table, and cascade-cleans associated requests
+  /// Removes a dealer from the Meat Dealers Directory without deleting historical slaughter requests or payments.
+  /// Persists a tombstone so auto-sync from profiles/requests will never resurrect the removed dealer.
   Future<void> deleteDealer(String id) async {
     await AppSettingsService.instance.ensureAdminAuthSession();
 
@@ -1084,9 +1226,46 @@ class RegularDealersService {
       ),
     );
 
-    _dealers.removeWhere((d) => d.id == id);
+    // 1. Delete from public.regular_dealers table (handle both real UUIDs and synthetic client IDs)
+    if (_uuidRegex.hasMatch(id)) {
+      try {
+        await supabase.from('regular_dealers').delete().eq('id', id);
+      } catch (e) {
+        debugPrint('Error deleting dealer by UUID from regular_dealers: $e');
+        throw Exception('Could not remove dealer from Supabase database: $e');
+      }
+    }
+    if (target.name.trim().isNotEmpty) {
+      try {
+        await supabase
+            .from('regular_dealers')
+            .delete()
+            .ilike('name', target.name.trim())
+            .eq('category', target.category);
+      } catch (e) {
+        debugPrint('Notice deleting matching dealer row by name/category: $e');
+      }
+    }
+
+    // 2. Record removal tombstone so syncFromConfirmedProfiles / syncCustomersFromRequests won't re-add them
+    final tombstoneKeys = _tombstoneKeysFor(
+      userId: target.userId,
+      name: target.name,
+      category: target.category,
+    );
+    _deletedDealerKeys.addAll(tombstoneKeys);
+
+    // 3. Remove from in-memory roster and persist cache + tombstones + system_settings
+    _dealers.removeWhere((d) =>
+        d.id == id ||
+        (target.name.trim().isNotEmpty &&
+            d.name.trim().toUpperCase() == target.name.trim().toUpperCase() &&
+            d.category == target.category));
+
+    await _saveDeletedTombstones();
     await _saveLocalCache();
     await _syncToSupabase();
+
     AuditLogService.instance.log(
       action: 'dealer_deleted',
       module: 'Meat Dealers',
@@ -1094,43 +1273,6 @@ class RegularDealersService {
       targetRef: target.markings,
       details: {'name': target.name, 'category': target.category},
     );
-
-    // 1. Delete from public.regular_dealers table
-    try {
-      await supabase.from('regular_dealers').delete().eq('id', id);
-    } catch (e) {
-      debugPrint('Error deleting from regular_dealers table: $e');
-    }
-
-    // 2. Cascade delete historical requests and linked payments
-    if (target.name.isNotEmpty) {
-      try {
-        final userId = target.userId;
-        if (userId != null && userId.isNotEmpty) {
-          final userRequests = await supabase.from('requests').select('id').eq('user_id', userId);
-          final reqIds = (userRequests as List).map((r) => r['id'].toString()).toList();
-          if (reqIds.isNotEmpty) {
-            await supabase.from('payments').delete().inFilter('request_id', reqIds);
-          }
-          await supabase.from('requests').delete().eq('user_id', userId);
-        } else {
-          final matchingRequests = await supabase
-              .from('requests')
-              .select('id')
-              .or('customer_name.ilike.${target.name},marking.eq.${target.markings}');
-          final reqIds = (matchingRequests as List).map((r) => r['id'].toString()).toList();
-          if (reqIds.isNotEmpty) {
-            await supabase.from('payments').delete().inFilter('request_id', reqIds);
-          }
-          await supabase
-              .from('requests')
-              .delete()
-              .or('customer_name.ilike.${target.name},marking.eq.${target.markings}');
-        }
-      } catch (e) {
-        debugPrint('Error cascade-deleting dealer requests: $e');
-      }
-    }
   }
 
   /// Sends an email with PDF attachment via Resend REST API

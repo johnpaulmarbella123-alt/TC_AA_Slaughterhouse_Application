@@ -20,6 +20,7 @@ class AdminRealtimeHub {
     'regular_dealers',
     'reports',
     'staff_notifications',
+    'walkin_sms_replies',
   ];
 
   final StreamController<String> _controller = StreamController<String>.broadcast();
@@ -92,9 +93,16 @@ class AdminRealtimeHub {
         );
       }
 
+      _channel = channel;
+
       channel.subscribe((status, [error]) {
+        // Ignore callbacks from stale/replaced channels (e.g. closed during reconnect)
+        if (!identical(_channel, channel)) return;
+
         if (status == RealtimeSubscribeStatus.subscribed) {
           _reconnectAttempt = 0;
+          _reconnectTimer?.cancel();
+          _reconnectTimer = null;
           debugPrint('AdminRealtimeHub: subscribed to ${watchedTables.join(', ')}');
         } else if (status == RealtimeSubscribeStatus.timedOut ||
             status == RealtimeSubscribeStatus.channelError ||
@@ -105,8 +113,6 @@ class AdminRealtimeHub {
           }
         }
       });
-
-      _channel = channel;
     } catch (e) {
       debugPrint('AdminRealtimeHub subscribe error: $e');
       if (_started) {

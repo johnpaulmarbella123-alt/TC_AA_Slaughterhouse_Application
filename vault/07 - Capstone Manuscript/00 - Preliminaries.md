@@ -127,7 +127,7 @@ The system's identified information requirements effectively supported animal re
 ### Conclusion
 The study concluded that the Operation Management Application for the AA Slaughterhouse of Tabaco City successfully replaced manual processes, boosting the efficiency, accuracy, transparency, and accessibility of operations and customer services. For future impact, the system may serve as an exemplary model and blueprint for the digital modernization and transformation of other local government-managed slaughterhouses across the Philippines.
 
-**Keywords**: Slaughterhouse Management, Web and Mobile System, Meat Inspection, Traceability, Automation, Usability, Flutter, Supabase, PayMongo.
+**Keywords**: Slaughterhouse Management, Web and Mobile System, Meat Inspection, Traceability, Automation, Usability, Flutter, Supabase, Xendit.
 
 ---
 
@@ -207,7 +207,7 @@ The study concluded that the Operation Management Application for the AA Slaught
 | **2** | Technologies and Development Tools Used |
 | **3** | Sub-Domain A: Intake Booking, Lairage Queueing, and Permit Information Requirements |
 | **4** | Sub-Domain B: Veterinary Inspection, Carcass Weighing, and Condemnation Information Requirements |
-| **5** | Sub-Domain C: Municipal Cashiering, PayMongo GCash, and Statutory Reports Information Requirements |
+| **5** | Sub-Domain C: Municipal Cashiering, Xendit GCash, and Statutory Reports Information Requirements |
 | **6** | Recommended Software Requirements |
 | **7** | Recommended Hardware Requirements |
 | **8** | System Testing and Verification Matrix (Functional, Security, Real-Time, and Integration) |
@@ -236,7 +236,7 @@ The study concluded that the Operation Management Application for the AA Slaught
 | **12** | Digital Carcass Weighing Scale & MIC Approval Interface            |  37  |
 | **13** | Official Digital Meat Condemnation Slip Preview                    |  38  |
 | **14** | Municipal Tariff Billing & Cashiering Workspace                    |  39  |
-| **15** | PayMongo Hosted GCash Digital Payment Gateway                      |  40  |
+| **15** | Xendit Hosted GCash Digital Payment Gateway                      |  40  |
 | **16** | Official Slaughterhouse Receipt & Barcode Gate Pass                |  41  |
 | **17** | Meat Releasing & Dispatch Confirmation Console                     |  42  |
 | **18** | Illegal Slaughter Whistleblower Reporting & Investigation Console  |  43  |

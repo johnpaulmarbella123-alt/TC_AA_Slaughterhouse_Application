@@ -75,7 +75,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
       if (table == 'requests' || table == 'payments' || table == 'slaughter_inspection') {
         _loadData(silent: true);
       } else if (table == 'regular_dealers') {
-        RegularDealersService.instance.reload().then((_) {
+        RegularDealersService.instance.reload().then((_) async {
+          if (_allRequests.isNotEmpty) {
+            await RegularDealersService.instance.syncCustomersFromRequests(_allRequests);
+          }
           if (mounted) setState(() {});
         });
       } else if (table == 'reports') {
@@ -1577,38 +1580,13 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               height: 200,
               child: Center(child: Text('No processed animals for this period', style: TextStyle(color: Colors.grey.shade400))),
             )
-          else ...[
-            Center(
-              child: SizedBox(
-                width: 200,
-                height: 200,
-                child: CustomPaint(
-                  painter: _DonutChartPainter(
-                    values: dist.values.toList(),
-                    colors: mappedColors,
-                  ),
-                ),
-              ),
+          else
+            _AnimatedCommoditiesDonut(
+              labels: dist.keys.toList(),
+              values: dist.values.toList(),
+              colors: mappedColors,
+              periodKey: '${_reportType}_${_getActivePeriodLabel()}_${dist.entries.map((e) => '${e.key}:${e.value}').join(',')}',
             ),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children: dist.entries.toList().asMap().entries.map((entry) {
-                final idx = entry.key;
-                final e = entry.value;
-                final color = mappedColors[idx];
-                return Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-                    const SizedBox(width: 6),
-                    Text('${e.key}: ${e.value} heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                  ],
-                );
-              }).toList(),
-            ),
-          ],
         ],
       ),
     );
@@ -3931,7 +3909,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Warning: Removing this dealer will delete their directory record and cascade-clear linked historical slaughter requests and payments.',
+                      'This removes the dealer from the Meat Dealers Directory and frees their permanent marking. Historical slaughter requests, payments, and NMIS reports will remain intact.',
                       style: TextStyle(fontSize: 11.5, color: Colors.red.shade900, height: 1.3),
                     ),
                   ),
@@ -3953,22 +3931,33 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
+            child: const Text('Remove'),
           ),
         ],
       ),
     );
 
     if (confirmed == true && mounted) {
-      await RegularDealersService.instance.deleteDealer(dealer.id);
-      if (mounted) {
-        setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Removed ${dealer.name} from Meat Dealers Directory'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
+      try {
+        await RegularDealersService.instance.deleteDealer(dealer.id);
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Removed ${dealer.name} from Meat Dealers Directory'),
+              backgroundColor: const Color(0xFF0F5132),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to remove dealer: ${e.toString().replaceFirst('Exception: ', '')}'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
       }
     }
   }
@@ -4368,38 +4357,415 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 // ═══════════════════════════════════════════════════════════
 //  DONUT CHART PAINTER
 // ═══════════════════════════════════════════════════════════
+class _AnimatedCommoditiesDonut extends StatefulWidget {
+  final List<String> labels;
+  final List<int> values;
+  final List<Color> colors;
+  final String periodKey;
+
+  const _AnimatedCommoditiesDonut({
+    required this.labels,
+    required this.values,
+    required this.colors,
+    required this.periodKey,
+  });
+
+  @override
+  State<_AnimatedCommoditiesDonut> createState() => _AnimatedCommoditiesDonutState();
+}
+
+class _AnimatedCommoditiesDonutState extends State<_AnimatedCommoditiesDonut>
+    with TickerProviderStateMixin {
+  late final AnimationController _sweepCtrl;
+  late final Animation<double> _sweepAnim;
+  late final AnimationController _hoverCtrl;
+  late final Animation<double> _hoverAnim;
+
+  int? _hoveredIndex;
+  int? _pinnedIndex;
+  int? _lastActiveIndex;
+
+  int? get _activeIndex => _hoveredIndex ?? _pinnedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _sweepCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+    );
+    _sweepAnim = CurvedAnimation(parent: _sweepCtrl, curve: Curves.easeOutCubic);
+
+    _hoverCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+    );
+    _hoverAnim = CurvedAnimation(parent: _hoverCtrl, curve: Curves.easeOutCubic);
+
+    _sweepCtrl.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedCommoditiesDonut oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.periodKey != widget.periodKey) {
+      _hoveredIndex = null;
+      _pinnedIndex = null;
+      _lastActiveIndex = null;
+      _hoverCtrl.value = 0.0;
+      _sweepCtrl.forward(from: 0.0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _sweepCtrl.dispose();
+    _hoverCtrl.dispose();
+    super.dispose();
+  }
+
+  void _setActiveHover(int? idx) {
+    if (_hoveredIndex == idx) return;
+    setState(() {
+      _hoveredIndex = idx;
+      if (_activeIndex != null) {
+        _lastActiveIndex = _activeIndex;
+        _hoverCtrl.forward();
+      } else {
+        _hoverCtrl.reverse();
+      }
+    });
+  }
+
+  void _togglePin(int? idx) {
+    setState(() {
+      if (idx == null || _pinnedIndex == idx) {
+        _pinnedIndex = null;
+      } else {
+        _pinnedIndex = idx;
+      }
+      if (_activeIndex != null) {
+        _lastActiveIndex = _activeIndex;
+        _hoverCtrl.forward();
+      } else {
+        _hoverCtrl.reverse();
+      }
+    });
+  }
+
+  int? _hitTestSlice(Offset localPosition, Size size) {
+    final total = widget.values.fold(0, (a, b) => a + b);
+    if (total <= 0) return null;
+
+    final center = Offset(size.width / 2, size.height / 2);
+    final dx = localPosition.dx - center.dx;
+    final dy = localPosition.dy - center.dy;
+    final dist = sqrt(dx * dx + dy * dy);
+
+    final outerRadius = min(size.width, size.height) / 2 - 10;
+    final innerRadius = outerRadius * 0.50;
+    if (dist < innerRadius || dist > outerRadius + 10) return null;
+
+    double angle = atan2(dy, dx) + pi / 2;
+    if (angle < 0) angle += 2 * pi;
+
+    double cumulative = 0;
+    for (int i = 0; i < widget.values.length; i++) {
+      final sweep = (widget.values[i] / total) * 2 * pi;
+      if (angle >= cumulative && angle <= cumulative + sweep) {
+        return i;
+      }
+      cumulative += sweep;
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.values.fold(0, (a, b) => a + b);
+    final activeIdx = _activeIndex;
+    const chartSize = 220.0;
+
+    return Column(
+      children: [
+        Center(
+          child: SizedBox(
+            width: chartSize,
+            height: chartSize,
+            child: MouseRegion(
+              cursor: activeIdx != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              onHover: (event) => _setActiveHover(_hitTestSlice(event.localPosition, const Size(chartSize, chartSize))),
+              onExit: (_) => _setActiveHover(null),
+              child: GestureDetector(
+                onTapUp: (details) {
+                  final hit = _hitTestSlice(details.localPosition, const Size(chartSize, chartSize));
+                  _togglePin(hit);
+                },
+                child: AnimatedBuilder(
+                  animation: Listenable.merge([_sweepAnim, _hoverAnim]),
+                  builder: (context, _) {
+                    final progress = _sweepAnim.value;
+                    final displayTotal = (total * progress).round();
+                    final painterActiveIdx = _activeIndex ?? (_hoverAnim.value > 0 ? _lastActiveIndex : null);
+
+                    return Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        CustomPaint(
+                          size: const Size(chartSize, chartSize),
+                          painter: _DonutChartPainter(
+                            values: widget.values,
+                            colors: widget.colors,
+                            progress: progress,
+                            activeIndex: painterActiveIdx,
+                            hoverProgress: _hoverAnim.value,
+                          ),
+                        ),
+                        IgnorePointer(
+                          child: SizedBox(
+                            width: chartSize * 0.50,
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              transitionBuilder: (child, anim) => FadeTransition(
+                                opacity: anim,
+                                child: ScaleTransition(
+                                  scale: Tween<double>(begin: 0.92, end: 1.0).animate(anim),
+                                  child: child,
+                                ),
+                              ),
+                              child: activeIdx != null && activeIdx < widget.labels.length
+                                  ? Column(
+                                      key: ValueKey('slice_$activeIdx'),
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          widget.labels[activeIdx],
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: widget.colors[activeIdx % widget.colors.length],
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${widget.values[activeIdx]}',
+                                          style: const TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF0F172A),
+                                            height: 1.1,
+                                          ),
+                                        ),
+                                        Text(
+                                          '${((widget.values[activeIdx] / total) * 100).toStringAsFixed(1)}%',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Column(
+                                      key: const ValueKey('total'),
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          '$displayTotal',
+                                          style: const TextStyle(
+                                            fontSize: 24,
+                                            fontWeight: FontWeight.w800,
+                                            color: Color(0xFF0F172A),
+                                            height: 1.1,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          total == 1 ? 'Total Head' : 'Total Heads',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.grey.shade500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          children: List.generate(widget.labels.length, (idx) {
+            final label = widget.labels[idx];
+            final val = widget.values[idx];
+            final color = widget.colors[idx % widget.colors.length];
+            final pct = total > 0 ? (val / total) * 100 : 0.0;
+            final isHighlighted = activeIdx == idx;
+            final isDimmed = activeIdx != null && !isHighlighted;
+
+            return MouseRegion(
+              cursor: SystemMouseCursors.click,
+              onEnter: (_) => _setActiveHover(idx),
+              onExit: (_) => _setActiveHover(null),
+              child: GestureDetector(
+                onTap: () => _togglePin(idx),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isHighlighted ? color.withValues(alpha: 0.12) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isHighlighted ? color : const Color(0xFFE2E8F0),
+                      width: isHighlighted ? 1.4 : 1,
+                    ),
+                  ),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    opacity: isDimmed ? 0.52 : 1.0,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '$label: $val (${pct.toStringAsFixed(0)}%)',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isHighlighted ? FontWeight.w700 : FontWeight.w500,
+                            color: const Color(0xFF1E293B),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+}
+
 class _DonutChartPainter extends CustomPainter {
   final List<int> values;
   final List<Color> colors;
+  final double progress;
+  final int? activeIndex;
+  final double hoverProgress;
 
-  _DonutChartPainter({required this.values, required this.colors});
+  _DonutChartPainter({
+    required this.values,
+    required this.colors,
+    this.progress = 1.0,
+    this.activeIndex,
+    this.hoverProgress = 0.0,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final total = values.fold(0, (a, b) => a + b);
-    if (total == 0) return;
+    if (total == 0 || progress <= 0) return;
 
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = min(size.width, size.height) / 2;
-    final strokeWidth = radius * 0.45;
-    final rect = Rect.fromCircle(center: center, radius: radius - strokeWidth / 2);
+    final baseRadius = min(size.width, size.height) / 2 - 12;
+    final baseStrokeWidth = baseRadius * 0.44;
+    final maxSweep = 2 * pi * progress;
 
     double startAngle = -pi / 2;
+    double drawnSweep = 0.0;
+    final dividerAngles = <double>[];
+
     for (int i = 0; i < values.length; i++) {
-      final sweepAngle = (values[i] / total) * 2 * pi;
+      final fullSliceSweep = (values[i] / total) * 2 * pi;
+      final remaining = maxSweep - drawnSweep;
+      if (remaining <= 0) break;
+
+      final sweepAngle = min(fullSliceSweep, remaining);
+      final isHighlighted = activeIndex == i;
+      final isDimmed = activeIndex != null && !isHighlighted && hoverProgress > 0;
+
+      final popOffset = isHighlighted ? 7.0 * hoverProgress : 0.0;
+      final extraStroke = isHighlighted ? 4.5 * hoverProgress : 0.0;
+      final midAngle = startAngle + sweepAngle / 2;
+      final sliceCenter = Offset(
+        center.dx + cos(midAngle) * popOffset,
+        center.dy + sin(midAngle) * popOffset,
+      );
+      final sliceRadius = baseRadius - baseStrokeWidth / 2;
+      final rect = Rect.fromCircle(center: sliceCenter, radius: sliceRadius);
+
+      final baseColor = colors[i % colors.length];
+      final color = isDimmed
+          ? baseColor.withValues(alpha: 1.0 - (0.42 * hoverProgress))
+          : baseColor;
+
+      if (isHighlighted && hoverProgress > 0.05) {
+        final glowPaint = Paint()
+          ..color = baseColor.withValues(alpha: 0.22 * hoverProgress)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = baseStrokeWidth + extraStroke + 6
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+        canvas.drawArc(rect, startAngle, sweepAngle, false, glowPaint);
+      }
+
       final paint = Paint()
-        ..color = colors[i % colors.length]
+        ..color = color
         ..style = PaintingStyle.stroke
-        ..strokeWidth = strokeWidth
+        ..strokeWidth = baseStrokeWidth + extraStroke
         ..strokeCap = StrokeCap.butt;
       canvas.drawArc(rect, startAngle, sweepAngle, false, paint);
+
+      if (values.length > 1) {
+        dividerAngles.add(startAngle);
+      }
+
       startAngle += sweepAngle;
+      drawnSweep += sweepAngle;
+    }
+
+    // Crisp white radial dividers between slices
+    if (values.length > 1 && progress > 0.15) {
+      final dividerPaint = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4;
+      final innerR = baseRadius - baseStrokeWidth - 2;
+      final outerR = baseRadius + 10;
+      for (final angle in dividerAngles) {
+        final p1 = Offset(center.dx + cos(angle) * innerR, center.dy + sin(angle) * innerR);
+        final p2 = Offset(center.dx + cos(angle) * outerR, center.dy + sin(angle) * outerR);
+        canvas.drawLine(p1, p2, dividerPaint);
+      }
     }
   }
 
   @override
   bool shouldRepaint(covariant _DonutChartPainter oldDelegate) {
-    return oldDelegate.values != values || oldDelegate.colors != colors;
+    return oldDelegate.values != values ||
+        oldDelegate.colors != colors ||
+        oldDelegate.progress != progress ||
+        oldDelegate.activeIndex != activeIndex ||
+        oldDelegate.hoverProgress != hoverProgress;
   }
 }
 

@@ -11,7 +11,7 @@ import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../widgets/animals_in_lot_editor.dart';
-import '../widgets/walk_in_sms_helper.dart';
+import '../services/ear_tag_registry_service.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -385,7 +385,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         );
       }
 
-      // 1a. Allow Admin/Clerk to assign Ear-Tag # per head upon approval (auto-defaults to Auto #1, #2, ...)
+      // 1a. Allow Admin/Clerk to assign exclusive Ear-Tag # per head upon approval
       final fallbackOrigin = [
         request['barangay']?.toString().trim() ?? '',
         request['municipality']?.toString().trim() ?? '',
@@ -395,6 +395,10 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         fallbackCount: (request['animal_count'] as num?)?.toInt() ?? 1,
         fallbackOrigin: fallbackOrigin.isNotEmpty ? fallbackOrigin : 'Tabaco City',
       );
+      Map<String, String> activeEarTags = await EarTagRegistryService.fetchActiveEarTags(
+        supabase,
+        excludeRequestId: request['id'],
+      );
 
       if (!mounted) return;
       final assignedLot = await showDialog<List<AnimalLotItem>>(
@@ -402,6 +406,9 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
         barrierDismissible: false,
         builder: (ctx) {
           List<AnimalLotItem> editableLot = List<AnimalLotItem>.from(approvalLot);
+          bool showEarTagErrors = false;
+          bool isValidating = false;
+          String? validationBanner;
           return StatefulBuilder(
             builder: (ctx, setDlgState) => AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -422,15 +429,37 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Customer livestock details are pre-filled below. Attach the physical Ear-Tag # for each head (leave blank to auto-assign Auto #1, Auto #2, etc.).',
+                        'Customer livestock details are pre-filled below. Assign a unique Ear-Tag # for every head (tags cannot be duplicated while active and are reusable only after release or dispatch).',
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                       ),
+                      if (validationBanner != null) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                          ),
+                          child: Text(
+                            validationBanner!,
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B), fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       AnimalsInLotEditor(
                         items: editableLot,
                         defaultOrigin: fallbackOrigin.isNotEmpty ? fallbackOrigin : 'Tabaco City',
                         tagOnlyMode: true,
-                        onChanged: (updated) => setDlgState(() => editableLot = updated),
+                        activeEarTags: activeEarTags,
+                        requireEarTag: true,
+                        showValidationErrors: showEarTagErrors,
+                        onChanged: (updated) => setDlgState(() {
+                          editableLot = updated;
+                          validationBanner = null;
+                        }),
                       ),
                     ],
                   ),
@@ -438,13 +467,50 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(ctx, null),
+                  onPressed: isValidating ? null : () => Navigator.pop(ctx, null),
                   child: const Text('Cancel'),
                 ),
                 ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(ctx, editableLot),
-                  icon: const Icon(Icons.check, size: 16),
-                  label: const Text('Confirm & Approve'),
+                  onPressed: isValidating
+                      ? null
+                      : () async {
+                          setDlgState(() {
+                            isValidating = true;
+                            showEarTagErrors = true;
+                            validationBanner = null;
+                          });
+                          final freshActive = await EarTagRegistryService.fetchActiveEarTags(
+                            supabase,
+                            excludeRequestId: request['id'],
+                          );
+                          final tagErrors = EarTagRegistryService.validateLot(
+                            editableLot,
+                            freshActive,
+                            requireEarTag: true,
+                          );
+                          if (tagErrors.isNotEmpty) {
+                            if (ctx.mounted) {
+                              setDlgState(() {
+                                activeEarTags = freshActive;
+                                isValidating = false;
+                                validationBanner =
+                                    'Please fix Ear-Tag error(s): ${tagErrors.values.first}';
+                              });
+                            }
+                            return;
+                          }
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx, editableLot);
+                          }
+                        },
+                  icon: isValidating
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.check, size: 16),
+                  label: Text(isValidating ? 'Checking...' : 'Confirm & Approve'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF0F5132),
                     foregroundColor: Colors.white,
@@ -984,20 +1050,6 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
-                                          WalkInSmsHelper.buildNotifyButton(
-                                            context: context,
-                                            contactNumber: req['contact_number'].toString(),
-                                            stage: 'receiving',
-                                            refNo: _buildRefNo(req),
-                                            customerName: (req['customer_name'] ?? 'Customer').toString(),
-                                            marking: (req['customer_marking'] ?? req['marking'] ?? '').toString(),
-                                            livestockType: (req['livestock_type'] ?? '').toString(),
-                                            animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
-                                            requestId: req['id']?.toString(),
-                                          ),
-                                          const SizedBox(width: 6),
-                                        ],
                                         OutlinedButton(
                                           onPressed: () => _showUpdateApprovedRequestDialog(req),
                                           style: OutlinedButton.styleFrom(
@@ -1056,6 +1108,15 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
     if (!livestockOptions.contains(selectedLivestock)) {
       selectedLivestock = livestockOptions.first;
     }
+
+    Map<String, String> activeEarTags = await EarTagRegistryService.fetchActiveEarTags(
+      supabase,
+      excludeRequestId: req['id'],
+    );
+    bool showEarTagErrors = false;
+    bool isSavingUpdate = false;
+    String? earTagErrorBanner;
+    if (!mounted) return;
 
     await showDialog<void>(
       context: context,
@@ -1117,10 +1178,32 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     ),
                   ),
                   const SizedBox(height: 14),
+                  if (earTagErrorBanner != null) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF2F2),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Text(
+                        earTagErrorBanner!,
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF991B1B), fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                   AnimalsInLotEditor(
                     items: editLotItems,
                     defaultOrigin: editFallbackOrigin.isNotEmpty ? editFallbackOrigin : 'Tabaco City',
-                    onChanged: (updated) => setDialogState(() => editLotItems = updated),
+                    activeEarTags: activeEarTags,
+                    requireEarTag: true,
+                    showValidationErrors: showEarTagErrors,
+                    onChanged: (updated) => setDialogState(() {
+                      editLotItems = updated;
+                      earTagErrorBanner = null;
+                    }),
                   ),
                   const SizedBox(height: 12),
                   if (isMarketReq) ...[
@@ -1181,18 +1264,45 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: isSavingUpdate ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () async {
-                final newCount = editLotItems.length;
-                final newMarking = markingCtrl.text.trim().toUpperCase();
-                final serializedLot = List.generate(
-                  editLotItems.length,
-                  (i) => editLotItems[i].toJson(i),
-                );
-                Navigator.pop(ctx);
+              onPressed: isSavingUpdate
+                  ? null
+                  : () async {
+                      setDialogState(() {
+                        isSavingUpdate = true;
+                        showEarTagErrors = true;
+                        earTagErrorBanner = null;
+                      });
+                      final freshActive = await EarTagRegistryService.fetchActiveEarTags(
+                        supabase,
+                        excludeRequestId: req['id'],
+                      );
+                      final tagErrors = EarTagRegistryService.validateLot(
+                        editLotItems,
+                        freshActive,
+                        requireEarTag: true,
+                      );
+                      if (tagErrors.isNotEmpty) {
+                        if (ctx.mounted) {
+                          setDialogState(() {
+                            activeEarTags = freshActive;
+                            isSavingUpdate = false;
+                            earTagErrorBanner =
+                                'Please fix Ear-Tag error(s): ${tagErrors.values.first}';
+                          });
+                        }
+                        return;
+                      }
+                      final newCount = editLotItems.length;
+                      final newMarking = markingCtrl.text.trim().toUpperCase();
+                      final serializedLot = List.generate(
+                        editLotItems.length,
+                        (i) => editLotItems[i].toJson(i),
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
                 try {
                   final payload = <String, dynamic>{
                     'customer_name': nameCtrl.text.trim(),
@@ -1953,6 +2063,8 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
   List<_CustomerLookupItem> _lookupDirectory = [];
   _CustomerLookupItem? _selectedCustomer;
+  Map<String, String> _activeEarTags = {};
+  bool _showEarTagValidationErrors = false;
   bool _isMarkingLocked = false;
   bool _isSeparateFacility = false;
   String _selectedEmergencyCause = 'Heat Stroke';
@@ -1968,6 +2080,14 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
     super.initState();
     _loadMunicipalities(_selectedProvinceCode);
     _loadRegisteredCustomers();
+    _loadActiveEarTags();
+  }
+
+  Future<void> _loadActiveEarTags() async {
+    final active = await EarTagRegistryService.fetchActiveEarTags(widget.supabase);
+    if (mounted) {
+      setState(() => _activeEarTags = active);
+    }
   }
 
   Future<void> _loadRegisteredCustomers() async {
@@ -2667,9 +2787,35 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       return;
     }
 
-    setState(() => _isSaving = true);
+      setState(() {
+        _isSaving = true;
+        _showEarTagValidationErrors = true;
+      });
     try {
       await AppSettingsService.instance.ensureAdminAuthSession();
+
+      // Enforce exclusive, non-empty per-head Ear-Tags across all active (unreleased/undispatched) requests
+      final freshActiveTags = await EarTagRegistryService.fetchActiveEarTags(widget.supabase);
+      final earTagErrors = EarTagRegistryService.validateLot(
+        _walkInLot,
+        freshActiveTags,
+        requireEarTag: true,
+      );
+      if (earTagErrors.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _activeEarTags = freshActiveTags;
+            _isSaving = false;
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Ear-Tag validation failed: ${earTagErrors.values.first}'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+        return;
+      }
       final markingInput = _markingCtrl.text.trim();
       final currentEnteredName = _customerNameCtrl.text.trim().toUpperCase();
       final conflicting = await widget.supabase
@@ -2829,10 +2975,6 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
 
       if (mounted) {
         final savedCustomerName = _customerNameCtrl.text.trim();
-        final savedMarking = _markingCtrl.text.trim();
-        final savedAnimalType = _selectedAnimalType ?? 'Hog';
-        final savedHeadCount = _walkInLot.length;
-        final rootContext = Navigator.of(context, rootNavigator: true).context;
         final messenger = ScaffoldMessenger.of(context);
 
         widget.onSaved();
@@ -2842,25 +2984,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
           SnackBar(
             content: Text('Walk-in request $refNo saved for $savedCustomerName.'),
             backgroundColor: const Color(0xFF0F5132),
-            duration: const Duration(seconds: 6),
-            action: contactStr.isNotEmpty
-                ? SnackBarAction(
-                    label: 'Send SMS',
-                    textColor: const Color(0xFFD1FAE5),
-                    onPressed: () {
-                      WalkInSmsHelper.showSmsFeedbackDialog(
-                        context: rootContext,
-                        contactNumber: contactStr,
-                        stage: 'receiving',
-                        refNo: refNo,
-                        customerName: savedCustomerName,
-                        marking: savedMarking,
-                        livestockType: savedAnimalType,
-                        animalCount: savedHeadCount,
-                      );
-                    },
-                  )
-                : null,
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -3070,6 +3194,9 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               AnimalsInLotEditor(
                 items: _walkInLot,
                 defaultOrigin: _currentOriginLabel(),
+                activeEarTags: _activeEarTags,
+                requireEarTag: true,
+                showValidationErrors: _showEarTagValidationErrors,
                 onChanged: (updated) => setState(() => _walkInLot = updated),
               ),
               const SizedBox(height: 16),

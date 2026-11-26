@@ -43,9 +43,10 @@ class AnimalLotItem {
   }
 
   Map<String, dynamic> toJson(int index) {
+    final cleanTag = earTag.trim().toUpperCase();
     return {
       'head_no': index + 1,
-      'ear_tag': earTag.trim().isNotEmpty ? earTag.trim() : 'Auto #${index + 1}',
+      'ear_tag': cleanTag.isNotEmpty ? cleanTag : 'Auto #${index + 1}',
       'color': color.trim(),
       'origin': origin.trim(),
       'sex': sex.trim(),
@@ -103,6 +104,13 @@ class AnimalsInLotEditor extends StatefulWidget {
   final String defaultOrigin;
   final ValueChanged<List<AnimalLotItem>> onChanged;
   final bool tagOnlyMode;
+  /// Active ear-tags from Supabase (`NORMALIZED_TAG -> "MI-YYYY-XXX (Customer)"`).
+  /// Any head matching a key here shows an immediate inline conflict warning.
+  final Map<String, String> activeEarTags;
+  /// When true, every head must have an explicit, non-empty Ear-Tag #.
+  final bool requireEarTag;
+  /// When true, blank Ear-Tag fields also show inline red validation errors.
+  final bool showValidationErrors;
 
   const AnimalsInLotEditor({
     super.key,
@@ -110,6 +118,9 @@ class AnimalsInLotEditor extends StatefulWidget {
     required this.defaultOrigin,
     required this.onChanged,
     this.tagOnlyMode = false,
+    this.activeEarTags = const {},
+    this.requireEarTag = true,
+    this.showValidationErrors = false,
   });
 
   @override
@@ -212,9 +223,35 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
     widget.onChanged(next);
   }
 
+  Map<int, String> _computeEarTagErrors() {
+    final errors = <int, String>{};
+    final seen = <String, int>{};
+    for (int i = 0; i < widget.items.length; i++) {
+      final norm = widget.items[i].earTag.trim().toUpperCase();
+      if (norm.isEmpty) {
+        if (widget.requireEarTag && widget.showValidationErrors) {
+          errors[i] = 'Ear-Tag # is required';
+        }
+        continue;
+      }
+      if (seen.containsKey(norm)) {
+        final first = seen[norm]!;
+        errors[i] = 'Duplicate Ear-Tag (already used on Head #${first + 1})';
+        errors.putIfAbsent(first, () => 'Duplicate Ear-Tag (also used on Head #${i + 1})');
+        continue;
+      }
+      seen[norm] = i;
+      if (widget.activeEarTags.containsKey(norm)) {
+        errors[i] = 'In use by ${widget.activeEarTags[norm]} — reusable after release/dispatch';
+      }
+    }
+    return errors;
+  }
+
   @override
   Widget build(BuildContext context) {
     final count = widget.items.length;
+    final earTagErrors = _computeEarTagErrors();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -249,6 +286,7 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
         const SizedBox(height: 10),
         ...List.generate(widget.items.length, (i) {
           final item = widget.items[i];
+          final tagError = earTagErrors[i];
           if (widget.tagOnlyMode) {
             final wtLabel = (item.liveWeight != null && item.liveWeight! > 0)
                 ? '${item.liveWeight!.toStringAsFixed(1)} kg'
@@ -260,25 +298,32 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(
+                  color: tagError != null ? Colors.red.shade400 : const Color(0xFFE2E8F0),
+                  width: tagError != null ? 1.4 : 1.0,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD1FAE5),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          'Head #${i + 1}',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF047857),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFD1FAE5),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Head #${i + 1}',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF047857),
+                            ),
                           ),
                         ),
                       ),
@@ -286,10 +331,17 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
                       Expanded(
                         child: TextFormField(
                           initialValue: item.earTag,
-                          onChanged: (v) => item.earTag = v,
+                          textCapitalization: TextCapitalization.characters,
+                          onChanged: (v) {
+                            item.earTag = v;
+                            setState(() {});
+                            widget.onChanged(widget.items);
+                          },
                           decoration: InputDecoration(
-                            labelText: 'Ear-Tag #',
-                            hintText: 'Auto #${i + 1}',
+                            labelText: widget.requireEarTag ? 'Ear-Tag # *' : 'Ear-Tag #',
+                            hintText: widget.requireEarTag ? 'Required (e.g. ET-001)' : 'Auto #${i + 1}',
+                            errorText: tagError,
+                            errorMaxLines: 2,
                             isDense: true,
                             filled: true,
                             fillColor: Colors.white,
@@ -325,20 +377,31 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
             decoration: BoxDecoration(
               color: const Color(0xFFFAFBFD),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(
+                color: tagError != null ? Colors.red.shade400 : Colors.grey.shade300,
+                width: tagError != null ? 1.4 : 1.0,
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: TextFormField(
                         initialValue: item.earTag,
-                        onChanged: (v) => item.earTag = v,
+                        textCapitalization: TextCapitalization.characters,
+                        onChanged: (v) {
+                          item.earTag = v;
+                          setState(() {});
+                          widget.onChanged(widget.items);
+                        },
                         decoration: InputDecoration(
-                          labelText: 'Ear-Tag #',
-                          hintText: 'Auto #${i + 1}',
+                          labelText: widget.requireEarTag ? 'Ear-Tag # *' : 'Ear-Tag #',
+                          hintText: widget.requireEarTag ? 'Required (e.g. ET-001)' : 'Auto #${i + 1}',
+                          errorText: tagError,
+                          errorMaxLines: 2,
                           isDense: true,
                           filled: true,
                           fillColor: Colors.white,

@@ -53,23 +53,23 @@ The Ante-Mortem Clinical Data Requirements category captures live animal health 
 
 ---
 
-### C. Sub-Domain C: Municipal Cashiering, PayMongo Checkout, Audit Trail, and Statutory Reports Information Requirements
+### C. Sub-Domain C: Municipal Cashiering, Xendit Checkout, Audit Trail, and Statutory Reports Information Requirements
 
-To support municipal fiscal accountability, automated tariff computation, tamper-evident auditing, and statutory compliance, Table 3 outlines the data structures governing the cashiering console, PayMongo online payment integration, meat releasing, immutable staff audit logs, customer feedback, and official reporting.
+To support municipal fiscal accountability, automated tariff computation, tamper-evident auditing, and statutory compliance, Table 3 outlines the data structures governing the cashiering console, Xendit online payment integration, meat releasing, immutable staff audit logs, customer feedback, and official reporting.
 
-The Municipal Tariff & Billing Requirements category encompasses the dynamic fee parameters established by Tabaco City revenue ordinances—evaluating base facility fees, veterinary inspection dues, holding corral charges, variable post-mortem fees based on certified carcass weight, delivery van fees for Market requests, and cold-storage/late-pickup penalties. The PayMongo Checkout & Receipt Parameters category manages online checkout sessions (GCash, Maya, Cards, GrabPay), Cash Over-the-Counter / Cash on Pickup verification by clerks, transaction references, and official receipt numbers (`RCP-YYYY-XXX`). The Releasing, Audit Trail & Reporting Data category captures meat release timestamps and authorized representative handoff records, immutable Admin-only Staff Audit Logs (`audit_logs`), customer satisfaction ratings and comments (`reviews`), Illegal Slaughter Report submissions (`reports`), and daily, weekly, monthly, or custom date-range payloads for legal-size NMIS PDF reports and Excel-ready CSV exports.
+The Municipal Tariff & Billing Requirements category encompasses the dynamic fee parameters established by Tabaco City revenue ordinances—evaluating base facility fees, veterinary inspection dues, holding corral charges, variable post-mortem fees based on certified carcass weight, delivery van fees for Market requests, and cold-storage/late-pickup penalties. The Xendit Checkout & Receipt Parameters category manages online checkout sessions (GCash, Maya, Cards, GrabPay), Cash Over-the-Counter / Cash on Pickup verification by clerks, transaction references, and official receipt numbers (`RCP-YYYY-XXX`). The Releasing, Audit Trail & Reporting Data category captures meat release timestamps and authorized representative handoff records, immutable Admin-only Staff Audit Logs (`audit_logs`), customer satisfaction ratings and comments (`reviews`), Illegal Slaughter Report submissions (`reports`), and daily, weekly, monthly, or custom date-range payloads for legal-size NMIS PDF reports and Excel-ready CSV exports.
 
-#### Table 3. Sub-Domain C: Municipal Cashiering, PayMongo Checkout, Audit Trail, and Statutory Reports Information Requirements
+#### Table 3. Sub-Domain C: Municipal Cashiering, Xendit Checkout, Audit Trail, and Statutory Reports Information Requirements
 
-| Municipal Tariff & Billing Requirements | PayMongo Checkout & Receipt Parameters | Releasing, Audit Trail & Reporting Data |
-| :--- | :--- | :--- |
-| Veterinary Health Certificate Fee (₱50.00) | Payment Channel (`Cash` vs. `PayMongo Online: GCash/Maya/Card/GrabPay`) | Meat Release Status (`released`), Timestamp (`released_at`) & Clerk ID |
-| Permit to Slaughter Fee (₱60.00) | PayMongo Checkout Session ID (`cs_...`) & Checkout URL | Authorized Representative / Claimant Name & Delivery Driver Details |
-| Slaughterhouse Facility Fee (₱60.00) | Payment Verification Status (`pending` &rarr; `paid` via Clerk Confirmation) | Immutable Staff Audit Logs (`audit_logs`: Actor, Role, Module, Action, Timestamp) |
-| Holding Corral Fee (₱40.00) | Transaction Reference Code & Detected Payment Method | Custom Date Range PDF & Excel-Ready CSV Export Payloads |
-| Ante-Mortem Inspection Fee (₱40.00) | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) & Printable PDF | Customer Feedback Ratings (1–5★) & Comments (`reviews`) |
-| Post-Mortem Rate (₱5.00 × Carcass Weight kg) | Total Fee, Balance (`0.00` when settled) & Cashier Audit Record | Illegal Slaughter Report Details, Location, Photo Evidence & Case Status (`reports`) |
-| Delivery Van Fee (₱60.00, Market) & Cold Storage Fee (₱150.00) | Automated Customer Receipt & Staff Bell Notifications | Legal-Size NMIS Daily Production PDF & Resend Email Transmittal Log (`nmic_transmissions`) |
+| Municipal Tariff & Billing Requirements                        | Xendit Checkout & Receipt Parameters                                         | Releasing, Audit Trail & Reporting Data                                                    |
+| :------------------------------------------------------------- | :--------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
+| Veterinary Health Certificate Fee (₱50.00)                     | Payment Channel (`Cash` vs. `Xendit Online: GCash/Maya/Card/GrabPay/QR Ph`)  | Meat Release Status (`released`), Timestamp (`released_at`) & Clerk ID                     |
+| Permit to Slaughter Fee (₱60.00)                               | Xendit Invoice ID (`xnd_...`) & Hosted Invoice URL                           | Authorized Representative / Claimant Name & Delivery Driver Details                        |
+| Slaughterhouse Facility Fee (₱60.00)                           | Payment Verification Status (`pending` &rarr; `paid` via Clerk Confirmation) | Immutable Staff Audit Logs (`audit_logs`: Actor, Role, Module, Action, Timestamp)          |
+| Holding Corral Fee (₱40.00)                                    | Transaction Reference Code & Detected Payment Method                         | Custom Date Range PDF & Excel-Ready CSV Export Payloads                                    |
+| Ante-Mortem Inspection Fee (₱40.00)                            | Official Slaughterhouse Receipt (`RCP-YYYY-XXX`) & Printable PDF             | Customer Feedback Ratings (1–5★) & Comments (`reviews`)                                    |
+| Post-Mortem Rate (₱5.00 × Carcass Weight kg)                   | Total Fee, Balance (`0.00` when settled) & Cashier Audit Record              | Illegal Slaughter Report Details, Location, Photo Evidence & Case Status (`reports`)       |
+| Delivery Van Fee (₱60.00, Market) & Cold Storage Fee (₱150.00) | Automated Customer Receipt & Staff Bell Notifications                        | Legal-Size NMIS Daily Production PDF & Resend Email Transmittal Log (`nmic_transmissions`) |
 
 ---
 
@@ -138,9 +138,9 @@ Figure 14 shows the **Municipal Tariff Billing & Cashiering Workspace**. Cashier
 
 Figure 14. Municipal Tariff Billing & Cashiering Workspace
 
-Figure 15 displays the **PayMongo Hosted GCash Digital Payment Gateway**. For cashless payments, the client invokes a serverless Deno Edge Function, redirecting the user to PayMongo's secure GCash portal. Webhooks confirm transaction settlement and update database records instantaneously.
+Figure 15 displays the **Xendit Hosted GCash Digital Payment Gateway**. For cashless payments, the client invokes a serverless Deno Edge Function, redirecting the user to Xendit's secure GCash portal. Webhooks confirm transaction settlement and update database records instantaneously.
 
-Figure 15. PayMongo Hosted GCash Digital Payment Gateway
+Figure 15. Xendit Hosted GCash Digital Payment Gateway
 
 Figure 16 illustrates the **Official Slaughterhouse Receipt & Barcode Gate Pass**. Upon payment settlement, the system compiles an official municipal receipt (`RCP-YYYY-XXX`) containing an encrypted 2D QR gate pass token, itemized fee breakdown, and customer metadata.
 
@@ -175,8 +175,8 @@ In modern software engineering, system architecture serves as the fundamental st
 
 Applied to the **Operation Management Application for AA Slaughterhouse of Tabaco City**, the system adopts a decoupled, cloud-native multi-tier architecture that cleanly separates client presentation, serverless business logic, real-time synchronization, and relational data persistence:
 
-1. **Presentation Tier (Cross-Platform Clients & Web Distribution):** Consists of the native Android **Customer Mobile Application** (`mobile_app`, distributed via the Vercel static portal at `https://tabaco-abattoir-app.vercel.app`) for remote slaughter bookings, permit uploads, live tracking, PayMongo GCash checkout, and whistleblower reporting, alongside the role-based **Administrative Operations Console** (`admin_panel`, hosted on Vercel at `https://web-ten-sooty-86.vercel.app`) tailored for Administrators, Receiving Clerks, Veterinary Meat Inspectors, and Municipal Cashiers.
-2. **Application & Integration Tier (Serverless Edge Functions & External Gateways):** Executed on Supabase Deno Edge Functions (`paymongo-webhook`, `send-walkin-sms`, and checkout handlers) to isolate sensitive API credentials, verify cryptographic PayMongo payment webhooks, and dispatch JWT-authenticated manual Walk-In SMS alerts via Semaphore (`TCAASlaught` Sender ID) with automatic fallback to the TextBee Android gateway.
+1. **Presentation Tier (Cross-Platform Clients & Web Distribution):** Consists of the native Android **Customer Mobile Application** (`mobile_app`, distributed via the Vercel static portal at `https://tabaco-abattoir-app.vercel.app`) for remote slaughter bookings, permit uploads, live tracking, Xendit GCash checkout, and whistleblower reporting, alongside the role-based **Administrative Operations Console** (`admin_panel`, hosted on Vercel at `https://web-ten-sooty-86.vercel.app`) tailored for Administrators, Receiving Clerks, Veterinary Meat Inspectors, and Municipal Cashiers.
+2. **Application & Integration Tier (Serverless Edge Functions & External Gateways):** Executed on Supabase Deno Edge Functions (`create-gcash-payment`, `send-walkin-sms`, and `receive-walkin-sms`) to isolate sensitive API credentials, create and verify Xendit Invoice API v2 payment transactions, and dispatch JWT-authenticated Walk-In SMS alerts via Semaphore (`TCAASlaught` Sender ID) with automatic fallback to the TextBee Android gateway.
 3. **Real-Time Synchronization & Data Persistence Tier (Supabase Cloud):** Centered on **PostgreSQL 15+** with strict ACID transactions, **GoTrue JWT Authentication**, database-enforced **Row-Level Security (RLS)** (`public.is_admin()` / `public.is_staff()`), encrypted binary **Storage Buckets** (`request-documents`, `report-evidence`, `avatars`), and **Supabase Postgres Realtime** (`supabase_realtime` publication with `REPLICA IDENTITY FULL`) feeding the multiplexed `AdminRealtimeHub` WebSocket channel for sub-second updates across all Admin and Clerk stations.
 
 ---
@@ -199,7 +199,7 @@ graph TD
 
         subgraph PROCESS
             P1["SOFTWARE DEVELOPMENT (RAD)<br/>• Requirements Analysis<br/>• Interactive Prototyping"]
-            P2["SYSTEM WORKFLOW ENGINE<br/>• Authentication & Role Validation<br/>• Request Triage & Allocation<br/>• Document Compliance Verification<br/>• Ante & Post-Mortem Inspection<br/>• Slaughter Line Process Tracking<br/>• Carcass Weighing & Fee Billing<br/>• PayMongo Digital Gateway Flow<br/>• Legal MIC & PDF Report Generation<br/>• Realtime Push Notification Sync"]
+            P2["SYSTEM WORKFLOW ENGINE<br/>• Authentication & Role Validation<br/>• Request Triage & Allocation<br/>• Document Compliance Verification<br/>• Ante & Post-Mortem Inspection<br/>• Slaughter Line Process Tracking<br/>• Carcass Weighing & Fee Billing<br/>• Xendit Digital Gateway Flow<br/>• Legal MIC & PDF Report Generation<br/>• Realtime Push Notification Sync"]
         end
 
         subgraph OUTPUT
@@ -228,14 +228,14 @@ The Proposed System Flowchart depicted in Figure 20 defines the dual-track opera
 1. **Track 1: Internal Staff Cascading Role Dispatcher (`Internal User — Web Admin Portal`)**:
    - **Staff Authentication (`Staff Authenticated?`)**: Internal abattoir personnel authenticate strictly via administrator-provisioned **Email & Password** credentials (`signInWithPassword`) without public registration or OTP requirements.
    - **Administrator (`Is Admin? == Yes`)**: Routes to the **Admin Workstation**. While retaining full superuser access across all operational modules (Receiving, Document Verification, Slaughter Inspection, Cashiering, Meat Releasing), the Administrator's primary focus centers on **Reports & Records**—specifically compiling the official Daily Slaughterhouse Production Report (formatted as a legal-sized 8.5" × 14" document complying with National Meat Inspection Service [NMIS] regulatory standards), generating municipal fiscal audit ledgers, and investigating whistleblower incident dossiers for inter-agency enforcement with the City Veterinary Office (CVO) and Philippine National Police (PNP).
-   - **Receiving Clerk & Cashier (`Is Clerk? == Yes`)**: Routes to the **Clerk Workstation**, governing front-of-house intake and financial settlement: (a) *Receiving & New Requests* (evaluating daily corral capacity and barangay/market delivery quotas), (b) *Document Verification* (auditing physical livestock ear-tags against uploaded Veterinary Health Certificates and shipping permits), (c) *Payment & Cashiering* (computing municipal tariffs, accepting over-the-counter cash tendered or verifying digital PayMongo webhook settlements, and issuing Official Receipts `RCP-YYYY-XXX`), and (d) *Meat Releasing* (scanning the cryptographically signed QR gate pass at the dispatch loading dock and stamping `released_at = NOW()`).
+   - **Receiving Clerk & Cashier (`Is Clerk? == Yes`)**: Routes to the **Clerk Workstation**, governing front-of-house intake and financial settlement: (a) *Receiving & New Requests* (evaluating daily corral capacity and barangay/market delivery quotas), (b) *Document Verification* (auditing physical livestock ear-tags against uploaded Veterinary Health Certificates and shipping permits), (c) *Payment & Cashiering* (computing municipal tariffs, accepting over-the-counter cash tendered or verifying digital Xendit webhook settlements, and issuing Official Receipts `RCP-YYYY-XXX`), and (d) *Meat Releasing* (scanning the cryptographically signed QR gate pass at the dispatch loading dock and stamping `released_at = NOW()`).
    - **Veterinary Meat Inspector (`Is Inspector? == Yes`)**: Routes to the **Inspector Workstation**, commanding abattoir floor operations and biological safety checks: (a) *Clinical Ante-Mortem Inspection* at holding pens (quarantining or incinerating unfit livestock under Condemnation Slip `CS-YYYY-XXX`), (b) *Slaughter Operations Line Supervision* across hygienic stations (stunning, bleeding, scalding/dehairing, evisceration, splitting), (c) *Post-Mortem Visceral Pathology* on carcasses and offal, and (d) *Calibrated Carcass Weighing (kg)* and stamping digital Meat Inspection Certificates (MIC).
 
 2. **Track 2: Customer / Client Service Pipeline (`Customer / Client — Mobile App`)**:
    - **Customer Authentication & Mobile Sign-Up OTP (`Customer Authenticated?`)**: Returning customers sign in using their registered Email/Password, while new customers registering on the mobile application must complete **Sign-Up with One-Time Password (OTP) Verification** to validate account ownership.
    - **Action Type Selection**: Allows registered meat dealers, market vendors, or walk-in citizens to choose between filing a *Whistleblower Tip* (attaching GPS geolocation and photographic evidence of clandestine slaughter) or initiating a *Slaughter Service Request*.
    - **End-to-End Service Progression & Cross-Functional Gatekeeping**: The customer's slaughter request progresses sequentially through each physical and digital gate—Intake Approval $\rightarrow$ Document Verification $\rightarrow$ Ante-Mortem Inspection $\rightarrow$ Slaughter Operations Line $\rightarrow$ Post-Mortem Inspection $\rightarrow$ Carcass Weighing & MIC $\rightarrow$ Municipal Fee Computation $\rightarrow$ Multi-Channel Payment Settlement $\rightarrow$ Dispatch Loading Dock Verification $\rightarrow$ Confirmed Pickup. Dotted cross-links explicitly illustrate how the Clerk, Inspector, and Administrator workstations drive each stage of the customer's transaction lifecycle.
-   - **Multi-Channel Payment Gateway**: Expanding beyond single-wallet GCash, the payment stage integrates a comprehensive **PayMongo Multi-Channel Online Gateway** supporting **GCash, Maya, GrabPay, Visa/Mastercard credit and debit cards, and national QR Ph standards** with automated serverless webhook signature validation (`Status == 'paid'`), operating alongside traditional municipal over-the-counter cash cashiering.
+   - **Multi-Channel Payment Gateway**: Expanding beyond single-wallet GCash, the payment stage integrates a comprehensive **Xendit Multi-Channel Online Gateway** supporting **GCash, Maya, GrabPay, Visa/Mastercard credit and debit cards, and national QR Ph standards** with automated serverless webhook signature validation (`Status == 'paid'`), operating alongside traditional municipal over-the-counter cash cashiering.
 
 ```mermaid
 flowchart TD
@@ -324,7 +324,7 @@ Figure 20. Proposed System Flowchart
 
 The Use Case Diagram in Figure 21 is a behavioral diagram in the Unified Modeling Language (UML) that captures the functional requirements of a system by modeling the dynamic interactions between external actors and internal system use cases (Sommerville, 2020). It defines the system boundary and illustrates how different user roles engage with specific platform features to achieve operational goals, utilizing `<<include>>` and `<<extend>>` relationships to represent mandatory sub-processes and conditional workflows (Pressman & Maxim, 2020).
 
-The proposed Operation Management Application for AA Slaughterhouse of Tabaco City defines its functional scope across four primary human actors modeled in Figure 21: **Customer / Meat Dealer**, **Receiving Clerk & Cashier**, **Veterinary Meat Inspector**, and **Slaughterhouse Administrator**. On the client side, the **Customer / Meat Dealer** interacts with the mobile portal to *Book Slaughter Schedule* (which `<<includes>>` *Upload Required Documents* and *Select Request Type*), *Track Request Status* (which `<<includes>>` *Receive Push Notifications*), *Settle Municipal Fees* (choosing between multi-channel online checkout via PayMongo [GCash, Maya, Cards, QR Ph] or over-the-counter cash), *View Receipt & Gate Pass*, *View Condemnation Slip*, and *Report Illegal Slaughter* (which `<<includes>>` *Attach Location & Photo*). At the facility entry and payment windows, the **Receiving Clerk & Cashier** utilizes the system to *Approve Requests & Assign Pens* (which `<<includes>>` *Check Pen Capacity*), *Verify Required Documents*, *Compute Slaughter Fees*, *Process Cash Payment*, and *Confirm Meat Release* (which `<<includes>>` *Record Release Timestamp*). On the abattoir floor, the **Veterinary Meat Inspector** engages the platform to *Conduct Ante-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Ante-Mortem Condemnation Slip*), *Update Slaughter Stage*, *Perform Post-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Post-Mortem Condemnation Slip*), and *Record Carcass Weight* (which `<<includes>>` *Issue Meat Inspection Certificate (MIC)*). Finally, the **Slaughterhouse Administrator** oversees system governance by executing use cases to *Manage Users & Roles*, *Manage Illegal Slaughter Reports* (which `<<includes>>` *Update Case Status*), *Generate Production Reports*, and *View Dashboard & Records*.
+The proposed Operation Management Application for AA Slaughterhouse of Tabaco City defines its functional scope across four primary human actors modeled in Figure 21: **Customer / Meat Dealer**, **Receiving Clerk & Cashier**, **Veterinary Meat Inspector**, and **Slaughterhouse Administrator**. On the client side, the **Customer / Meat Dealer** interacts with the mobile portal to *Book Slaughter Schedule* (which `<<includes>>` *Upload Required Documents* and *Select Request Type*), *Track Request Status* (which `<<includes>>` *Receive Push Notifications*), *Settle Municipal Fees* (choosing between multi-channel online checkout via Xendit [GCash, Maya, Cards, QR Ph] or over-the-counter cash), *View Receipt & Gate Pass*, *View Condemnation Slip*, and *Report Illegal Slaughter* (which `<<includes>>` *Attach Location & Photo*). At the facility entry and payment windows, the **Receiving Clerk & Cashier** utilizes the system to *Approve Requests & Assign Pens* (which `<<includes>>` *Check Pen Capacity*), *Verify Required Documents*, *Compute Slaughter Fees*, *Process Cash Payment*, and *Confirm Meat Release* (which `<<includes>>` *Record Release Timestamp*). On the abattoir floor, the **Veterinary Meat Inspector** engages the platform to *Conduct Ante-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Ante-Mortem Condemnation Slip*), *Update Slaughter Stage*, *Perform Post-Mortem Inspection* (which conditionally `<<extends>>` to *Issue Post-Mortem Condemnation Slip*), and *Record Carcass Weight* (which `<<includes>>` *Issue Meat Inspection Certificate (MIC)*). Finally, the **Slaughterhouse Administrator** oversees system governance by executing use cases to *Manage Users & Roles*, *Manage Illegal Slaughter Reports* (which `<<includes>>` *Update Case Status*), *Generate Production Reports*, and *View Dashboard & Records*.
 
 ```mermaid
 graph TD
@@ -436,7 +436,7 @@ Figure 21. Use Case Diagram
 
 	The Class Diagram in Figure 22 models the core domain entity structure, attributes, encapsulation methods, and relational associations governing livestock intake scheduling, clinical meat inspection, municipal tariff billing, and administrative controls within the AA Slaughterhouse of Tabaco City (Sommerville, 2020). The data model isolates system identity and security through the `UserProfile` class, which encapsulates role-based authorization rules (`hasPermission()`) and authentication credential validation (`validateCredentials()`) across customers, receiving clerks, meat inspectors, cashiers, and administrators. Stakeholder engagement and regulatory reporting implement a one-to-many association hierarchy where each `UserProfile` creates one or more `SlaughterRequest` bookings, files `IllegalSlaughterReport` whistleblower records with embedded GPS coordinates and photo evidence, and receives `NotificationRecord` alerts that synchronize real-time push notifications across mobile and web interfaces (Pressman & Maxim, 2020).
 
-	Abattoir floor execution, clinical compliance, and financial auditing are enforced through tightly coupled transactional entities that guarantee ACID consistency. The `SlaughterRequest` entity functions as the primary aggregate root, encapsulating livestock species, head counts, holding pen allocations (`allocatePen()`), and real-time status transitions (`updateStatus()`), while governing three dependent composition entities. Gate compliance is managed by the `DocumentAttachment` class, which encapsulates required document URLs (Barangay Certificate, Business Permit, Proof of Ownership, and Veterinary Certificate) and executes physical gate verification (`verifyGateCompliance()`). Sequential clinical evaluations are enforced by the `SlaughterInspection` entity, which tracks ante-mortem corral assessments (`recordAnteMortem()`), active slaughter line stages (`advanceStage()`), post-mortem visceral findings (`recordPostMortem()`), calibrated net dressed carcass weights, and condemnation reasons. Finally, approved slaughter requests are settled via the `PaymentInvoice` class, which encapsulates municipal tariff calculations (`calculateTariff()`), over-the-counter cash tendering (`settleCash()`), official receipt generation (`RCP-YYYY-XXX`), and PayMongo GCash digital gateway verification (`settleGCash()`).
+	Abattoir floor execution, clinical compliance, and financial auditing are enforced through tightly coupled transactional entities that guarantee ACID consistency. The `SlaughterRequest` entity functions as the primary aggregate root, encapsulating livestock species, head counts, holding pen allocations (`allocatePen()`), and real-time status transitions (`updateStatus()`), while governing three dependent composition entities. Gate compliance is managed by the `DocumentAttachment` class, which encapsulates required document URLs (Barangay Certificate, Business Permit, Proof of Ownership, and Veterinary Certificate) and executes physical gate verification (`verifyGateCompliance()`). Sequential clinical evaluations are enforced by the `SlaughterInspection` entity, which tracks ante-mortem corral assessments (`recordAnteMortem()`), active slaughter line stages (`advanceStage()`), post-mortem visceral findings (`recordPostMortem()`), calibrated net dressed carcass weights, and condemnation reasons. Finally, approved slaughter requests are settled via the `PaymentInvoice` class, which encapsulates municipal tariff calculations (`calculateTariff()`), over-the-counter cash tendering (`settleCash()`), official receipt generation (`RCP-YYYY-XXX`), and Xendit GCash digital gateway verification (`settleGCash()`).
 
 ```mermaid
 classDiagram
@@ -555,7 +555,7 @@ Figure 22. Class Diagram
 
 A sequence diagram is a dynamic behavioral diagram in the Unified Modeling Language (UML) that depicts the chronological sequence of interactions and message exchanges between participating objects, actors, and architectural lifelines during a specific system scenario (Sommerville, 2020). By tracing communication events from top to bottom along vertical lifelines, the sequence diagram illuminates how distributed components collaborate across network boundaries to satisfy functional requirements, enforce transactional business rules, and maintain data consistency across system tiers (Pressman & Maxim, 2020).
 
-**End-to-End Operational Sequence.** The proposed Operation Management Application for AA Slaughterhouse of Tabaco City formalizes the operational lifecycle of meat processing through the end-to-end sequence modeled in Figure 23. The interaction spans three primary human actors (Customer, Receiving Clerk & Cashier, and Veterinary Meat Inspector) and six technical runtime participants (Flutter Mobile App, Flutter Admin Panel, Supabase PostgreSQL Database, Supabase Object Storage, Supabase Edge Functions, and the PayMongo Payment API).
+**End-to-End Operational Sequence.** The proposed Operation Management Application for AA Slaughterhouse of Tabaco City formalizes the operational lifecycle of meat processing through the end-to-end sequence modeled in Figure 23. The interaction spans three primary human actors (Customer, Receiving Clerk & Cashier, and Veterinary Meat Inspector) and six technical runtime participants (Flutter Mobile App, Flutter Admin Panel, Supabase PostgreSQL Database, Supabase Object Storage, Supabase Edge Functions, and the Xendit Payment API).
 
 ```mermaid
 sequenceDiagram
@@ -568,7 +568,7 @@ sequenceDiagram
     participant DB as 🗄️ PostgreSQL DB
     participant Storage as 📦 Storage Bucket
     participant Edge as ⚡ Edge Function
-    participant PayMongo as 💳 PayMongo API
+    participant Xendit as 💳 Xendit API
 
     %% 1. Intake Booking
     Customer->>Mobile: Fill slaughter intake details & attach permits
@@ -612,15 +612,15 @@ sequenceDiagram
     alt Pay via GCash
         Customer->>Mobile: Select GCash -> Tap "Pay Now"
         Mobile->>Edge: POST /create-gcash-payment {amount, request_id}
-        Edge->>PayMongo: POST /links (Basic Auth)
-        PayMongo-->>Edge: Return checkout_url
-        Edge-->>Mobile: Return checkout_url
-        Mobile->>Customer: Open PayMongo portal in browser
-        Customer->>PayMongo: Complete GCash payment
+        Edge->>Xendit: POST /v2/invoices (Basic Auth)
+        Xendit-->>Edge: Return invoice_url
+        Edge-->>Mobile: Return checkoutUrl
+        Mobile->>Customer: Open Xendit portal in browser
+        Customer->>Xendit: Complete GCash/Maya payment
         Customer->>Mobile: Return to app
-        Mobile->>Edge: GET /create-gcash-payment?link_id=xxx
-        Edge->>PayMongo: Verify payment status
-        PayMongo-->>Edge: status: "paid"
+        Mobile->>Edge: GET /create-gcash-payment?link_id=xnd_...
+        Edge->>Xendit: Verify invoice status (GET /v2/invoices/:id)
+        Xendit-->>Edge: status: "PAID"
         Edge-->>Mobile: status: "paid"
         Mobile->>DB: UPDATE payments SET status='paid'
         Mobile->>DB: UPDATE requests SET status='paid'
@@ -653,7 +653,7 @@ The System Sequence Diagram depicted in Figure 23 delineates the chronological m
 4. **Post-Mortem Visceral Pathology and Carcass Weighing (Steps 22–27):** Following dressing operations, the veterinary meat inspector performs post-mortem pathological examinations on internal organs (liver, lungs, kidneys, spleen, and lymph nodes) and carcass musculature. Wholesome carcasses advance to the calibrated digital scale station, where net dressed carcass weights ($W$ in kilograms) are captured. The inspector records clinical findings and clicks "Save & Approve Release." This action concurrently updates `requests` to `status = 'releasable'`, marks `slaughter_inspection.post_mortem = 'Passed'` with recorded carcass weights, and invokes the municipal tariff calculation engine to insert a billing record into `payments` with `status = 'pending'`. A mobile notification alerts the meat dealer that their carcass has passed inspection and the municipal invoice is ready for settlement.
 
 5. **Dual-Channel Municipal Tariff Settlement (Steps 28–49):** To support financial flexibility and eliminate revenue leakages, the payment sequence accommodates both digital e-wallet settlements and over-the-counter cash transactions:
-   - *Digital GCash Settlement (`alt Pay via GCash`):* The customer selects GCash on the mobile application and initiates checkout. The application dispatches an authenticated HTTP POST request to the Supabase Deno Edge Function (`create-gcash-payment`), which securely communicates with the PayMongo API (`POST /v1/links`) using encrypted Basic Authentication. PayMongo returns a unique hosted checkout URL, which the mobile app opens using in-app browser linking. Upon completing payment authorization on the GCash gateway, the customer returns to the mobile application. Application lifecycle listener hooks detect the return state and execute a status verification call (`GET /create-gcash-payment?link_id=xxx`) against the Edge Function, which queries PayMongo. Upon confirming status `'paid'`, the client commits transactional updates marking both `payments` and `requests` records as `status = 'paid'`.
+   - *Digital GCash / E-Wallet Settlement (`alt Pay via Online Gateway`):* The customer selects online payment on the mobile application and initiates checkout. The application dispatches an authenticated HTTP POST request to the Supabase Deno Edge Function (`create-gcash-payment`), which securely communicates with the Xendit Invoice API v2 (`POST /v2/invoices`) using encrypted Basic Authentication (`XENDIT_SECRET_KEY`). Xendit returns a unique hosted invoice URL supporting GCash, Maya, GrabPay, ShopeePay, QR Ph, and cards, which the mobile app opens using in-app browser linking. Upon completing payment authorization on the Xendit hosted portal, the customer returns to the mobile application. Application lifecycle listener hooks detect the return state and execute a status verification call (`GET /create-gcash-payment?link_id=xnd_...`) against the Edge Function, which queries Xendit (`GET /v2/invoices/:id`). Upon confirming status `'PAID'`, the client commits transactional updates marking both `payments` and `requests` records as `status = 'paid'`.
    - *Over-the-Counter Cash Settlement (`else Pay via Cash`):* The customer presents their queue reference number at the abattoir cashier counter. The municipal cashier records the cash tendered in the Admin Panel POS desk. Upon confirming that the tendered amount satisfies the computed tariff, the system computes applicable change, assigns a cash session identifier, and updates `payments` (`payment_method = 'Cash'`, `status = 'paid'`) and `requests` (`status = 'paid'`), automatically compiling an official digital receipt (`RCP-YYYY-XXX`) and generating a cryptographically signed gate pass QR token.
 
 6. **Meat Dispatch Validation and Carcass Release (Steps 50–54):** In the final operational phase, the loading dock release officer scans the hauler's digital QR Gate Pass or verifies the official receipt number via the Admin Panel releasing console. Upon confirming payment integrity and sanitary clearance, the officer clicks "Confirm Release." The system executes an ACID update setting `requests` to `status = 'completed'` and recording the exact physical dispatch timestamp (`released_at = NOW()`). A final push notification informs the customer that the meat has been successfully released, successfully terminating the transaction lifecycle.
@@ -741,7 +741,7 @@ graph TD
             C2["Slaughter Scheduling & Lairage Controller"]
             C3["Veterinary Inspection & Condemnation Controller"]
             C4["Cashiering & Tariff Calculation Engine"]
-            C5["PayMongo Deno Edge Runtime Service"]
+            C5["Xendit Deno Edge Runtime Service"]
             C6["ReportPdfGenerator Legal Document Engine"]
         end
 
@@ -838,7 +838,7 @@ graph TD
     subgraph ExternalServices["External Services"]
         direction TB
         comp4["&lt;&lt;component&gt;&gt;"]
-        ext1["PayMongo API, PSGC API, and Firebase Cloud Messaging"]
+        ext1["Xendit API, PSGC API, and Firebase Cloud Messaging"]
     end
 
     ClientDevices -. "HTTPS / TLS 1.3" .-> BackendServer
@@ -861,7 +861,7 @@ All relational schemas, triggers, and security policies were deployed to the pro
 - Core operational tables (`requests`, `slaughter_inspection`, `payments`, `profiles`, `regular_dealers`, `reports`, `notifications`, `staff_notifications`, `nmic_transmissions`, `audit_logs`, and `system_settings`).
 - Hardened Row-Level Security (RLS) policies utilizing `SECURITY DEFINER` helper functions (`public.is_admin()` and `public.is_staff()`) to ensure customers can access only their own records while authorized Admin, Clerk, Inspector, and Cashier personnel can execute their designated workflows.
 - Supabase Realtime publication (`supabase_realtime`) with `REPLICA IDENTITY FULL` enabled on `requests`, `payments`, and `slaughter_inspection` for sub-second cross-station synchronization.
-- Serverless Deno Edge Functions deployed to Supabase Edge Runtime for PayMongo checkout/webhook processing and JWT-authenticated Walk-In SMS notifications (`send-walkin-sms`), with all API keys stored strictly in encrypted Supabase Function Secrets.
+- Serverless Deno Edge Functions deployed to Supabase Edge Runtime for Xendit checkout/webhook processing and JWT-authenticated Walk-In SMS notifications (`send-walkin-sms`), with all API keys stored strictly in encrypted Supabase Function Secrets.
 
 ### 2. Administrative Operations Console Deployment (Vercel Web)
 The Flutter Web Admin Operations Console (`admin_panel`) was compiled with bundled Unicode TrueType fonts (`assets/fonts/segoeui*.ttf` and `consola*.ttf`) for accurate `₱` PDF rendering and deployed to Vercel's global Edge CDN (`https://web-ten-sooty-86.vercel.app`). Role-based routing automatically adapts the workspace layout upon sign-in for Admin, Receiving Clerk, Meat Inspector, and Cashier accounts.
@@ -870,13 +870,13 @@ The Flutter Web Admin Operations Console (`admin_panel`) was compiled with bundl
 The Flutter Android Customer Portal (`mobile_app`) was compiled into a signed release APK (`TC_AA_Slaughterhouse_App.apk`) and published via GitHub Releases, paired with a dedicated, lightweight static landing page (`apk_landing/`) hosted on Vercel at `https://tabaco-abattoir-app.vercel.app`. Meat dealers and backyard livestock raisers scan a QR code or open the link from Messenger/Chrome to download and install the application directly without Play Store delays.
 
 ### 4. Operational Cutover & Stakeholder Onboarding
-Prior to full cutover, the researchers conducted hands-on orientation sessions with Tabaco City Slaughterhouse personnel covering: (a) walk-in dealer registration in the Meat Dealers Directory, (b) permit verification and ear-tag assignment, (c) tablet-based ante-mortem/post-mortem logging and Condemnation Slip issuance, (d) Cash Tendered/Change Due cashiering and PayMongo GCash reconciliation, and (e) one-click legal-size NMIS PDF report generation.
+Prior to full cutover, the researchers conducted hands-on orientation sessions with Tabaco City Slaughterhouse personnel covering: (a) walk-in dealer registration in the Meat Dealers Directory, (b) permit verification and ear-tag assignment, (c) tablet-based ante-mortem/post-mortem logging and Condemnation Slip issuance, (d) Cash Tendered/Change Due cashiering and Xendit GCash reconciliation, and (e) one-click legal-size NMIS PDF report generation.
 
 ---
 
 ## Recommended Hardware and Software Requirements
 
-The client-side functions as a flexible, accessible mobile interface designed for broad compatibility, allowing backyard farmers and commercial meat dealers to engage with the slaughterhouse from any location. It requires standard modern smartphone operating systems and stable internet connectivity, enabling users to operate on Android and iOS devices. This setup supports the necessary payment integrations—specifically GCash via the PayMongo payment gateway—to ensure a seamless, convenient booking and payment experience without requiring specialized hardware.
+The client-side functions as a flexible, accessible mobile interface designed for broad compatibility, allowing backyard farmers and commercial meat dealers to engage with the slaughterhouse from any location. It requires standard modern smartphone operating systems and stable internet connectivity, enabling users to operate on Android and iOS devices. This setup supports the necessary payment integrations—specifically GCash via the Xendit payment gateway—to ensure a seamless, convenient booking and payment experience without requiring specialized hardware.
 
 The admin-side requires a more robust, specialized workstation environment to handle intensive operational tasks like holding pen allocation, veterinary clinical inspection, carcass weighing, cashiering, and official report generation. It mandates higher-performance hardware (at least 4 GB to 8 GB of RAM and multi-core processors) and requires a desktop operating system (Windows 10/11, macOS, or Linux) to ensure stability during high-volume operations. Furthermore, this side necessitates integration with specific abattoir peripherals—such as 80mm thermal receipt printers, legal-size (8.5" × 14") laser printers, optical barcode/QR scanners, and calibrated digital carcass scales—and strictly enforces security through Role-Based Access Control (RBAC).
 
@@ -888,9 +888,9 @@ Dart (v3.11+) provides the client-optimized, strongly typed programming language
 
 Supabase BaaS functions as the centralized cloud-native backend engine. It provides the managed PostgreSQL 15+ relational database, GoTrue JWT authentication, real-time WebSocket state broadcasting, and secure S3-compatible binary object storage (`request-documents`, `report-evidence`, `avatars`). Database-level Row-Level Security (RLS) ensures that data mutations are restricted strictly to authorized user roles.
 
-Deno TypeScript serves as the secure, serverless compute runtime executing Supabase Edge Functions. It executes critical backend business logic—such as creating PayMongo GCash checkout sessions and validating webhook callbacks—without exposing private API secret keys to client devices.
+Deno TypeScript serves as the secure, serverless compute runtime executing Supabase Edge Functions. It executes critical backend business logic—such as creating Xendit GCash checkout sessions and validating webhook callbacks—without exposing private API secret keys to client devices.
 
-PayMongo Payment Gateway API is integrated as the regulated Philippine fintech rail facilitating cashless digital settlements. PayMongo enables instant GCash payments, emitting cryptographically authenticated HMAC-SHA256 webhook events that automatically trigger official receipt compilation.
+Xendit Payment Gateway API is integrated as the regulated Philippine fintech rail facilitating cashless digital settlements. Xendit enables instant GCash, Maya, GrabPay, ShopeePay, and QR Ph payments via hosted invoices with server-side status verification that automatically triggers official receipt compilation.
 
 Google ML Kit Vision provides on-device machine learning for Optical Character Recognition (OCR), automatically extracting text from uploaded Veterinary Health Certificates to verify permit dates and animal quantities.
 
@@ -904,8 +904,8 @@ Google ML Kit Vision provides on-device machine learning for Optical Character R
 | **Cross-Platform UI Framework** | Flutter SDK (v3.11+) | Compiles native, high-performance UI binaries for Android, iOS, Web, and Desktop from a single codebase. |
 | **Core Programming Language** | Dart (v3.11+) | Object-oriented language powering client application state, asynchronous streams, and PDF generation. |
 | **Database Administration** | Supabase Studio Dashboard | Graphical cloud UI for managing PostgreSQL relational tables, RLS policies, and SQL seed scripts. |
-| **Serverless Compute** | Deno TypeScript | Executes serverless Edge Functions for PayMongo API payment links and webhook handling. |
-| **Payment Gateway** | PayMongo API v1 | Regulated Philippine financial infrastructure for automated GCash checkout links and verification. |
+| **Serverless Compute** | Deno TypeScript | Executes serverless Edge Functions for Xendit Invoice API v2 checkout creation and status verification. |
+| **Payment Gateway** | Xendit Invoice API v2 | Regulated Philippine financial infrastructure for automated GCash, Maya, and QR Ph hosted invoices and verification. |
 | **Document Generation** | Dart `pdf` & `printing` | Compiles legal-size (8.5" × 14") NMIS Daily Production Reports and 80mm thermal receipt layouts. |
 | **Version Control** | Git & GitHub Repository | Distributed version control, continuous integration, and commit auditing. |
 
@@ -959,7 +959,7 @@ Comprehensive software verification and validation were conducted prior to stake
 
 ### Testing Strategy
 1. **Static Code Analysis & Build Verification**: Both `admin_panel` and `mobile_app` were continuously validated using `flutter analyze --no-fatal-infos --no-fatal-warnings`, achieving **0 errors and 0 warnings**, alongside clean production web (`flutter build web`) and Android release APK (`flutter build apk --release`) builds.
-2. **Functional & End-to-End Integration Testing**: Every stage of the slaughterhouse lifecycle—from customer mobile booking and permit upload through receiving triage, document verification, ante-mortem/post-mortem inspection, billing/PayMongo checkout, meat releasing, and NMIS PDF export—was verified end-to-end against the live Supabase Cloud backend.
+2. **Functional & End-to-End Integration Testing**: Every stage of the slaughterhouse lifecycle—from customer mobile booking and permit upload through receiving triage, document verification, ante-mortem/post-mortem inspection, billing/Xendit checkout, meat releasing, and NMIS PDF export—was verified end-to-end against the live Supabase Cloud backend.
 3. **Security & Role-Based Access Control (RLS) Testing**: Unauthorized cross-user reads, anonymous writes to `payments` or `regular_dealers`, and unauthenticated Edge Function invocations were tested to verify HTTP 401/403 rejections and Postgres RLS enforcement.
 4. **Real-Time & Connectivity Resilience Testing**: Multi-browser/mobile concurrency tests verified sub-second delivery of new requests and payment status updates across Admin and Clerk consoles via `AdminRealtimeHub`, as well as offline detection and automatic recovery via the mobile `NoInternetOverlay`.
 
@@ -976,7 +976,7 @@ Comprehensive software verification and validation were conducted prior to stake
 | **TC-07** | Ante-Mortem Inspection | Mark lot as Passed vs. Failed/Suspect | Passed advances to slaughter floor; Failed locks lot out and alerts customer/management | **Passed** |
 | **TC-08** | Post-Mortem & Condemnation | Toggle Record Condemnation Slip, enter condemned part/weight/reason | Generates `CS-YYYY-####` Condemnation Slip and persists pathology details to `slaughter_inspection` | **Passed** |
 | **TC-09** | Cashiering (Cash) | Enter Cash Tendered less than vs. greater than Total Due | Insufficient cash blocked; valid cash computes exact Change Due and saves `amount_tendered`/`change_amount` | **Passed** |
-| **TC-10** | Cashiering (PayMongo) | Complete GCash checkout via PayMongo hosted link | `paymongo-webhook` verifies signature, marks request `paid`, and updates Cashiering in real time | **Passed** |
+| **TC-10** | Cashiering (Xendit) | Complete GCash/Maya checkout via Xendit hosted invoice | `create-gcash-payment` verifies Xendit invoice status, marks request `paid`, and updates Cashiering in real time | **Passed** |
 | **TC-11** | PDF Receipt & NMIC Reports | Print Official Receipt and legal-size (8.5" × 14") NMIS Production Report | Renders cleanly with crisp `₱` currency glyphs (zero black boxes) and accurate totals | **Passed** |
 | **TC-12** | Meat Pickup Authorization | View mobile receipt before vs. after Admin sends "Ready for Collection" notice | Pickup Authorization card remains hidden until notice is sent, then hides again once `released` | **Passed** |
 | **TC-13** | Walk-In SMS Dispatch | Trigger manual Walk-In SMS from Cashiering and Releasing | Edge Function authenticates staff JWT, dispatches SMS via Semaphore/TextBee, button updates to `Sent ✓` | **Passed** |

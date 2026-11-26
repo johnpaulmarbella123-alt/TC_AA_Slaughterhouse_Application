@@ -327,10 +327,6 @@ Pascual, M., & De Leon, S. (2020). Implementation of computer-based
             Public Administration*, 64(1), 52–69.
             https://ncpag.upd.edu.ph/pjpa/
 
-PayMongo. (2024). *PayMongo API v1 documentation and Checkout Sessions
-            integration guide*. PayMongo Developer Portal.
-            https://developers.paymongo.com/docs
-
 Peres, S. C., Pham, T., & Phillips, R. (2020). Validation of the two-factor structure
             of the System Usability Scale in commercial point-of-sale and
             desktop systems. *Human Factors*, 62(7), 1140–1152.
@@ -492,6 +488,10 @@ Windmill, E., & Chao, K. (2022). *Flutter in action* (2nd ed.). Manning
 World Health Organization (WHO). (2020). *Food safety and inspection:
             Risk-based approaches for meat control systems*. World Health
             Organization. https://www.who.int/health-topics/food-safety
+
+Xendit. (2024). *Xendit API v2 documentation and Invoices integration guide*.
+            Xendit Developer Documentation.
+            https://developers.xendit.co/api-reference/
 
 Zoho. (2025). *Rapid Application Development (RAD): The definitive guide to
             UI prototyping and agile delivery*. Zoho Creator Resources.

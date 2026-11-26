@@ -11,6 +11,7 @@ import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
+import '../services/walk_in_sms_service.dart';
 
 class MeatReleasingPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -527,6 +528,32 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
         },
       );
 
+      // Auto-send Meat Released confirmation SMS to walk-in customers
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (walkInPhone.isNotEmpty) {
+        final custName = (req['customer_name'] ?? 'Customer').toString();
+        final releaseDetail = isDelivery
+            ? 'Delivered to your market stall by driver ${driverName ?? 'Abattoir Van'} at $formattedTime.'
+            : 'Officially released to $claimantName ($claimantType) at $formattedTime.';
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'released',
+          refNo: ref,
+          customerName: custName,
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+          findings: releaseDetail,
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'released',
+          refNo: ref,
+          customerName: custName,
+          requestId: reqId?.toString(),
+        );
+      }
+
       _loadRequests();
       if (mounted) {
         Navigator.of(context).pop();
@@ -1024,20 +1051,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if ((req['contact_number'] ?? '').toString().trim().isNotEmpty) ...[
-                                WalkInSmsHelper.buildNotifyButton(
-                                  context: context,
-                                  contactNumber: req['contact_number'].toString(),
-                                  stage: 'releasing',
-                                  refNo: 'MI-${DateTime.now().year}-${req['id'].toString().padLeft(3, '0')}',
-                                  customerName: (req['customer_name'] ?? 'Customer').toString(),
-                                  marking: (req['marking'] ?? '').toString(),
-                                  livestockType: (req['livestock_type'] ?? '').toString(),
-                                  animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
-                                  requestId: req['id']?.toString(),
-                                ),
-                                const SizedBox(width: 6),
-                              ],
                               status == 'Released'
                                   ? _buildDoneButton(req)
                                   : isMarket
@@ -1250,7 +1263,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     }
 
     final isImmediate = _isImmediateSlaughter(req);
-    if (isImmediate || _isWalkIn(req)) {
+    if (isImmediate) {
       return OutlinedButton(
         onPressed: () => _showReleaseDialog(req, isDelivery: false),
         style: OutlinedButton.styleFrom(
@@ -1344,7 +1357,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       ),
     );
 
-    if (_isImmediateSlaughter(req) || _isWalkIn(req)) {
+    if (_isImmediateSlaughter(req)) {
       return waitingBtn;
     }
 
@@ -1471,6 +1484,32 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             'amount': amount,
             'pickup_deadline': deadline.toIso8601String(),
           },
+        );
+      }
+
+      // Auto-send Ready for Pickup SMS to walk-in customers
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
+        final custName = (req['customer_name'] ?? 'Customer').toString();
+        final pickupMsg = isPaid
+            ? 'Please claim your carcass at the Releasing Bay on or before $deadlineStr to avoid the PHP 150.00 Cold Storage fee.'
+            : 'Please settle $amountStr at the Cashier window and claim your carcass on or before $deadlineStr (PHP 150.00 Cold Storage / PHP 100.00 Overdue penalties apply after 5:00 PM).';
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'pickup_ready',
+          refNo: ref,
+          customerName: custName,
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+          findings: pickupMsg,
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'pickup_ready',
+          refNo: ref,
+          customerName: custName,
+          requestId: reqId?.toString(),
         );
       }
 
@@ -1709,6 +1748,30 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           'dispatched_at': formattedTime,
         },
       );
+
+      // Auto-send Out for Delivery SMS to walk-in Market customers
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (walkInPhone.isNotEmpty) {
+        final custName = (req['customer_name'] ?? 'Customer').toString();
+        final driverInfo = plate.isNotEmpty ? 'Driver: $driverName ($plate)' : 'Driver: $driverName';
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'out_for_delivery',
+          refNo: ref,
+          customerName: custName,
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+          statusSummary: driverInfo,
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'out_for_delivery',
+          refNo: ref,
+          customerName: custName,
+          requestId: reqId?.toString(),
+        );
+      }
 
       _loadRequests();
       if (mounted) {

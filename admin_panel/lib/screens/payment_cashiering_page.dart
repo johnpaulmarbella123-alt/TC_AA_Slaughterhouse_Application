@@ -15,6 +15,7 @@ import '../services/staff_notification_service.dart';
 import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
 import '../widgets/walk_in_sms_helper.dart';
+import '../services/walk_in_sms_service.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -1092,6 +1093,33 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           'request_id': reqId,
         },
       );
+
+      // Auto-send Payment Confirmed SMS to walk-in customers
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (walkInPhone.isNotEmpty) {
+        final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'payment_confirmed',
+          refNo: refNo,
+          customerName: staffCustLabel,
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+          amountDue: 'PHP ${(fees['total'] as num).toStringAsFixed(2)}',
+          statusSummary: '$resolvedMethod (Receipt: $receiptNo)',
+          findings: isMarket
+              ? 'Your meat is now cleared and queued for market delivery dispatch.'
+              : 'You may now proceed to the Releasing Bay to claim your meat carcass.',
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'payment_confirmed',
+          refNo: refNo,
+          customerName: staffCustLabel,
+          requestId: reqId?.toString(),
+        );
+      }
 
       _loadRequests(silent: true);
     } catch (e) {
@@ -2963,6 +2991,34 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
         );
       }
 
+      // Auto-send Payment Confirmed SMS to walk-in customers
+      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
+        final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
+        final payMethodLabel = (paymentData['payment_method'] ?? 'Cash').toString();
+        final smsBody = WalkInSmsHelper.buildDefaultMessage(
+          stage: 'payment_confirmed',
+          refNo: refNo,
+          customerName: staffCustLabel,
+          marking: (req['marking'] ?? '').toString(),
+          livestockType: (req['livestock_type'] ?? '').toString(),
+          animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+          amountDue: 'PHP ${totalDue.toStringAsFixed(2)}',
+          statusSummary: '$payMethodLabel (Receipt: $receiptNo)',
+          findings: isMarket
+              ? 'Your meat is now cleared and queued for market delivery dispatch.'
+              : 'You may now proceed to the Releasing Bay to claim your meat carcass.',
+        );
+        WalkInSmsService.sendSms(
+          phone: walkInPhone,
+          message: smsBody,
+          stage: 'payment_confirmed',
+          refNo: refNo,
+          customerName: staffCustLabel,
+          requestId: reqId?.toString(),
+        );
+      }
+
       if (mounted) {
         Navigator.pop(context);
         widget.onDone();
@@ -3207,6 +3263,38 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
     if (_realtimeChannel != null) {
       widget.supabase.removeChannel(_realtimeChannel!);
       _realtimeChannel = null;
+    }
+
+    // Auto-send Payment Confirmed SMS to walk-in customer if phone recorded
+    final req = _foundRequest;
+    final walkInPhone = (req?['contact_number'] ?? '').toString().trim();
+    if (req != null && walkInPhone.isNotEmpty) {
+      final reqId = req['id'];
+      final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';
+      final custLabel = (_customerName.isNotEmpty ? _customerName : (req['customer_name'] ?? 'Customer')).toString();
+      final totalDue = (_fees['total'] as num?)?.toDouble() ?? _totalAmount;
+      final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
+      final smsBody = WalkInSmsHelper.buildDefaultMessage(
+        stage: 'payment_confirmed',
+        refNo: refNo,
+        customerName: custLabel,
+        marking: (req['marking'] ?? '').toString(),
+        livestockType: (req['livestock_type'] ?? '').toString(),
+        animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
+        amountDue: 'PHP ${totalDue.toStringAsFixed(2)}',
+        statusSummary: 'Online Payment (Receipt: $receiptNo)',
+        findings: isMarket
+            ? 'Your meat is now cleared and queued for market delivery dispatch.'
+            : 'You may now proceed to the Releasing Bay to claim your meat carcass.',
+      );
+      WalkInSmsService.sendSms(
+        phone: walkInPhone,
+        message: smsBody,
+        stage: 'payment_confirmed',
+        refNo: refNo,
+        customerName: custLabel,
+        requestId: reqId?.toString(),
+      );
     }
 
     if (mounted) {
