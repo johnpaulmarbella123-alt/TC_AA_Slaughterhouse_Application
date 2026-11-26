@@ -11,6 +11,7 @@ import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/receipt_pdf_generator.dart';
+import '../services/regular_dealers_service.dart';
 import '../services/staff_notification_service.dart';
 import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
@@ -74,6 +75,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           supabase.auth.currentSession == null) {
         await AppSettingsService.instance.ensureAdminAuthSession();
       }
+      await RegularDealersService.instance.init();
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
@@ -1095,7 +1097,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       );
 
       // Auto-send Payment Confirmed SMS to walk-in customers
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
       if (walkInPhone.isNotEmpty) {
         final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
         final smsBody = WalkInSmsHelper.buildDefaultMessage(
@@ -1111,14 +1113,26 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
               ? 'Your meat is now cleared and queued for market delivery dispatch.'
               : 'You may now proceed to the Releasing Bay to claim your meat carcass.',
         );
-        WalkInSmsService.sendSms(
+        final smsRes = await WalkInSmsService.sendSms(
           phone: walkInPhone,
           message: smsBody,
           stage: 'payment_confirmed',
           refNo: refNo,
           customerName: staffCustLabel,
-          requestId: reqId?.toString(),
+          requestId: reqId.toString(),
         );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                smsRes.success
+                    ? 'Payment confirmed • SMS sent to $walkInPhone'
+                    : 'Payment confirmed • SMS failed: ${smsRes.message}',
+              ),
+              backgroundColor: smsRes.success ? const Color(0xFF0F5132) : Colors.orange.shade800,
+            ),
+          );
+        }
       }
 
       _loadRequests(silent: true);
@@ -2992,7 +3006,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
       }
 
       // Auto-send Payment Confirmed SMS to walk-in customers
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
       if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
         final isMarket = (req['request_type'] ?? '').toString().toLowerCase() == 'market';
         final payMethodLabel = (paymentData['payment_method'] ?? 'Cash').toString();
@@ -3015,7 +3029,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
           stage: 'payment_confirmed',
           refNo: refNo,
           customerName: staffCustLabel,
-          requestId: reqId?.toString(),
+          requestId: reqId.toString(),
         );
       }
 
@@ -3267,7 +3281,7 @@ class _NewPaymentEntryDialogState extends State<_NewPaymentEntryDialog> {
 
     // Auto-send Payment Confirmed SMS to walk-in customer if phone recorded
     final req = _foundRequest;
-    final walkInPhone = (req?['contact_number'] ?? '').toString().trim();
+    final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
     if (req != null && walkInPhone.isNotEmpty) {
       final reqId = req['id'];
       final refNo = 'MI-${DateTime.now().year}-${reqId.toString().padLeft(3, '0')}';

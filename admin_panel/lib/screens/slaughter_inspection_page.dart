@@ -12,6 +12,7 @@ import '../services/inspection_documents_pdf_generator.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
+import '../services/regular_dealers_service.dart';
 import '../services/walk_in_sms_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
@@ -222,6 +223,7 @@ class _SlaughterInspectionPageState extends State<SlaughterInspectionPage> {
           supabase.auth.currentSession == null) {
         await AppSettingsService.instance.ensureAdminAuthSession();
       }
+      await RegularDealersService.instance.init();
       // Fetch requests that are past Document Verification (doc_verified) or in slaughter phases.
       final data = await supabase
           .from('requests')
@@ -3775,7 +3777,7 @@ class _UpdateProcessDialogState extends State<_UpdateProcessDialog> {
       // Auto-send detailed Ante-Mortem Failed or Post-Mortem Failed SMS to walk-in customers
       // (same relevant details as mobile notifications, without sending the condemnation slip itself)
       String? walkInSmsFeedback;
-      final walkInPhone = (widget.request['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(widget.request);
       final isWalkInFailure = walkInPhone.isNotEmpty &&
           !isImmediateSlaughterWalkIn &&
           (isPartialAnteConfinement ||

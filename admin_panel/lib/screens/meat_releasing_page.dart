@@ -7,6 +7,7 @@ import '../services/notification_service.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
+import '../services/regular_dealers_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
 import '../widgets/staff_notification_bell.dart';
@@ -68,6 +69,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           supabase.auth.currentSession == null) {
         await AppSettingsService.instance.ensureAdminAuthSession();
       }
+      await RegularDealersService.instance.init();
       final data = await supabase
           .from('requests')
           .select('*, slaughter_inspection(*), payments(*)')
@@ -529,7 +531,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       );
 
       // Auto-send Meat Released confirmation SMS to walk-in customers
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
       if (walkInPhone.isNotEmpty) {
         final custName = (req['customer_name'] ?? 'Customer').toString();
         final releaseDetail = isDelivery
@@ -1025,7 +1027,15 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                             ],
                           ],
                         )),
-                        DataCell(Text(req['contact_number']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 12))),
+                        DataCell(Builder(builder: (_) {
+                          final resolvedPhone = WalkInSmsService.resolveWalkInPhone(req);
+                          final displayContact = resolvedPhone.isNotEmpty
+                              ? resolvedPhone
+                              : ((req['contact_number'] ?? '').toString().trim().isNotEmpty
+                                  ? req['contact_number'].toString().trim()
+                                  : '\u2014');
+                          return Text(displayContact, style: const TextStyle(fontSize: 12));
+                        })),
                         DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
                         DataCell(Text(mic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey.shade700))),
                         DataCell(_buildStatusBadge(status, isOverdue: _isPickupOverdue(req))),
@@ -1254,9 +1264,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     );
   }
 
-  bool _isWalkIn(Map<String, dynamic> req) =>
-      (req['user_id'] ?? '').toString().trim().isEmpty;
-
   Widget _buildReleaseForPickupButton(Map<String, dynamic> req) {
     if (!_isPaid(req)) {
       return _buildAwaitingPaymentButton(req);
@@ -1280,13 +1287,18 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     final reqIdStr = req['id'].toString();
     final isNotifying = _notifyingPickupIds.contains(reqIdStr);
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
+    final isWalkIn = WalkInSmsService.isWalkInRequest(req);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Tooltip(
-          message: isAlreadyNotified
-              ? 'Customer notified that meat is ready for collection (click to resend reminder)'
-              : 'Send notification to customer that their meat is ready for collection (starts 5:00 PM \u20b1150 Cold Storage deadline)',
+          message: isWalkIn
+              ? (isAlreadyNotified
+                  ? 'Walk-in customer notified via SMS (click to resend SMS)'
+                  : 'Send SMS to walk-in customer that their meat is ready for pickup')
+              : (isAlreadyNotified
+                  ? 'Customer notified that meat is ready for collection (click to resend reminder)'
+                  : 'Send notification to customer that their meat is ready for collection (starts 5:00 PM \u20b1150 Cold Storage deadline)'),
           child: ElevatedButton.icon(
             icon: isNotifying
                 ? const SizedBox(
@@ -1295,7 +1307,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : Icon(
-                    isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+                    isAlreadyNotified
+                        ? Icons.mark_email_read_outlined
+                        : (isWalkIn ? Icons.sms_outlined : Icons.notifications_active_outlined),
                     size: 14,
                     color: Colors.white,
                   ),
@@ -1311,7 +1325,11 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isNotifying ? 'Sending...' : (isAlreadyNotified ? 'Notified ✓' : 'Notify Ready'),
+              isNotifying
+                  ? 'Sending...'
+                  : (isAlreadyNotified
+                      ? (isWalkIn ? 'SMS Sent ✓' : 'Notified ✓')
+                      : (isWalkIn ? 'Notify via SMS' : 'Notify Ready')),
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1364,14 +1382,19 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     final reqIdStr = req['id'].toString();
     final isNotifying = _notifyingPickupIds.contains(reqIdStr);
     final isAlreadyNotified = _hasBeenNotifiedForPickup(req);
+    final isWalkIn = WalkInSmsService.isWalkInRequest(req);
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Tooltip(
-          message: isAlreadyNotified
-              ? 'Customer already notified that meat is ready for collection (click to resend)'
-              : 'Send notification to customer that their meat is ready for collection (must pay at Cashier before pickup)',
+          message: isWalkIn
+              ? (isAlreadyNotified
+                  ? 'Walk-in customer notified via SMS (click to resend SMS)'
+                  : 'Send SMS to walk-in customer that their meat is ready for collection (must pay at Cashier before pickup)')
+              : (isAlreadyNotified
+                  ? 'Customer already notified that meat is ready for collection (click to resend)'
+                  : 'Send notification to customer that their meat is ready for collection (must pay at Cashier before pickup)'),
           child: ElevatedButton.icon(
             icon: isNotifying
                 ? const SizedBox(
@@ -1380,7 +1403,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                   )
                 : Icon(
-                    isAlreadyNotified ? Icons.mark_email_read_outlined : Icons.notifications_active_outlined,
+                    isAlreadyNotified
+                        ? Icons.mark_email_read_outlined
+                        : (isWalkIn ? Icons.sms_outlined : Icons.notifications_active_outlined),
                     size: 14,
                     color: Colors.white,
                   ),
@@ -1396,7 +1421,11 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
             label: Text(
-              isNotifying ? 'Sending...' : (isAlreadyNotified ? 'Notified ✓' : 'Notify Ready'),
+              isNotifying
+                  ? 'Sending...'
+                  : (isAlreadyNotified
+                      ? (isWalkIn ? 'SMS Sent ✓' : 'Notified ✓')
+                      : (isWalkIn ? 'Notify via SMS' : 'Notify Ready')),
               style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -1488,7 +1517,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       }
 
       // Auto-send Ready for Pickup SMS to walk-in customers
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
       if (!isImmediateOnSite && walkInPhone.isNotEmpty) {
         final custName = (req['customer_name'] ?? 'Customer').toString();
         final pickupMsg = isPaid
@@ -1503,13 +1532,32 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
           animalCount: (req['animal_count'] as num?)?.toInt() ?? 1,
           findings: pickupMsg,
         );
-        WalkInSmsService.sendSms(
+        final smsRes = await WalkInSmsService.sendSms(
           phone: walkInPhone,
           message: smsBody,
           stage: 'pickup_ready',
           refNo: ref,
           customerName: custName,
           requestId: reqId?.toString(),
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                smsRes.success
+                    ? 'Pickup SMS sent to $custName ($walkInPhone)'
+                    : 'SMS failed: ${smsRes.message}',
+              ),
+              backgroundColor: smsRes.success ? const Color(0xFF0F5132) : Colors.orange.shade800,
+            ),
+          );
+        }
+      } else if (!isImmediateOnSite && WalkInSmsService.isWalkInRequest(req) && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No contact number found for this walk-in dealer. Please add their phone in Meat Dealers Directory.'),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
 
@@ -1750,7 +1798,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       );
 
       // Auto-send Out for Delivery SMS to walk-in Market customers
-      final walkInPhone = (req['contact_number'] ?? '').toString().trim();
+      final walkInPhone = WalkInSmsService.resolveWalkInPhone(req);
       if (walkInPhone.isNotEmpty) {
         final custName = (req['customer_name'] ?? 'Customer').toString();
         final driverInfo = plate.isNotEmpty ? 'Driver: $driverName ($plate)' : 'Driver: $driverName';

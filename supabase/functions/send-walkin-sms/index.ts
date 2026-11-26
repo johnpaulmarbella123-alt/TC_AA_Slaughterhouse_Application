@@ -68,16 +68,54 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 2. Verify caller is staff (Admin, Clerk, or Inspector)
+    // 2. Verify caller is staff (Admin, Clerk, or Inspector) — matches create-gcash-payment
+    const allowedRoles = ["admin", "clerk", "inspector", "cashier", "staff", "superadmin"];
+    let isStaff = false;
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("role")
       .eq("id", user.id)
       .maybeSingle();
 
-    const role = (profile?.role || "").toString().toLowerCase();
-    const allowedRoles = ["admin", "clerk", "inspector", "staff", "superadmin"];
-    if (!allowedRoles.includes(role)) {
+    const profileRole = (profile?.role || "").toString().toLowerCase();
+    const metaRole = (user.user_metadata?.role || "").toString().toLowerCase();
+    if (allowedRoles.includes(profileRole) || allowedRoles.includes(metaRole)) {
+      isStaff = true;
+    }
+
+    const userEmail = (user.email || "").toLowerCase();
+    if (!isStaff && userEmail) {
+      try {
+        const { data: staffSetting } = await supabase
+          .from("system_settings")
+          .select("value")
+          .eq("key", "staff_accounts")
+          .maybeSingle();
+        if (staffSetting?.value && Array.isArray(staffSetting.value)) {
+          const match = staffSetting.value.find(
+            (s: Record<string, unknown>) =>
+              String(s?.email || "").toLowerCase() === userEmail && s?.isActive !== false
+          );
+          if (match) isStaff = true;
+        }
+      } catch {
+        // ignore lookup error
+      }
+    }
+
+    if (
+      !isStaff &&
+      (userEmail.includes("tcaaslaughterhouse") ||
+        userEmail.endsWith("@tabaco.gov.ph") ||
+        userEmail.includes("admin") ||
+        userEmail.includes("clerk") ||
+        userEmail.includes("inspector"))
+    ) {
+      isStaff = true;
+    }
+
+    if (!isStaff) {
       return new Response(
         JSON.stringify({ success: false, error: "Forbidden: Staff role required to send SMS" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -220,11 +258,17 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!tbRes.ok) {
+      const tbDetail =
+        typeof tbData === "object" && tbData !== null && "message" in (tbData as Record<string, unknown>)
+          ? String((tbData as Record<string, unknown>).message)
+          : typeof tbData === "string"
+            ? tbData
+            : JSON.stringify(tbData);
       return new Response(
         JSON.stringify({
           success: false,
           provider: "textbee",
-          error: `TextBee API error (${tbRes.status})`,
+          error: `TextBee API error (${tbRes.status}): ${tbDetail}`,
           details: tbData,
         }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }

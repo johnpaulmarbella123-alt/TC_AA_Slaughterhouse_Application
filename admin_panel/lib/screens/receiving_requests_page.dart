@@ -2887,7 +2887,7 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
         'market_name': !_isBarangay ? _marketNameCtrl.text.trim() : null,
         'marking': _markingCtrl.text.trim(),
         'preferred_date': DateTime.now().toIso8601String().split('T')[0], // today's date
-        'special_instruction': '[WALK_IN]',
+        'special_instruction': contactStr.isNotEmpty ? '[WALK_IN] [PHONE:$contactStr]' : '[WALK_IN]',
         'status': _isSeparateFacility ? 'slaughter_started' : 'approved', // Separate Facility bypasses Doc Verification directly into Slaughter & Inspection
       };
 
