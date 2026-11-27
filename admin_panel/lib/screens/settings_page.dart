@@ -20,7 +20,7 @@ class _SettingsPageState extends State<SettingsPage>
   late TabController _tabController;
   final _settingsService = AppSettingsService.instance;
 
-  // â”€â”€â”€ 1. FEES & RATES STATE â”€â”€â”€
+  // ─── 1. FEES & RATES STATE ───
   String _selectedAnimal = 'hog';
   final TextEditingController _facilityFeeCtrl =
       TextEditingController(text: '60.00');
@@ -43,7 +43,7 @@ class _SettingsPageState extends State<SettingsPage>
   final TextEditingController _testWeightCtrl =
       TextEditingController(text: '75');
 
-  // â”€â”€â”€ 2. SLAUGHTER SCHEDULE & CAPACITY STATE â”€â”€â”€
+  // ─── 2. SLAUGHTER SCHEDULE & CAPACITY STATE ───
   late List<String> _selectedOperatingDays;
   late TextEditingController _openingTimeCtrl;
   late TextEditingController _closingTimeCtrl;
@@ -57,7 +57,7 @@ class _SettingsPageState extends State<SettingsPage>
   late bool _isFacilityOperational;
   late TextEditingController _noticeMsgCtrl;
 
-  // â”€â”€â”€ 3. MY PROFILE STATE â”€â”€â”€
+  // ─── 3. MY PROFILE STATE ───
   late TextEditingController _profileNameCtrl;
   final TextEditingController _currentPasswordCtrl = TextEditingController();
   final TextEditingController _newPasswordCtrl = TextEditingController();
@@ -67,12 +67,12 @@ class _SettingsPageState extends State<SettingsPage>
   bool _obscureConfirmPass = true;
   bool _isUpdatingPassword = false;
 
-  // â”€â”€â”€ 4. APPEARANCE STATE â”€â”€â”€
+  // ─── 4. APPEARANCE STATE ───
   late TextEditingController _headerTitleCtrl;
   late TextEditingController _headerSubtitleCtrl;
   late String _selectedLogoPath;
 
-  // â”€â”€â”€ 5. CUSTOMER ACCOUNTS STATE â”€â”€â”€
+  // ─── 5. CUSTOMER ACCOUNTS STATE ───
   List<Map<String, dynamic>>? _customerAccounts = [];
   bool _loadingCustomers = false;
   String _customerSearchQuery = '';
@@ -333,10 +333,10 @@ class _SettingsPageState extends State<SettingsPage>
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // â”€â”€â”€ TOP APP BAR / HEADER â”€â”€â”€
+          // ─── TOP APP BAR / HEADER ───
           _buildHeader(isDark),
 
-          // â”€â”€â”€ TAB NAVIGATION BAR â”€â”€â”€
+          // ─── TAB NAVIGATION BAR ───
           Container(
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -376,7 +376,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
 
-          // â”€â”€â”€ TAB CONTENT (Instant zero-lag tab switching) â”€â”€â”€
+          // ─── TAB CONTENT (Instant zero-lag tab switching) ───
           Expanded(
             child: IndexedStack(
               index: _currentTabIndex.clamp(0, 5),
@@ -395,9 +395,9 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TOP HEADER
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildHeader(bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
@@ -484,16 +484,16 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TAB 1: FEES AND RATES
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildFeesAndRatesTab(bool isDark) {
     final animalOptions = [
-      {'key': 'hog', 'label': 'Hog (Swine)', 'icon': 'ðŸ–'},
-      {'key': 'cattle', 'label': 'Cattle (Cow)', 'icon': 'ðŸ‚'},
-      {'key': 'carabao', 'label': 'Carabao (Water Buffalo)', 'icon': 'ðŸƒ'},
-      {'key': 'goat', 'label': 'Goat (Caprine)', 'icon': 'ðŸ'},
-      {'key': 'sheep', 'label': 'Sheep (Ovine)', 'icon': 'ðŸ‘'},
+      {'key': 'hog', 'label': 'Hog (Swine)', 'icon': '🐷'},
+      {'key': 'cattle', 'label': 'Cattle (Cow)', 'icon': '🐄'},
+      {'key': 'carabao', 'label': 'Carabao (Water Buffalo)', 'icon': '🐃'},
+      {'key': 'goat', 'label': 'Goat (Caprine)', 'icon': '🐐'},
+      {'key': 'sheep', 'label': 'Sheep (Ovine)', 'icon': '🐑'},
     ];
 
     // Compute preview
@@ -657,7 +657,7 @@ class _SettingsPageState extends State<SettingsPage>
                         _buildFeeInputField('Ante-Mortem Examination Fee', _anteMortemCtrl,
                             'Pre-slaughter clinical health examination fee', isDark),
                         const SizedBox(height: 14),
-                        _buildFeeInputField('Post-Mortem Rate (â‚± per kg Carcass)', _postMortemRateCtrl,
+                        _buildFeeInputField('Post-Mortem Rate (₱ per kg Carcass)', _postMortemRateCtrl,
                             'Rate multiplied by actual carcass dressed weight (kg)', isDark),
                         const SizedBox(height: 14),
                         _buildFeeInputField('Delivery Van Fee (Market Distribution)', _deliveryVanCtrl,
@@ -709,9 +709,9 @@ class _SettingsPageState extends State<SettingsPage>
                               ),
                               const SizedBox(height: 12),
                               _buildFeeInputField(
-                                'Additional Charge Amount (â‚±)',
+                                'Additional Charge Amount (₱)',
                                 _additionalFeeCtrl,
-                                'Fee amount added per head (â‚±0.00 if none)',
+                                'Fee amount added per head (₱0.00 if none)',
                                 isDark,
                               ),
                             ],
@@ -796,7 +796,7 @@ class _SettingsPageState extends State<SettingsPage>
                         _buildPreviewRow('Corral Fee', corral, isDark),
                         _buildPreviewRow('Ante-Mortem Fee', ante, isDark),
                         _buildPreviewRow(
-                          'Post-Mortem (${testWeight.toStringAsFixed(0)} kg @ â‚±${postRate.toStringAsFixed(2)})',
+                          'Post-Mortem (${testWeight.toStringAsFixed(0)} kg @ ₱${postRate.toStringAsFixed(2)})',
                           postMortemTotal,
                           isDark,
                         ),
@@ -826,7 +826,7 @@ class _SettingsPageState extends State<SettingsPage>
                                 ),
                               ),
                               Text(
-                                'â‚±${marketTotal.toStringAsFixed(2)}',
+                                '₱${marketTotal.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                   color: Color(0xFF2D6A4F),
@@ -876,7 +876,7 @@ class _SettingsPageState extends State<SettingsPage>
               : const [WordsCapitalizationFormatter()],
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
-            prefixText: isNumeric ? 'â‚± ' : null,
+            prefixText: isNumeric ? '₱ ' : null,
             prefixIcon: isNumeric
                 ? null
                 : const Icon(Icons.label_outline, size: 18, color: Color(0xFF2D6A4F)),
@@ -912,7 +912,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
           Text(
-            'â‚±${amount.toStringAsFixed(2)}',
+            '₱${amount.toStringAsFixed(2)}',
             style: TextStyle(
               fontSize: 13,
               fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
@@ -924,9 +924,9 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TAB 2: STAFF ACCOUNTS AND ROLES
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildStaffRolesTab(bool isDark) {
     final rolesList = [
       'Admin',
@@ -1333,7 +1333,7 @@ class _SettingsPageState extends State<SettingsPage>
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
           backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-          title: Text('Set Login Password â€” ${staff.fullName}'),
+          title: Text('Set Login Password — ${staff.fullName}'),
           content: SizedBox(
             width: 380,
             child: Column(
@@ -1543,9 +1543,9 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TAB 3: SLAUGHTER SCHEDULE & CAPACITY
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildScheduleCapacityTab(bool isDark) {
     final daysOfWeek = [
       'Monday',
@@ -1771,7 +1771,7 @@ class _SettingsPageState extends State<SettingsPage>
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Max Hogs / Day',
-                            prefixText: 'ðŸ– ',
+                            prefixText: '🐷 ',
                           ),
                         ),
                       ),
@@ -1782,7 +1782,7 @@ class _SettingsPageState extends State<SettingsPage>
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Max Cattle / Day',
-                            prefixText: 'ðŸ‚ ',
+                            prefixText: '🐄 ',
                           ),
                         ),
                       ),
@@ -1797,7 +1797,7 @@ class _SettingsPageState extends State<SettingsPage>
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Max Carabao / Day',
-                            prefixText: 'ðŸƒ ',
+                            prefixText: '🐃 ',
                           ),
                         ),
                       ),
@@ -1808,7 +1808,7 @@ class _SettingsPageState extends State<SettingsPage>
                           keyboardType: TextInputType.number,
                           decoration: const InputDecoration(
                             labelText: 'Max Goats / Day',
-                            prefixText: 'ðŸ ',
+                            prefixText: '🐐 ',
                           ),
                         ),
                       ),
@@ -1887,9 +1887,9 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TAB 4: MY PROFILE
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildMyProfileTab(bool isDark) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -2307,9 +2307,9 @@ class _SettingsPageState extends State<SettingsPage>
     }
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  TAB 5: APPEARANCE
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Widget _buildAppearanceTab(bool isDark) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -2643,9 +2643,9 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   //  5. CUSTOMER ACCOUNTS TAB (Registered Mobile Users)
-  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ═══════════════════════════════════════════════════════════
   Future<void> _loadCustomerAccounts() async {
     if (mounted) setState(() => _loadingCustomers = true);
     try {
@@ -3002,7 +3002,7 @@ class _SettingsPageState extends State<SettingsPage>
                 final contact = [
                   if ((c['phone'] ?? '').toString().trim().isNotEmpty) c['phone'].toString().trim(),
                   if ((c['email'] ?? '').toString().trim().isNotEmpty) c['email'].toString().trim(),
-                ].join(' â€¢ ');
+                ].join(' • ');
                 final roleLabel = _resolveDealerRoleLabel(c);
                 final location = _resolveDealerLocation(c);
                 final reqCount = (c['_request_count'] as int?) ?? 0;
@@ -3078,7 +3078,7 @@ class _SettingsPageState extends State<SettingsPage>
                               Text(contact, style: TextStyle(fontSize: 12.5, color: subCol)),
                             const SizedBox(height: 4),
                             Text(
-                              'Location: $location  â€¢  Requests: $reqCount',
+                              'Location: $location  •  Requests: $reqCount',
                               style: TextStyle(fontSize: 12, color: subCol),
                             ),
                             if (!isActive && reason.isNotEmpty) ...[
@@ -3103,7 +3103,7 @@ class _SettingsPageState extends State<SettingsPage>
                                 showDialog(
                                   context: context,
                                   builder: (ctx) => AlertDialog(
-                                    title: Text('$name â€” $roleLabel Document'),
+                                    title: Text('$name — $roleLabel Document'),
                                     content: SizedBox(
                                       width: 480,
                                       child: SingleChildScrollView(
