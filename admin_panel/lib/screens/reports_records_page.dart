@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import 'illegal_slaughter_reports_view.dart';
+import 'customer_reviews_view.dart';
 import 'audit_logs_tab.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
@@ -18,6 +18,7 @@ import '../services/regular_dealers_service.dart';
 import '../services/nmic_report_pdf_generator.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/phone_number_formatter.dart';
+import '../widgets/animated_date_dropdown.dart';
 
 class ReportsRecordsPage extends StatefulWidget {
   final String? initialTab;
@@ -42,11 +43,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   DateTime? _selectedDate = DateTime.now();
   DateTimeRange? _customDateRange;
 
-  // Real-time alert polling state for Illegal Slaughter Reports
-  Timer? _alertTimer;
   StreamSubscription<String>? _realtimeSub;
-  int _unreviewedIllegalReports = 0;
-  Map<String, dynamic>? _latestIllegalReport;
 
   // NMIC & Abattoir Official Reports state
   DateTime _nmicReportDate = DateTime.now();
@@ -59,12 +56,29 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   String _dealerSearchQuery = '';
   String _dealerCategoryFilter = 'All'; // 'All', 'Market', 'Barangay', 'New'
 
+  List<String> get _availableReportViews => [
+        'Analytics',
+        'Daily Production (Abattoir)',
+        'Monthly Dealer Log',
+        'NMIS Reports & Transmittal',
+        'Customer Records',
+        'Meat Dealers Directory',
+        'Customer Reviews',
+        if (AppSettingsService.instance.isAdmin) 'Audit Logs',
+      ];
+
+  String _normalizeTab(String? tab) {
+    if (tab == null || tab.isEmpty || tab == 'Report Illegal') {
+      return 'Analytics';
+    }
+    return _availableReportViews.contains(tab) ? tab : 'Analytics';
+  }
+
   @override
   void initState() {
     super.initState();
-    _activeTab = widget.initialTab ?? 'Analytics';
+    _activeTab = _normalizeTab(widget.initialTab);
     _loadData();
-    _loadIllegalReportAlerts();
     RegularDealersService.instance.init().then((_) {
       RegularDealersService.instance.getTransmissions().then((list) {
         if (mounted) setState(() => _nmicTransmissionsList = list);
@@ -81,12 +95,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           }
           if (mounted) setState(() {});
         });
-      } else if (table == 'reports') {
-        _loadIllegalReportAlerts();
       }
-    });
-    _alertTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      _loadIllegalReportAlerts();
     });
   }
 
@@ -95,7 +104,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     super.didUpdateWidget(oldWidget);
     if (widget.initialTab != null && widget.initialTab != oldWidget.initialTab) {
       setState(() {
-        _activeTab = widget.initialTab!;
+        _activeTab = _normalizeTab(widget.initialTab);
       });
     }
   }
@@ -103,104 +112,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   @override
   void dispose() {
     _realtimeSub?.cancel();
-    _alertTimer?.cancel();
     super.dispose();
-  }
-
-  Future<void> _loadIllegalReportAlerts() async {
-    try {
-      final reportsRes = await supabase.from('reports').select();
-      final Map<String, Map<String, dynamic>> reportsMap = {};
-
-      for (var r in (reportsRes as List)) {
-        final idStr = r['id']?.toString() ?? '';
-        final shortId = idStr.length >= 8
-            ? idStr.substring(0, 8).toUpperCase()
-            : idStr.toUpperCase();
-        final ref = r['reference_no']?.toString() ?? (idStr.isNotEmpty ? 'RPT-2026-$shortId' : '');
-        final key = ref.isNotEmpty ? ref : idStr;
-        if (key.isNotEmpty) {
-          reportsMap[key] = {
-            'id': idStr,
-            'reference_no': ref,
-            'status': r['status'] ?? 'Pending Review',
-            'location': r['location'] ?? 'Tabaco City',
-            'reporter_name': r['reporter_name'] ?? 'Citizen',
-            'created_at': r['incident_date'] ?? r['created_at'],
-          };
-        }
-      }
-
-      try {
-        final notifs = await supabase
-            .from('notifications')
-            .select('id, type, reference_no, data, created_at')
-            .inFilter('type', [
-              'admin_illegal_report',
-              'report_filed',
-              'report_status_update',
-              'report_investigating',
-              'report_resolved',
-            ])
-            .order('created_at', ascending: true);
-
-        for (var n in (notifs as List)) {
-          final data = n['data'] is Map ? Map<String, dynamic>.from(n['data']) : <String, dynamic>{};
-          final ref = n['reference_no']?.toString() ?? data['reference_no']?.toString() ?? '';
-          final rId = data['report_id']?.toString() ?? data['id']?.toString() ?? '';
-
-          String? matchKey;
-          for (var k in reportsMap.keys) {
-            final item = reportsMap[k]!;
-            if ((ref.isNotEmpty && (k == ref || item['reference_no'] == ref)) ||
-                (rId.isNotEmpty && (item['id'] == rId || k == rId))) {
-              matchKey = k;
-              break;
-            }
-          }
-
-          if (matchKey != null) {
-            if (data['status'] != null && data['status'].toString().isNotEmpty) {
-              reportsMap[matchKey]!['status'] = data['status'].toString();
-            }
-          } else if (ref.isNotEmpty || rId.isNotEmpty) {
-            final key = ref.isNotEmpty ? ref : rId;
-            reportsMap[key] = {
-              'id': rId,
-              'reference_no': ref,
-              'status': data['status'] ?? 'Pending Review',
-              'location': data['location'] ?? 'Tabaco City',
-              'reporter_name': data['reporter_name'] ?? 'Citizen',
-              'created_at': n['created_at'],
-            };
-          }
-        }
-      } catch (_) {}
-
-      int count = 0;
-      Map<String, dynamic>? latest;
-      for (var rep in reportsMap.values) {
-        final s = (rep['status'] ?? '').toString().trim().toLowerCase();
-        final isPending = s == 'pending' ||
-            s == 'unreviewed' ||
-            s == 'submitted' ||
-            s == 'new' ||
-            s == 'pending review' ||
-            s == 'pending_review' ||
-            s == 'under review';
-        if (isPending) {
-          count++;
-          latest ??= rep;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          _unreviewedIllegalReports = count;
-          _latestIllegalReport = latest;
-        });
-      }
-    } catch (_) {}
   }
 
   // ════════════════════════════════════════════
@@ -876,17 +788,11 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (_unreviewedIllegalReports > 0) ...[
-                            _buildIllegalReportUrgentAlertBanner(),
-                            const SizedBox(height: 20),
-                          ],
-                          _buildFilterBar(),
-                          const SizedBox(height: 20),
-                          _buildSummaryCards(),
-                          const SizedBox(height: 24),
-                          _buildTabButtons(),
-                          const SizedBox(height: 24),
                           if (_activeTab == 'Analytics') ...[
+                            _buildFilterBar(),
+                            const SizedBox(height: 20),
+                            _buildSummaryCards(),
+                            const SizedBox(height: 24),
                             _buildCalendarAndChart(),
                             const SizedBox(height: 24),
                             _buildOperationsRecordsSection(),
@@ -906,10 +812,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                             _buildCustomerHistoricalRecordsTab(),
                           ] else if (_activeTab == 'Meat Dealers Directory') ...[
                             _buildMeatDealersDirectoryTab(),
+                          ] else if (_activeTab == 'Customer Reviews') ...[
+                            const CustomerReviewsView(),
                           ] else if (_activeTab == 'Audit Logs' && AppSettingsService.instance.isAdmin) ...[
                             AuditLogsTab(activeDateRange: _getActiveDateRange()),
-                          ] else ...[
-                            _buildReportIllegalSection(),
                           ],
                         ],
                       ),
@@ -943,15 +849,17 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 ),
                 SizedBox(height: 3),
                 Text(
-                  'Daily, weekly, monthly reports, revenue & animal health surveillance',
+                  'Analytics, abattoir records, dealer logs, customer reviews & audit trails',
                   style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
                 ),
               ],
             ),
           ),
+          const SizedBox(width: 16),
+          _buildReportViewDropdown(),
           const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey.shade300),
               borderRadius: BorderRadius.circular(8),
@@ -959,6 +867,90 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
         ],
+      ),
+    );
+  }
+
+  IconData _iconForReportView(String view) {
+    switch (view) {
+      case 'Analytics':
+        return Icons.analytics_outlined;
+      case 'Daily Production (Abattoir)':
+        return Icons.factory_outlined;
+      case 'Monthly Dealer Log':
+        return Icons.calendar_view_month_outlined;
+      case 'NMIS Reports & Transmittal':
+        return Icons.assignment_turned_in_outlined;
+      case 'Customer Records':
+        return Icons.history_edu_outlined;
+      case 'Meat Dealers Directory':
+        return Icons.storefront_outlined;
+      case 'Customer Reviews':
+        return Icons.rate_review_outlined;
+      case 'Audit Logs':
+        return Icons.policy_outlined;
+      default:
+        return Icons.description_outlined;
+    }
+  }
+
+  Widget _buildReportViewDropdown() {
+    final views = _availableReportViews;
+    final current = views.contains(_activeTab) ? _activeTab : 'Analytics';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.35)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: current,
+          isDense: false,
+          borderRadius: BorderRadius.circular(12),
+          dropdownColor: Colors.white,
+          icon: const Padding(
+            padding: EdgeInsets.only(left: 6),
+            child: Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF2D6A4F), size: 20),
+          ),
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1B4332),
+          ),
+          items: views.map((view) {
+            final isSelected = view == current;
+            return DropdownMenuItem<String>(
+              value: view,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _iconForReportView(view),
+                    size: 16,
+                    color: isSelected ? const Color(0xFF2D6A4F) : const Color(0xFF64748B),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    view,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: isSelected ? const Color(0xFF1B4332) : const Color(0xFF334155),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (val) {
+            if (val != null && val != _activeTab) {
+              setState(() => _activeTab = val);
+            }
+          },
+        ),
       ),
     );
   }
@@ -1023,44 +1015,41 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                       ),
                     const SizedBox(width: 6),
-                    InkWell(
-                      onTap: () async {
-                        if (_reportType == 'Custom Range') {
-                          await _pickCustomDateRange();
-                          return;
-                        }
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: _activeDate(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035),
-                        );
-                        if (picked != null) {
+                    if (_reportType == 'Custom Range')
+                      InkWell(
+                        onTap: _pickCustomDateRange,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.calendar_today_outlined, size: 14, color: Color(0xFF2D6A4F)),
+                              const SizedBox(width: 6),
+                              Text(
+                                periodLabel,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF2D3748),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      AnimatedDateDropdown(
+                        selectedDate: _activeDate(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2035),
+                        label: periodLabel,
+                        onDateSelected: (picked) {
                           setState(() {
                             _selectedDate = picked;
                             _calendarMonth = DateTime(picked.year, picked.month);
                           });
-                        }
-                      },
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.calendar_today_outlined, size: 14, color: Color(0xFF2D6A4F)),
-                            const SizedBox(width: 6),
-                            Text(
-                              periodLabel,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF2D3748),
-                              ),
-                            ),
-                          ],
-                        ),
+                        },
                       ),
-                    ),
                     const SizedBox(width: 6),
                     if (_reportType != 'Custom Range')
                       IconButton(
@@ -1254,155 +1243,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             Text(changeText, style: TextStyle(fontSize: 10.5, color: changeColor), overflow: TextOverflow.ellipsis),
           ],
         ),
-      ),
-    );
-  }
-
-  // ════════════════════════════════════════════
-  //  TAB BUTTONS
-  // ════════════════════════════════════════════
-  Widget _buildTabButtons() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _tabButton('Analytics', _activeTab == 'Analytics'),
-          const SizedBox(width: 8),
-          _tabButton('Daily Production (Abattoir)', _activeTab == 'Daily Production (Abattoir)'),
-          const SizedBox(width: 8),
-          _tabButton('Monthly Dealer Log', _activeTab == 'Monthly Dealer Log'),
-          const SizedBox(width: 8),
-          _tabButton('NMIS Reports & Transmittal', _activeTab == 'NMIS Reports & Transmittal'),
-          const SizedBox(width: 8),
-          _tabButton('Customer Records', _activeTab == 'Customer Records'),
-          const SizedBox(width: 8),
-          _tabButton('Meat Dealers Directory', _activeTab == 'Meat Dealers Directory'),
-          if (AppSettingsService.instance.isAdmin) ...[
-            const SizedBox(width: 8),
-            _tabButton('Audit Logs', _activeTab == 'Audit Logs'),
-          ],
-          const SizedBox(width: 8),
-          _tabButton(
-            'Report Illegal',
-            _activeTab == 'Report Illegal',
-            badgeCount: _unreviewedIllegalReports,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tabButton(String label, bool isActive, {int badgeCount = 0}) {
-    return OutlinedButton(
-      onPressed: () => setState(() => _activeTab = label),
-      style: OutlinedButton.styleFrom(
-        backgroundColor: isActive ? const Color(0xFF2D6A4F).withValues(alpha: 0.08) : Colors.white,
-        foregroundColor: isActive ? const Color(0xFF2D6A4F) : const Color(0xFF4A5568),
-        side: BorderSide(
-          color: isActive ? const Color(0xFF2D6A4F) : Colors.grey.shade300,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: TextStyle(fontSize: 13, fontWeight: isActive ? FontWeight.w600 : FontWeight.w500)),
-          if (badgeCount > 0) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: const Color(0xFFDC2626),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '$badgeCount',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIllegalReportUrgentAlertBanner() {
-    final ref = _latestIllegalReport?['reference_no'] ?? 'Report';
-    final loc = _latestIllegalReport?['location'] ?? 'Location not specified';
-    final reporter = _latestIllegalReport?['reporter_name'] ?? 'Citizen';
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFEF2F2),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFDC2626).withValues(alpha: 0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: const Color(0xFFDC2626).withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      '🚨 New Illegal Slaughter Whistleblower Report ($_unreviewedIllegalReports Pending)',
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF991B1B),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDC2626),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Text('ALERT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Ref: $ref • Location: $loc • Reporter: $reporter',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFFB91C1C)),
-                ),
-              ],
-            ),
-          ),
-          ElevatedButton.icon(
-            onPressed: () => setState(() => _activeTab = 'Report Illegal'),
-            icon: const Icon(Icons.arrow_forward, size: 15),
-            label: const Text('Go to Report Illegal', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -2173,15 +2013,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     );
   }
 
-  // ════════════════════════════════════════════
-  //  REPORT ILLEGAL SECTION
-  // ════════════════════════════════════════════
-  Widget _buildReportIllegalSection() {
-    return IllegalSlaughterReportsView(
-      onReportsUpdated: _loadIllegalReportAlerts,
-    );
-  }
-
   // ═══════════════════════════════════════════════════════════
   //  1. DAILY ABATTOIR PRODUCTION TAB (Market & Barangay)
   // ═══════════════════════════════════════════════════════════
@@ -2261,21 +2092,17 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   ],
                 ),
               ),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.calendar_today, size: 16),
-                label: Text(DateFormat('yyyy-MM-dd').format(_nmicReportDate)),
-                onPressed: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _nmicReportDate,
-                    firstDate: DateTime(2024),
-                    lastDate: DateTime(2030),
-                  );
-                  if (picked != null) setState(() => _nmicReportDate = picked);
+              AnimatedDateDropdown(
+                selectedDate: _nmicReportDate,
+                firstDate: DateTime(2024),
+                lastDate: DateTime(2030),
+                label: DateFormat('yyyy-MM-dd').format(_nmicReportDate),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: Colors.white,
+                borderColor: Colors.grey.shade300,
+                onDateSelected: (picked) {
+                  setState(() => _nmicReportDate = picked);
                 },
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
               ),
               const SizedBox(width: 12),
               ElevatedButton.icon(

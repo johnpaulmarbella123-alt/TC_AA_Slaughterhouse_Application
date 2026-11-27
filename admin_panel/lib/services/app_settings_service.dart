@@ -768,6 +768,7 @@ class AppSettingsService extends ChangeNotifier {
   /// 5: Meat Releasing
   /// 6: Reports & Records
   /// 7: Settings (Full Settings for Admin, My Profile for Clerk/Inspector)
+  /// 8: Illegal Slaughter Reports (Admin only)
   bool isModuleAllowed(int moduleIndex) {
     final normalized = StaffAccount.normalizeRole(_currentRole);
     if (normalized == 'Admin') return true;

@@ -10,6 +10,7 @@ import 'slaughter_inspection_page.dart';
 import 'payment_cashiering_page.dart';
 import 'meat_releasing_page.dart';
 import 'reports_records_page.dart';
+import 'illegal_slaughter_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
@@ -92,18 +93,30 @@ class _AdminShellState extends State<AdminShell> {
 
   void _onNavigate(int index, [dynamic tabArg]) {
     setState(() {
+      // Redirect legacy routes cleanly:
+      // - (6, 'Report Illegal') -> dedicated Admin-only Illegal Reports page (index 8)
+      // - (7, 'feedback') -> Reports & Records -> Customer Reviews
+      if (index == 6 && tabArg == 'Report Illegal') {
+        _selectedIndex = 8;
+        _loadedPages.add(8);
+        return;
+      }
+      if (index == 7 && tabArg == 'feedback') {
+        _selectedIndex = 6;
+        _loadedPages.add(6);
+        _reportsInitialTab = 'Customer Reviews';
+        return;
+      }
+
       _selectedIndex = index;
       _loadedPages.add(index);
       if (index == 6 && tabArg is String) {
         _reportsInitialTab = tabArg;
       } else if (index == 7 && tabArg is int) {
-        _settingsInitialTab = tabArg;
+        _settingsInitialTab = tabArg.clamp(0, 5);
         _settingsNavVersion++;
       } else if (index == 7 && tabArg == 'customers') {
         _settingsInitialTab = 5;
-        _settingsNavVersion++;
-      } else if (index == 7 && tabArg == 'feedback') {
-        _settingsInitialTab = 6;
         _settingsNavVersion++;
       } else if (index == 7) {
         _settingsNavVersion++;
@@ -163,6 +176,9 @@ class _AdminShellState extends State<AdminShell> {
                           initialTab: _settingsInitialTab,
                           navVersion: _settingsNavVersion,
                         )
+                      : const SizedBox.shrink(),
+                  _loadedPages.contains(8)
+                      ? const IllegalSlaughterPage()
                       : const SizedBox.shrink(),
                 ],
               ),
@@ -473,6 +489,17 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                       index: 6,
                                       icon: LucideSidebarIcon.fileText,
                                       label: 'Reports',
+                                      subtitle: '',
+                                      isDark: isDark,
+                                      currentWidth: currentWidth,
+                                    ),
+                                  ],
+                                  if (settingsService.isModuleAllowed(8)) ...[
+                                    const SizedBox(height: 4),
+                                    _buildNavItem(
+                                      index: 8,
+                                      icon: LucideSidebarIcon.shieldAlert,
+                                      label: 'Illegal Reports',
                                       subtitle: '',
                                       badgeCount: _illegalReportBadgeCount,
                                       isDark: isDark,

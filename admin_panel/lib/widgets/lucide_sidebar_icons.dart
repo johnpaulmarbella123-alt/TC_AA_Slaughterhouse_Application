@@ -9,6 +9,7 @@ enum LucideSidebarIcon {
   receiptDollar,
   truck,
   fileText,
+  shieldAlert,
   settings,
   user,
   logOut,
@@ -217,6 +218,21 @@ class _LucidePainter extends CustomPainter {
         canvas.drawLine(const Offset(8, 13), const Offset(16, 13), paint);
         canvas.drawLine(const Offset(8, 17), const Offset(16, 17), paint);
         canvas.drawLine(const Offset(8, 9), const Offset(10, 9), paint);
+        break;
+
+      case LucideSidebarIcon.shieldAlert:
+        final shield = Path()
+          ..moveTo(12, 22)
+          ..cubicTo(12, 22, 20, 18, 20, 12)
+          ..lineTo(20, 5)
+          ..lineTo(12, 2)
+          ..lineTo(4, 5)
+          ..lineTo(4, 12)
+          ..cubicTo(4, 18, 12, 22, 12, 22)
+          ..close();
+        canvas.drawPath(shield, paint);
+        canvas.drawLine(const Offset(12, 8), const Offset(12, 12.5), paint);
+        canvas.drawLine(const Offset(12, 16), const Offset(12.01, 16), paint);
         break;
 
       case LucideSidebarIcon.settings:

@@ -914,8 +914,7 @@ class _DashboardPageState extends State<DashboardPage> {
           title: 'Illegal Slaughter Report',
           refNo: ref,
           description: notifs.first['message']?.toString() ?? 'Citizen illegal slaughter submission.',
-          targetModuleIndex: 6,
-          targetTab: 'Report Illegal',
+          targetModuleIndex: 8,
         );
         return;
       }
@@ -1277,7 +1276,7 @@ class _DashboardPageState extends State<DashboardPage> {
         );
 
         final card4 = InkWell(
-          onTap: () => widget.onNavigate?.call(7, 'feedback'),
+          onTap: () => widget.onNavigate?.call(6, 'Customer Reviews'),
           borderRadius: BorderRadius.circular(14),
           child: _buildKpiCard(
             iconWidget: const Icon(Icons.star_rounded, size: 20, color: Color(0xFF1D4ED8)),
@@ -1713,7 +1712,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                     ),
-                    onPressed: () => widget.onNavigate?.call(6, 'Report Illegal'),
+                    onPressed: () => widget.onNavigate?.call(8),
                     child: const Text('Review', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   ),
                 ],
@@ -1956,15 +1955,13 @@ class _DashboardPageState extends State<DashboardPage> {
             // 6. Reports & Records
             _buildModuleNavCard(
               imageAssetPath: 'assets/images/reports_records.png',
-              badgeCount: _unreviewedIllegalReports,
+              badgeCount: 0,
               title: 'Reports & Records',
-              subtitle: _unreviewedIllegalReports > 0
-                  ? '$_unreviewedIllegalReports new reports to review'
-                  : 'Daily, weekly, monthly reports',
-              hasRedBorder: _unreviewedIllegalReports > 0,
-              isRedBadge: _unreviewedIllegalReports > 0,
+              subtitle: 'Analytics, daily logs & reviews',
+              hasRedBorder: false,
+              isRedBadge: false,
               buttonLabel: 'View Reports',
-              onTap: () => widget.onNavigate?.call(6, _unreviewedIllegalReports > 0 ? 'Report Illegal' : 'Analytics'),
+              onTap: () => widget.onNavigate?.call(6, 'Analytics'),
             ),
           ],
         );
