@@ -893,7 +893,19 @@ class _AdminSidebarState extends State<_AdminSidebar>
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    _buildFormalSidebarLogo(logoPath, size: 38),
+                    Tooltip(
+                      message: 'Go to Dashboard',
+                      child: Material(
+                        color: Colors.transparent,
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          onTap: () => widget.onItemSelected(0),
+                          customBorder: const CircleBorder(),
+                          hoverColor: Colors.white.withValues(alpha: 0.10),
+                          child: _buildFormalSidebarLogo(logoPath, size: 38),
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     InkWell(
                       onTap: _toggleCollapse,
@@ -918,42 +930,63 @@ class _AdminSidebarState extends State<_AdminSidebar>
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    _buildFormalSidebarLogo(logoPath, size: 52),
-                    const SizedBox(width: 10),
                     Expanded(
-                      child: ClipRect(
-                        child: FadeTransition(
-                          opacity: _fadeAnimation,
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                headerSubtitle,
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w400,
-                                  letterSpacing: 0.55,
-                                  color: Color(0xFFCBD5E1),
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                softWrap: false,
+                      child: Tooltip(
+                        message: 'Go to Dashboard',
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            onTap: () => widget.onItemSelected(0),
+                            borderRadius: BorderRadius.circular(10),
+                            hoverColor: Colors.white.withValues(alpha: 0.08),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                              child: Row(
+                                children: [
+                                  _buildFormalSidebarLogo(logoPath, size: 52),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: ClipRect(
+                                      child: FadeTransition(
+                                        opacity: _fadeAnimation,
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              headerSubtitle,
+                                              style: const TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w400,
+                                                letterSpacing: 0.55,
+                                                color: Color(0xFFCBD5E1),
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              softWrap: false,
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              headerTitle,
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                height: 1.25,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.white,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              softWrap: false,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                headerTitle,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  height: 1.25,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                softWrap: false,
-                              ),
-                            ],
+                            ),
                           ),
                         ),
                       ),

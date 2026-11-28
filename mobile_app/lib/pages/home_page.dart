@@ -667,84 +667,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
 
-          const SizedBox(height: 14),
-
-          // ── REPORT ILLEGAL SLAUGHTER (NO DEALER ROLE REQUIRED) ──
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Material(
-              color: const Color(0xFFFEF2F2),
-              borderRadius: BorderRadius.circular(12),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const ReportIllegalSlaughterScreen(),
-                    ),
-                  );
-                },
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFD32F2F).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(9),
-                        ),
-                        child: const Icon(
-                          Icons.report_problem_outlined,
-                          color: Color(0xFFD32F2F),
-                          size: 20,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Report Illegal Slaughter",
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF991B1B),
-                              ),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              "File an anonymous complaint or escalate to authorities — no dealer role required.",
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: Color(0xFF7F1D1D),
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      const Icon(
-                        Icons.chevron_right_rounded,
-                        color: Color(0xFFB91C1C),
-                        size: 22,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-
           const SizedBox(height: 16),
 
           // ── OUR FULL OPERATION MACHINE ─────────────────────
@@ -824,6 +746,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
 
           const SizedBox(height: 12),
+
+          // ── REPORT ILLEGAL SLAUGHTER (SIMPLE OUTLINED BUTTON) ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ReportIllegalSlaughterScreen(),
+                    ),
+                  );
+                },
+                icon: const Icon(
+                  Icons.report_problem_outlined,
+                  size: 17,
+                  color: Color(0xFFC62828),
+                ),
+                label: const Text(
+                  "Report Illegal Slaughter",
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFFB71C1C),
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0xFFE57373), width: 1),
+                  padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 14),
 
           // ── ABOUT / GALLERY / REVIEW TABS ─────────────────
           Padding(
