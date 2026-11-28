@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "633906759174",
+    "project_id": "tc-aa-slaughterhouse",
+    "storage_bucket": "tc-aa-slaughterhouse.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:633906759174:android:dff25f7c96f1cd16fa6587",
+        "android_client_info": {
+          "package_name": "com.example.tc_aa_slaughterhouse"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAh2_qPbgNL-VVR43Q_HeaFqm6voQTnHao"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -13,7 +13,7 @@ import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
-import '../widgets/staff_notification_bell.dart';
+import '../utils/admin_responsive.dart';
 
 class DocumentVerificationPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -150,17 +150,17 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
 
   @override
   Widget build(BuildContext context) {
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now());
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: Column(children: [
-        _buildHeader(dateStr),
         Expanded(child: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF2D6A4F)))
           : RefreshIndicator(onRefresh: _loadRequests, color: const Color(0xFF2D6A4F),
               child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(), padding: const EdgeInsets.all(24),
+                physics: const AlwaysScrollableScrollPhysics(), padding: AdminResponsive.pagePadding(context),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _buildSearchBar(),
+                  const SizedBox(height: 16),
                   _buildStatsRow(),
                   const SizedBox(height: 24),
                   _buildTable(title: 'Barangay Requests — Document Verification', subtitle: 'Verify: Barangay Certificate, Proof of Ownership, and Veterinary Health Certificate (if available)', requests: _filteredList(_barangayRequests), scrollCtrl: _barangayScrollCtrl, isBarangay: true),
@@ -171,47 +171,30 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
       ]),
     );
   }
-  Widget _buildHeader(String dateStr) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Colors.grey.shade200))),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-            Text('Document Verification', style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A))),
-            SizedBox(height: 3),
-            Text('Permits and certificates verification', style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569))),
-          ]),
+  Widget _buildSearchBar() {
+    final isCompact = AdminResponsive.isCompact(context);
+    return SizedBox(
+      width: isCompact ? double.infinity : 280,
+      height: 38,
+      child: TextField(
+        controller: _searchController,
+        onChanged: (_) => setState(() {}),
+        style: const TextStyle(fontSize: 13),
+        textAlignVertical: TextAlignVertical.center,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Search by reference or customer...',
+          hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
+          prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
+          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 38),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
         ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 250,
-          height: 36,
-          child: TextField(
-            controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(fontSize: 13),
-            textAlignVertical: TextAlignVertical.center,
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Search by reference or customer...',
-              hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
-              prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
-              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
-              filled: true,
-              fillColor: const Color(0xFFF7FAFC),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF2D6A4F), width: 1.5)),
-            ),
-          ),
-        ),
-        const SizedBox(width: 16),
-        Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)), child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568)))),
-        const SizedBox(width: 12),
-        StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
-      ]),
+      ),
     );
   }
 
@@ -221,15 +204,12 @@ class _DocumentVerificationPageState extends State<DocumentVerificationPage> {
     final aB = _verifiedRequests.where((r) => r['request_type'] == 'barangay').length;
     final rM = _cancelledRequests.where((r) => r['request_type'] == 'market').length;
     final rB = _cancelledRequests.where((r) => r['request_type'] == 'barangay').length;
-    return Row(children: [
-      Expanded(child: _statCard(icon: Icons.description_outlined, iconColor: const Color(0xFF4A5568), iconBg: const Color(0xFFF7FAFC), label: 'Total Documents', m: tM, b: tB, bc: Colors.grey.shade200)),
-      const SizedBox(width: 16),
-      Expanded(child: _statCard(icon: Icons.hourglass_top_rounded, iconColor: const Color(0xFFDD6B20), iconBg: const Color(0xFFFFFAF0), label: 'Pending Review', m: tM, b: tB, bc: const Color(0xFFFBD38D))),
-      const SizedBox(width: 16),
-      Expanded(child: _statCard(icon: Icons.check_circle_outline, iconColor: const Color(0xFF38A169), iconBg: const Color(0xFFF0FFF4), label: 'Approved', m: aM, b: aB, bc: const Color(0xFF9AE6B4))),
-      const SizedBox(width: 16),
-      Expanded(child: _statCard(icon: Icons.cancel_outlined, iconColor: const Color(0xFFE53E3E), iconBg: const Color(0xFFFFF5F5), label: 'Rejected', m: rM, b: rB, bc: const Color(0xFFFEB2B2))),
-    ]);
+    return AdminResponsive.kpiGrid([
+      _statCard(icon: Icons.description_outlined, iconColor: const Color(0xFF4A5568), iconBg: const Color(0xFFF7FAFC), label: 'Total Documents', m: tM, b: tB, bc: Colors.grey.shade200),
+      _statCard(icon: Icons.hourglass_top_rounded, iconColor: const Color(0xFFDD6B20), iconBg: const Color(0xFFFFFAF0), label: 'Pending Review', m: tM, b: tB, bc: const Color(0xFFFBD38D)),
+      _statCard(icon: Icons.check_circle_outline, iconColor: const Color(0xFF38A169), iconBg: const Color(0xFFF0FFF4), label: 'Approved', m: aM, b: aB, bc: const Color(0xFF9AE6B4)),
+      _statCard(icon: Icons.cancel_outlined, iconColor: const Color(0xFFE53E3E), iconBg: const Color(0xFFFFF5F5), label: 'Rejected', m: rM, b: rB, bc: const Color(0xFFFEB2B2)),
+    ], spacing: 12);
   }
 
   Widget _statCard({required IconData icon, required Color iconColor, required Color iconBg, required String label, required int m, required int b, required Color bc}) {

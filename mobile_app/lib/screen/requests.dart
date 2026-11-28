@@ -8,7 +8,6 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'report_illegal_slaughter_screen.dart';
 import 'how_it_works.dart';
 import '../services/document_verifier.dart';
 import '../utils/text_capitalization_formatters.dart';
@@ -63,7 +62,8 @@ const List<String> tabacoBarangays = [
   "Tagas", "Tayhi (Pob.)", "Visita"
 ];
 
-class _RequestsContentState extends State<RequestsContent> {
+class _RequestsContentState extends State<RequestsContent>
+    with WidgetsBindingObserver {
   final supabase = Supabase.instance.client;
 
   // moved out of top-level globals into proper state
@@ -115,11 +115,16 @@ class _RequestsContentState extends State<RequestsContent> {
   bool _isRegularDealer = false;
   bool? _isRoleLocked = false;
   bool? _isProfileLoading = true;
+  Map<String, dynamic>? _activeRoleChangeRequest;
+  bool _isSubmittingRoleChange = false;
   String? _pendingSelectedRole = 'barangay';
   bool get _roleLocked => _isRoleLocked ?? false;
   bool get _profileLoading => _isProfileLoading ?? false;
   String get _selectedRoleKey => _pendingSelectedRole ?? 'barangay';
   StreamSubscription<AuthState>? _authSubscription;
+  RealtimeChannel? _roleChangeChannel;
+  String? _subscribedRoleChangeUserId;
+  Timer? _pendingRoleChangePollTimer;
 
   String? selectedLivestock;
 
@@ -143,8 +148,13 @@ class _RequestsContentState extends State<RequestsContent> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     loadMunicipalities(selectedProvinceCode!);
     _loadCustomerProfile();
+    final initialUserId = supabase.auth.currentUser?.id;
+    if (initialUserId != null) {
+      _subscribeRoleChangeRealtime(initialUserId);
+    }
 
     if (widget.preselectedLivestockNotifier?.value != null) {
       selectedLivestock = widget.preselectedLivestockNotifier!.value;
@@ -153,10 +163,19 @@ class _RequestsContentState extends State<RequestsContent> {
     widget.preselectedLivestockNotifier?.addListener(_handleLivestockPreselection);
 
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
-      if (data.session?.user != null) {
+      final uid = data.session?.user.id;
+      if (uid != null) {
         _loadCustomerProfile();
+        _subscribeRoleChangeRealtime(uid);
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshRoleChangeStatus(showToastOnTransition: true);
+    }
   }
 
   @override
@@ -469,10 +488,27 @@ class _RequestsContentState extends State<RequestsContent> {
         }
       }
 
+      // 6. Check for active Barangay <-> Market dealer role change request
+      Map<String, dynamic>? activeRoleReq;
+      try {
+        final roleReqRow = await supabase
+            .from('dealer_role_change_requests')
+            .select()
+            .eq('user_id', user.id)
+            .inFilter('status', ['pending', 'approved_awaiting_verification'])
+            .order('created_at', ascending: false)
+            .limit(1)
+            .maybeSingle();
+        if (roleReqRow != null) {
+          activeRoleReq = Map<String, dynamic>.from(roleReqRow);
+        }
+      } catch (_) {}
+
       // NOTE: Do NOT pre-fill initials for first-time dealers!
       // Only populate _markingController when the user already has a locked marking.
       if (mounted) {
         setState(() {
+          _activeRoleChangeRequest = activeRoleReq;
           if (resolvedMarking != null && resolvedMarking.isNotEmpty) {
             _markingController.text = resolvedMarking;
             _isMarkingLocked = true;
@@ -480,7 +516,15 @@ class _RequestsContentState extends State<RequestsContent> {
             _markingController.clear();
             _isMarkingLocked = false;
           }
-          if (hasAuthoritativeRoleLock && (resolvedRole == 'barangay' || resolvedRole == 'market')) {
+          if (activeRoleReq != null &&
+              activeRoleReq['status'] == 'approved_awaiting_verification') {
+            // Admin approved the switch: re-open formal Role Verification form
+            // pre-selected to the approved target role so customer completes verification.
+            final targetRole = (activeRoleReq['requested_role'] ?? 'barangay').toString().toLowerCase();
+            _isRoleLocked = false;
+            _pendingSelectedRole = (targetRole == 'market') ? 'market' : 'barangay';
+            isBarangay = (_pendingSelectedRole == 'barangay');
+          } else if (hasAuthoritativeRoleLock && (resolvedRole == 'barangay' || resolvedRole == 'market')) {
             _isRoleLocked = true;
             isBarangay = (resolvedRole == 'barangay');
             _pendingSelectedRole = resolvedRole!;
@@ -489,6 +533,7 @@ class _RequestsContentState extends State<RequestsContent> {
           }
           _isProfileLoading = false;
         });
+        _syncPendingRoleChangePolling();
       }
     } catch (e) {
       debugPrint('Error loading customer profile: $e');
@@ -496,8 +541,177 @@ class _RequestsContentState extends State<RequestsContent> {
     }
   }
 
+  void _syncPendingRoleChangePolling() {
+    final isPending = _activeRoleChangeRequest?['status']?.toString() == 'pending';
+    if (isPending) {
+      _pendingRoleChangePollTimer ??= Timer.periodic(
+        const Duration(seconds: 4),
+        (_) {
+          if (!mounted) {
+            _pendingRoleChangePollTimer?.cancel();
+            _pendingRoleChangePollTimer = null;
+            return;
+          }
+          if (_activeRoleChangeRequest?['status']?.toString() != 'pending') {
+            _pendingRoleChangePollTimer?.cancel();
+            _pendingRoleChangePollTimer = null;
+            return;
+          }
+          _refreshRoleChangeStatus(showToastOnTransition: true);
+        },
+      );
+    } else {
+      _pendingRoleChangePollTimer?.cancel();
+      _pendingRoleChangePollTimer = null;
+    }
+  }
+
+  void _subscribeRoleChangeRealtime(String userId) {
+    if (_subscribedRoleChangeUserId == userId && _roleChangeChannel != null) {
+      return;
+    }
+    if (_roleChangeChannel != null) {
+      try {
+        supabase.removeChannel(_roleChangeChannel!);
+      } catch (_) {}
+      _roleChangeChannel = null;
+    }
+    _subscribedRoleChangeUserId = userId;
+    try {
+      _roleChangeChannel = supabase
+          .channel('public:dealer_role_change_requests_user_$userId')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'dealer_role_change_requests',
+            callback: (payload) {
+              if (!mounted) return;
+              final recUserId = payload.newRecord['user_id']?.toString() ??
+                  payload.oldRecord['user_id']?.toString();
+              if (recUserId != null && recUserId != userId) return;
+              _refreshRoleChangeStatus(showToastOnTransition: true);
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Role change realtime subscribe notice: $e');
+    }
+  }
+
+  Future<void> _refreshRoleChangeStatus({bool showToastOnTransition = false}) async {
+    final user = supabase.auth.currentUser;
+    if (user == null || !mounted) return;
+
+    final prevStatus = _activeRoleChangeRequest?['status']?.toString();
+    final prevId = _activeRoleChangeRequest?['id'];
+
+    try {
+      final latestRow = await supabase
+          .from('dealer_role_change_requests')
+          .select()
+          .eq('user_id', user.id)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (latestRow == null) {
+        if (_activeRoleChangeRequest != null) {
+          setState(() => _activeRoleChangeRequest = null);
+        }
+        _syncPendingRoleChangePolling();
+        return;
+      }
+
+      final row = Map<String, dynamic>.from(latestRow);
+      final newStatus = row['status']?.toString();
+
+      if (newStatus == 'pending') {
+        setState(() => _activeRoleChangeRequest = row);
+      } else if (newStatus == 'approved_awaiting_verification') {
+        final targetRole = (row['requested_role'] ?? 'barangay').toString().toLowerCase();
+        setState(() {
+          _activeRoleChangeRequest = row;
+          _isRoleLocked = false;
+          _pendingSelectedRole = (targetRole == 'market') ? 'market' : 'barangay';
+          isBarangay = (_pendingSelectedRole == 'barangay');
+        });
+        if (showToastOnTransition && prevStatus == 'pending') {
+          final label = targetRole == 'market' ? 'Market Dealer' : 'Barangay Dealer';
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.verified_outlined, color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Role switch to $label approved! Please complete the formal verification below.',
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFF1E855A),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (newStatus == 'rejected') {
+        final wasPending = prevStatus == 'pending' && (prevId == null || prevId == row['id']);
+        if (_activeRoleChangeRequest != null) {
+          setState(() => _activeRoleChangeRequest = null);
+        }
+        if (showToastOnTransition && wasPending) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white, size: 18),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Your role switch request was declined by the Admin.',
+                      style: TextStyle(fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.orange.shade800,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } else if (newStatus == 'completed') {
+        if (_activeRoleChangeRequest != null) {
+          setState(() => _activeRoleChangeRequest = null);
+          _loadCustomerProfile();
+        }
+      }
+      _syncPendingRoleChangePolling();
+    } catch (e) {
+      debugPrint('Role change refresh notice: $e');
+    }
+  }
+
   @override
   void dispose() {
+    _pendingRoleChangePollTimer?.cancel();
+    _pendingRoleChangePollTimer = null;
+    WidgetsBinding.instance.removeObserver(this);
+    if (_roleChangeChannel != null) {
+      try {
+        supabase.removeChannel(_roleChangeChannel!);
+      } catch (_) {}
+      _roleChangeChannel = null;
+    }
     widget.preselectedLivestockNotifier?.removeListener(_handleLivestockPreselection);
     _authSubscription?.cancel();
     _customerNameController.dispose();
@@ -569,6 +783,48 @@ class _RequestsContentState extends State<RequestsContent> {
       );
       return;
     }
+
+    // Confirmation warning prompt before finalizing submission
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 26),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Confirm Submission',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to submit this request? Please review your details and uploaded documents to make sure everything is accurate.',
+          style: TextStyle(fontSize: 13.5, height: 1.4, color: Color(0xFF334155)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E855A),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
 
     setState(() => isLoading = true);
 
@@ -1580,7 +1836,7 @@ class _RequestsContentState extends State<RequestsContent> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     setState(() {
       isBarangay = isChoosingBarangay;
@@ -1634,24 +1890,275 @@ class _RequestsContentState extends State<RequestsContent> {
           }).eq('id', user.id);
         } catch (_) {}
       }
+      // If completing an Admin-approved Barangay <-> Market role switch,
+      // finalize the switch atomically via RPC so Meat Dealers Directory updates too.
+      final pendingSwitch = _activeRoleChangeRequest;
+      if (pendingSwitch != null &&
+          pendingSwitch['status'] == 'approved_awaiting_verification') {
+        try {
+          await supabase.rpc(
+            'complete_dealer_role_switch',
+            params: {
+              'p_request_id': pendingSwitch['id'],
+              'p_new_role': chosenRole,
+            },
+          );
+        } catch (e) {
+          debugPrint('complete_dealer_role_switch RPC notice: $e');
+        }
+        if (mounted) {
+          setState(() => _activeRoleChangeRequest = null);
+        }
+      }
     }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text("Role permanently set to $roleTitle. You may now create your request."),
+        content: Text("Role verified and set to $roleTitle. You may now create your request."),
         backgroundColor: const Color(0xFF1E855A),
       ),
     );
   }
 
+  Future<void> _showLockedRolePrompt() async {
+    if (_isSubmittingRoleChange) return;
+    final currentLabel = isBarangay ? 'Barangay Dealer' : 'Market Dealer';
+    final targetLabel = isBarangay ? 'Market Dealer' : 'Barangay Dealer';
+
+    if (_activeRoleChangeRequest?['status'] == 'pending') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Your request to switch to $targetLabel is already pending Admin approval.',
+          ),
+          backgroundColor: const Color(0xFFD97706),
+        ),
+      );
+      return;
+    }
+
+    final wantSwitch = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.lock_outline, color: Color(0xFF1E855A), size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Account Role Locked',
+                style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Your account is permanently locked as a $currentLabel based on your initial role selection.\n\nDo you want to request a role change to $targetLabel?',
+          style: const TextStyle(fontSize: 13.5, height: 1.45, color: Color(0xFF334155)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E855A),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Request Role Change'),
+          ),
+        ],
+      ),
+    );
+
+    if (wantSwitch == true && mounted) {
+      await _showRequestRoleChangeDialog();
+    }
+  }
+
+  Future<void> _showRequestRoleChangeDialog() async {
+    final currentRole = isBarangay ? 'barangay' : 'market';
+    final targetRole = isBarangay ? 'market' : 'barangay';
+    final currentLabel = isBarangay ? 'Barangay Dealer' : 'Market Dealer';
+    final targetLabel = isBarangay ? 'Market Dealer' : 'Barangay Dealer';
+    final reasonCtrl = TextEditingController();
+
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        scrollable: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.swap_horiz_rounded, color: Color(0xFF1E855A), size: 24),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Request Switch to $targetLabel',
+                style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Your account is currently registered as a $currentLabel. Submit a request to the Slaughterhouse Admin to switch to $targetLabel.\n\nOnce approved, you will complete the formal role verification form (with updated details and supporting document) before the change takes effect.',
+                style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xFF334155)),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 3,
+                minLines: 2,
+                decoration: InputDecoration(
+                  labelText: 'Reason for role switch (optional)',
+                  hintText: 'e.g., Now operating a registered stall at Tabaco Public Market...',
+                  filled: true,
+                  fillColor: const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E855A),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Send Request'),
+          ),
+        ],
+      ),
+    );
+
+    if (submitted != true || !mounted) return;
+
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() => _isSubmittingRoleChange = true);
+    try {
+      final customerName = _customerNameController.text.trim().isNotEmpty
+          ? _customerNameController.text.trim()
+          : (_customerName.isNotEmpty ? _customerName : (user.email ?? 'Dealer'));
+      final inserted = await supabase
+          .from('dealer_role_change_requests')
+          .insert({
+            'user_id': user.id,
+            'customer_name': customerName,
+            'from_role': currentRole,
+            'requested_role': targetRole,
+            'reason': reasonCtrl.text.trim(),
+            'status': 'pending',
+          })
+          .select()
+          .single();
+
+      // Notify Admin staff bell (best-effort)
+      try {
+        await supabase.from('staff_notifications').insert({
+          'target_role': 'Admin',
+          'type': 'dealer_role_change',
+          'title': 'Dealer Role Change Request',
+          'message': '$customerName requested to switch from $currentLabel to $targetLabel.',
+        });
+      } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _activeRoleChangeRequest = Map<String, dynamic>.from(inserted);
+        });
+        _syncPendingRoleChangePolling();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Request to switch to $targetLabel sent to Admin for approval.'),
+            backgroundColor: const Color(0xFF1E855A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not submit role change request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmittingRoleChange = false);
+    }
+  }
+
   Widget _buildRoleSelectionView(BuildContext context) {
     final bool isChoosingBarangay = _selectedRoleKey == 'barangay';
+    final bool isApprovedRoleSwitch =
+        _activeRoleChangeRequest?['status'] == 'approved_awaiting_verification';
+    final String approvedTargetLabel =
+        (_activeRoleChangeRequest?['requested_role'] == 'market')
+            ? 'Market Dealer'
+            : 'Barangay Dealer';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (isApprovedRoleSwitch) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFECFDF5),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF34D399)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.verified_user_outlined, color: Color(0xFF047857), size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Role Switch Approved — Verify as $approvedTargetLabel',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF065F46),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Admin approved your request to become a $approvedTargetLabel. Complete this formal verification step and upload the required document to finalize your new role.',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF047857), height: 1.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           // Stepper indicator: Choose Role -> Create Request -> Submit
           Container(
             width: double.infinity,
@@ -2224,13 +2731,7 @@ class _RequestsContentState extends State<RequestsContent> {
                                       child: GestureDetector(
                                         onTap: () {
                                           if (!isBarangay) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  "Your account is permanently locked as a Market Dealer based on your initial role selection.",
-                                                ),
-                                              ),
-                                            );
+                                            _showLockedRolePrompt();
                                           }
                                         },
                                         child: Container(
@@ -2263,13 +2764,7 @@ class _RequestsContentState extends State<RequestsContent> {
                                       child: GestureDetector(
                                         onTap: () {
                                           if (isBarangay) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(
-                                                content: Text(
-                                                  "Your account is permanently locked as a Barangay Dealer based on your initial role selection.",
-                                                ),
-                                              ),
-                                            );
+                                            _showLockedRolePrompt();
                                           }
                                         },
                                         child: Container(
@@ -2316,6 +2811,23 @@ class _RequestsContentState extends State<RequestsContent> {
                                       ),
                                     ),
                                   ),
+                                  if (_activeRoleChangeRequest?['status'] == 'pending')
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFFEF3C7),
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: const Color(0xFFF59E0B)),
+                                      ),
+                                      child: const Text(
+                                        'Switch Pending Admin',
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF92400E),
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                               const SizedBox(height: 20),
@@ -2616,11 +3128,7 @@ class _RequestsContentState extends State<RequestsContent> {
                       _buildRequiredDocsList(),
                       const SizedBox(height: 32),
 
-                      // 6. Report Illegal Slaughter
-                      _buildReportButton(),
-                      const SizedBox(height: 32),
-
-                      // 7. Footer Buttons
+                      // 6. Footer Buttons
                       Row(
                         children: [
                           Expanded(
@@ -2917,30 +3425,6 @@ class _RequestsContentState extends State<RequestsContent> {
             ],
           ),
         )).toList(),
-      ),
-    );
-  }
-
-  Widget _buildReportButton() {
-    return OutlinedButton.icon(
-      onPressed: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => const ReportIllegalSlaughterScreen(),
-          ),
-        );
-      },
-      icon: const Icon(Icons.report_problem_outlined, color: Colors.red),
-      label: const Text(
-        "Report or Complaint Illegal Slaughter",
-        style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-      ),
-      style: OutlinedButton.styleFrom(
-        side: const BorderSide(color: Colors.red),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        minimumSize: const Size(double.infinity, 50),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }

@@ -334,7 +334,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
 
           // Resolve the exact payment channel detected from PayMongo
           String finalMethod = detectedFromPayments ??
-              (detectedMethodRaw != null && detectedMethodRaw != 'Online (PayMongo)' ? detectedMethodRaw : null) ??
+              (detectedMethodRaw != null && detectedMethodRaw != 'Online (PayMongo)' && detectedMethodRaw != 'Online (Xendit)' ? detectedMethodRaw : null) ??
               'GCash';
 
           _confirmedPaymentMethod = finalMethod;
@@ -345,13 +345,27 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
             await prefs.remove('paymongo_link_$reqId');
           } catch (_) {}
 
-          // 1. Record payment method and transaction link, leaving status for Clerk Verification
+          // 1. Auto-verify online payment immediately (Xendit server confirmed PAID/SETTLED)
           try {
             await supabase.from('payments').update({
+              'status': 'paid',
+              'balance': 0,
               'payment_method': finalMethod,
               'transaction_ref': linkId,
               'receipt_number': widget.receiptNo,
             }).eq('request_id', reqId);
+          } catch (_) {}
+
+          try {
+            final curReq = await supabase
+                .from('requests')
+                .select('status')
+                .eq('id', reqId)
+                .maybeSingle();
+            final curSt = (curReq?['status'] ?? '').toString().toLowerCase();
+            if (!['paid', 'out_for_delivery', 'released', 'completed'].contains(curSt)) {
+              await supabase.from('requests').update({'status': 'paid'}).eq('id', reqId);
+            }
           } catch (_) {}
 
           if (mounted) {
@@ -414,20 +428,20 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
           .from('notifications')
           .select('id')
           .eq('user_id', userId)
-          .eq('type', 'payment_submitted')
+          .inFilter('type', ['payment_confirmed', 'payment_submitted'])
           .ilike('message', '%${widget.receiptNo}%')
           .maybeSingle();
 
       if (existingNotif == null) {
         await supabase.from('notifications').insert({
           'user_id': userId,
-          'title': '$method Payment Submitted',
+          'title': '$method Payment Verified',
           'message':
-              'Your online payment of \u20b1${total.toStringAsFixed(2)} via $method (Receipt ${widget.receiptNo}, Ref: $refNo) has been submitted and is awaiting Clerk verification.',
-          'type': 'payment_submitted',
+              'Your online payment of \u20b1${total.toStringAsFixed(2)} via $method (Receipt ${widget.receiptNo}, Ref: $refNo) has been automatically verified via Xendit. Your meat order is now ready for Releasing.',
+          'type': 'payment_confirmed',
           'is_read': false,
         });
-        debugPrint('Single payment submitted notification inserted for ${widget.receiptNo}');
+        debugPrint('Single payment verified notification inserted for ${widget.receiptNo}');
       }
     } catch (notifErr) {
       debugPrint('Notification insert error on Done: $notifErr');
@@ -435,7 +449,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
   }
 
   // ═══════════════════════════════════════════════════
-  //  PAID SUCCESS DIALOG (Awaiting Clerk Verification)
+  //  PAID SUCCESS DIALOG (Auto-Verified via Xendit)
   // ═══════════════════════════════════════════════════
   void _showPaidSuccessDialog(String method, double total) {
     showDialog(
@@ -450,21 +464,21 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
               width: 58,
               height: 58,
               decoration: const BoxDecoration(
-                color: Color(0xFFE0F2FE),
+                color: Color(0xFFDCFCE7),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.mark_email_read_outlined,
-                  color: Color(0xFF0284C7), size: 32),
+              child: const Icon(Icons.check_circle_rounded,
+                  color: Color(0xFF16A34A), size: 34),
             ),
             const SizedBox(height: 14),
             const Text(
-              'Payment Submitted!',
+              'Payment Verified!',
               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
             Text(
-              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been submitted!\n\nAwaiting Slaughterhouse Clerk verification before receipt & meat release authorization are issued.',
+              'Your $method payment of \u20b1${total.toStringAsFixed(2)} has been automatically verified via Xendit!\n\nYour official receipt is ready and your meat order is now queued for Meat Releasing.',
               style: TextStyle(fontSize: 13, color: Colors.grey.shade700, height: 1.4),
               textAlign: TextAlign.center,
             ),
@@ -484,7 +498,7 @@ class _SelectPaymentScreenState extends State<SelectPaymentScreen>
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0284C7),
+                backgroundColor: const Color(0xFF16A34A),
                 foregroundColor: Colors.white,
                 minimumSize: const Size(140, 40),
                 shape: RoundedRectangleBorder(

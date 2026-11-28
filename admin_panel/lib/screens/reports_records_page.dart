@@ -1,24 +1,28 @@
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:math';
-import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import 'customer_reviews_view.dart';
 import 'audit_logs_tab.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
+import '../services/audit_log_service.dart';
+import '../services/notification_service.dart';
 import '../services/csv_export_helper.dart';
 import '../services/report_pdf_generator.dart';
 import '../services/regular_dealers_service.dart';
 import '../services/nmic_report_pdf_generator.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/phone_number_formatter.dart';
+import '../utils/admin_responsive.dart';
 import '../widgets/animated_date_dropdown.dart';
+import '../widgets/animated_date_range_dropdown.dart';
+import '../widgets/animated_export_dropdown.dart';
+import '../widgets/animated_select_dropdown.dart';
 
 class ReportsRecordsPage extends StatefulWidget {
   final String? initialTab;
@@ -38,23 +42,30 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   String _reportType = 'Daily Report'; // 'Daily Report', 'Weekly Report', 'Monthly Report', 'Custom Range'
   late String _activeTab;
 
-  // Selected date reference for Daily / Weekly / Monthly / Custom Range
-  DateTime _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  // Unified date & filter state (single source of truth across all report views)
   DateTime? _selectedDate = DateTime.now();
   DateTimeRange? _customDateRange;
+  int _customRangeOpenVersion = 0;
+  int _dealerLogStartDay = 1;
+  bool _trendShowRevenue = true;
+  String _analyticsSectionFilter = 'section1'; // 'section1' | 'section2' | 'section3' | 'all'
 
   StreamSubscription<String>? _realtimeSub;
 
+  // Derived dates so all tabs share the single unified calendar/date picker
+  DateTime get _nmicReportDate => _activeDate();
+  DateTime get _monthlyLogMonth => DateTime(_activeDate().year, _activeDate().month);
+
   // NMIC & Abattoir Official Reports state
-  DateTime _nmicReportDate = DateTime.now();
-  DateTime _monthlyLogMonth = DateTime(DateTime.now().year, DateTime.now().month);
   String _selectedNmicSpecies = 'HOG';
   String _selectedNmicFormType = 'Weekly Summary';
   String? _selectedCustomerFilter;
-  String _customerPeriodFilter = 'This Month';
   List<Map<String, dynamic>> _nmicTransmissionsList = [];
   String _dealerSearchQuery = '';
   String _dealerCategoryFilter = 'All'; // 'All', 'Market', 'Barangay', 'New'
+  List<Map<String, dynamic>> _roleChangeRequests = [];
+  bool _loadingRoleChanges = false;
+  RealtimeChannel? _roleChangeChannel;
 
   List<String> get _availableReportViews => [
         'Analytics',
@@ -64,7 +75,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         'Customer Records',
         'Meat Dealers Directory',
         'Customer Reviews',
-        if (AppSettingsService.instance.isAdmin) 'Audit Logs',
+        if (AppSettingsService.instance.isSuperAdmin) 'Audit Logs',
       ];
 
   String _normalizeTab(String? tab) {
@@ -79,6 +90,8 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     super.initState();
     _activeTab = _normalizeTab(widget.initialTab);
     _loadData();
+    _loadRoleChangeRequests();
+    _subscribeRoleChangeRealtime();
     RegularDealersService.instance.init().then((_) {
       RegularDealersService.instance.getTransmissions().then((list) {
         if (mounted) setState(() => _nmicTransmissionsList = list);
@@ -112,7 +125,122 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   @override
   void dispose() {
     _realtimeSub?.cancel();
+    if (_roleChangeChannel != null) {
+      supabase.removeChannel(_roleChangeChannel!);
+      _roleChangeChannel = null;
+    }
     super.dispose();
+  }
+
+  Future<void> _loadRoleChangeRequests() async {
+    if (mounted) setState(() => _loadingRoleChanges = true);
+    try {
+      await AppSettingsService.instance.ensureAdminAuthSession();
+      final rows = await supabase
+          .from('dealer_role_change_requests')
+          .select()
+          .inFilter('status', ['pending', 'approved_awaiting_verification'])
+          .order('created_at', ascending: false);
+      if (mounted) {
+        setState(() {
+          _roleChangeRequests = List<Map<String, dynamic>>.from(rows);
+          _loadingRoleChanges = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Role change requests load notice: $e');
+      if (mounted) setState(() => _loadingRoleChanges = false);
+    }
+  }
+
+  void _subscribeRoleChangeRealtime() {
+    try {
+      _roleChangeChannel = supabase
+          .channel('public:dealer_role_change_requests_admin')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'dealer_role_change_requests',
+            callback: (_) {
+              if (!mounted) return;
+              _loadRoleChangeRequests();
+              RegularDealersService.instance.reload().then((_) {
+                if (mounted) setState(() {});
+              });
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Role change realtime notice: $e');
+    }
+  }
+
+  Future<void> _handleRoleChangeDecision(
+    Map<String, dynamic> req, {
+    required bool approve,
+  }) async {
+    final id = req['id'];
+    final userId = req['user_id'];
+    final customerName = (req['customer_name'] ?? 'Dealer').toString();
+    final currentRole = (req['from_role'] ?? 'barangay').toString().toLowerCase();
+    final targetRole = (req['requested_role'] ?? 'market').toString().toLowerCase();
+    final targetLabel = targetRole == 'market' ? 'Market Dealer' : 'Barangay Dealer';
+    final currentLabel = currentRole == 'market' ? 'Market Dealer' : 'Barangay Dealer';
+
+    try {
+      await AppSettingsService.instance.ensureAdminAuthSession();
+      final newStatus = approve ? 'approved_awaiting_verification' : 'rejected';
+      await supabase.from('dealer_role_change_requests').update({
+        'status': newStatus,
+        'reviewed_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', id);
+
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: approve
+            ? 'Dealer Role Switch Approved — Verification Required'
+            : 'Dealer Role Switch Request Declined',
+        message: approve
+            ? 'Your request to switch from $currentLabel to $targetLabel has been approved by the Slaughterhouse Admin. Please open the Requests tab and complete the formal role verification form (including required documents) to finalize your new role.'
+            : 'Your request to switch from $currentLabel to $targetLabel was declined by the Slaughterhouse Admin. Your account remains registered as $currentLabel.',
+        type: approve ? 'dealer_role_change_approved' : 'dealer_role_change_rejected',
+        data: {
+          'role_change_request_id': id,
+          'current_role': currentRole,
+          'requested_role': targetRole,
+          'status': newStatus,
+        },
+      );
+
+      AuditLogService.instance.log(
+        action: approve ? 'dealer_role_change_approved' : 'dealer_role_change_rejected',
+        module: 'Meat Dealers Directory',
+        targetId: id?.toString(),
+        targetRef: customerName,
+        details: {'from': currentRole, 'to': targetRole, 'status': newStatus},
+      );
+
+      await _loadRoleChangeRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              approve
+                  ? 'Approved $customerName → $targetLabel. Awaiting customer formal verification.'
+                  : 'Declined role switch request for $customerName.',
+            ),
+            backgroundColor: approve ? const Color(0xFF2D6A4F) : Colors.orange.shade800,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating role switch request: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   // ════════════════════════════════════════════
@@ -188,6 +316,28 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     return double.tryParse(w.toString()) ?? 0;
   }
 
+  bool _isPartialPartCondemnation(Map<String, dynamic> r) {
+    final status = (r['status'] ?? '').toString().toLowerCase();
+    if (status == 'post_mortem_failed' || status == 'condemned') return false;
+    final post = (r['post_mortem'] ?? '').toString().toLowerCase();
+    final condReason = (r['condemnation_reason'] ?? '').toString();
+    return post == 'partially condemned' || condReason.contains('[Partial Condemnation');
+  }
+
+  double _condemnedPartWeight(Map<String, dynamic> r) {
+    if (!_isPartialPartCondemnation(r)) return 0.0;
+    final condReason = (r['condemnation_reason'] ?? '').toString();
+    final m = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(condReason);
+    if (m == null) return 0.0;
+    return double.tryParse(m.group(1) ?? '') ?? 0.0;
+  }
+
+  double _netCarcassWeight(Map<String, dynamic> r) {
+    final gross = _carcassWeight(r);
+    final condemned = _condemnedPartWeight(r);
+    return (gross - condemned).clamp(0.0, double.infinity);
+  }
+
   double _calcRequestFee(Map<String, dynamic> req) {
     final payment = req['payment'] as Map<String, dynamic>?;
     if (payment != null) {
@@ -197,7 +347,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     final reqAmt = double.tryParse((req['total_amount'] ?? req['total_fee'] ?? 0).toString()) ?? 0;
     if (reqAmt > 0) return reqAmt;
 
-    final weight = _carcassWeight(req);
+    final weight = _netCarcassWeight(req);
     if (weight > 0) {
       return (weight * 5.0) + 250.0;
     }
@@ -205,35 +355,44 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   }
 
   bool _isHealthIssue(Map<String, dynamic> r) {
+    if (_isUninspected(r)) return false;
+    // Partially condemned carcasses proceed through the complete slaughter & release process,
+    // so they belong in Section 1 (Processed), not Section 2 (Whole Condemnations).
+    if (_isPartialPartCondemnation(r)) return false;
     final status = (r['status'] ?? '').toString().toLowerCase();
-    final anti = (r['anti_mortem'] ?? '').toString().toLowerCase();
     final post = (r['post_mortem'] ?? '').toString().toLowerCase();
     final condReason = (r['condemnation_reason'] ?? '').toString().trim();
-    final vetFindings = (r['veterinary_findings'] ?? '').toString().trim();
 
-    if (anti == 'failed' || status == 'anti_mortem_failed' || status == 'taken_back') return true;
     if (post == 'failed' || status == 'post_mortem_failed' || status == 'condemned') return true;
     if (condReason.isNotEmpty && condReason != 'null') return true;
-    if (vetFindings.isNotEmpty && vetFindings != 'null' && anti != 'passed') return true;
     return false;
   }
 
   bool _isProcessed(Map<String, dynamic> r) {
-    if (_isHealthIssue(r)) return false;
+    if (_isHealthIssue(r) || _isUninspected(r)) return false;
     final status = (r['status'] ?? '').toString().toLowerCase();
     final post = (r['post_mortem'] ?? '').toString().toLowerCase();
     final anti = (r['anti_mortem'] ?? '').toString().toLowerCase();
 
-    if (post == 'passed') return true;
-    if (['releasable', 'paid', 'released', 'completed'].contains(status)) return true;
+    if (post == 'passed' || post == 'partially condemned') return true;
+    if (_isPartialPartCondemnation(r)) return true;
+    if (['releasable', 'mic_generated', 'paid', 'released', 'completed'].contains(status)) return true;
     if (status == 'slaughter_started' && anti == 'passed') return true;
     return false;
   }
 
+  /// Section 3: Livestock that failed ante-mortem inspection and are currently
+  /// held/confined under mandatory 2-day observation (awaiting re-evaluation
+  /// to either proceed to slaughter or be condemned).
   bool _isUninspected(Map<String, dynamic> r) {
-    if (_isHealthIssue(r)) return false;
-    if (_isProcessed(r)) return false;
-    return true;
+    final status = (r['status'] ?? '').toString().toLowerCase();
+    final anti = (r['anti_mortem'] ?? '').toString().toLowerCase();
+    final post = (r['post_mortem'] ?? '').toString().toLowerCase();
+
+    if (post == 'failed' || status == 'post_mortem_failed' || status == 'condemned') return false;
+    if (post == 'passed' || ['releasable', 'paid', 'released', 'completed'].contains(status)) return false;
+    if (status == 'confined' || status == 'anti_mortem_failed' || anti == 'failed') return true;
+    return false;
   }
 
   DateTime _activeDate() => _selectedDate ?? DateTime.now();
@@ -278,43 +437,25 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     }
   }
 
-  Future<void> _pickCustomDateRange() async {
+  void _activateCustomDateRange() {
     final now = DateTime.now();
-    final initial = _customDateRange ??
-        DateTimeRange(
-          start: DateTime(now.year, now.month, 1),
-          end: now,
-        );
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2035),
-      initialDateRange: initial,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFF2D6A4F),
-              onPrimary: Colors.white,
-              surface: Colors.white,
-              onSurface: Color(0xFF1A202C),
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-    if (picked != null && mounted) {
-      setState(() {
-        _customDateRange = picked;
-        _reportType = 'Custom Range';
-        _selectedDate = picked.start;
-        _calendarMonth = DateTime(picked.start.year, picked.start.month);
-      });
-    }
+    setState(() {
+      _customDateRange ??= DateTimeRange(
+        start: DateTime(now.year, now.month, 1),
+        end: DateTime(now.year, now.month, now.day),
+      );
+      _reportType = 'Custom Range';
+      _customRangeOpenVersion++;
+    });
   }
 
   DateTime? _getRequestDate(Map<String, dynamic> r) {
+    final notesStr = (r['process_notes'] ?? '').toString();
+    final completedMatch = RegExp(r'\[COMPLETED_AT:([^\]]+)\]').firstMatch(notesStr);
+    if (completedMatch != null) {
+      final parsed = DateTime.tryParse(completedMatch.group(1)!.trim());
+      if (parsed != null) return parsed.toLocal();
+    }
     final insp = r['inspection_created_at']?.toString();
     if (insp != null && insp.isNotEmpty) {
       try {
@@ -345,39 +486,75 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     }).toList();
   }
 
+  bool get _isMonthlyOnlyTab =>
+      _activeTab == 'Monthly Dealer Log' || _activeTab == 'NMIS Reports & Transmittal';
+
+  bool get _isDailyOnlyTab => _activeTab == 'Daily Production (Abattoir)';
+
+  bool get _usesPeriodSelector =>
+      _activeTab == 'Analytics' ||
+      _activeTab == 'Customer Records' ||
+      _activeTab == 'Audit Logs';
+
+  bool get _usesDateFilter =>
+      _activeTab != 'Meat Dealers Directory' && _activeTab != 'Customer Reviews';
+
+  bool get _canExportActiveView =>
+      _activeTab != 'Customer Reviews' && _activeTab != 'Audit Logs';
+
+  bool get _canSendToNmis =>
+      _activeTab == 'Daily Production (Abattoir)' ||
+      _activeTab == 'Monthly Dealer Log' ||
+      _activeTab == 'NMIS Reports & Transmittal';
+
+  String _getUnifiedDateLabel() {
+    final base = _activeDate();
+    if (_isMonthlyOnlyTab) {
+      return DateFormat('MMMM yyyy').format(base);
+    }
+    if (_isDailyOnlyTab) {
+      return DateFormat('EEEE, MMM d, yyyy').format(base);
+    }
+    return _getActivePeriodLabel();
+  }
+
   // Navigation handlers
   void _prevPeriod() {
     setState(() {
       final cur = _activeDate();
-      if (_reportType == 'Daily Report') {
+      if (_isMonthlyOnlyTab) {
+        _selectedDate = DateTime(cur.year, cur.month - 1, 1);
+      } else if (_isDailyOnlyTab || _reportType == 'Daily Report') {
         _selectedDate = cur.subtract(const Duration(days: 1));
       } else if (_reportType == 'Weekly Report') {
         _selectedDate = cur.subtract(const Duration(days: 7));
       } else {
         _selectedDate = DateTime(cur.year, cur.month - 1, 1);
       }
-      _calendarMonth = DateTime(_selectedDate!.year, _selectedDate!.month);
+      _dealerLogStartDay = 1;
     });
   }
 
   void _nextPeriod() {
     setState(() {
       final cur = _activeDate();
-      if (_reportType == 'Daily Report') {
+      if (_isMonthlyOnlyTab) {
+        _selectedDate = DateTime(cur.year, cur.month + 1, 1);
+      } else if (_isDailyOnlyTab || _reportType == 'Daily Report') {
         _selectedDate = cur.add(const Duration(days: 1));
       } else if (_reportType == 'Weekly Report') {
         _selectedDate = cur.add(const Duration(days: 7));
       } else {
         _selectedDate = DateTime(cur.year, cur.month + 1, 1);
       }
-      _calendarMonth = DateTime(_selectedDate!.year, _selectedDate!.month);
+      _dealerLogStartDay = 1;
     });
   }
 
   void _resetToCurrentPeriod() {
     setState(() {
       _selectedDate = DateTime.now();
-      _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
+      _dealerLogStartDay = 1;
     });
   }
 
@@ -413,22 +590,34 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     final status = req['status']?.toString();
     if (status == 'taken_back') return 'Ante-Mortem Failed — Taken Back';
     if (status == 'condemned') return 'Post-Mortem Failed — Condemned';
+    if (_isPartialPartCondemnation(req)) {
+      final condReason = (req['condemnation_reason'] ?? '').toString();
+      final partMatch = RegExp(r'Part:\s*([^|\]]+)').firstMatch(condReason);
+      final wtMatch = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(condReason);
+      final part = partMatch?.group(1)?.trim() ?? '';
+      final wt = wtMatch?.group(1)?.trim() ?? '';
+      if (part.isNotEmpty && wt.isNotEmpty) {
+        return 'Partial Condemnation ($part, ${wt}kg)';
+      } else if (part.isNotEmpty) {
+        return 'Partial Condemnation ($part)';
+      }
+      return 'Passed — Partial Condemnation';
+    }
     final postMortem = req['post_mortem']?.toString();
-    final notes = req['process_notes']?.toString() ?? '';
+    final rawNotes = req['process_notes']?.toString() ?? '';
+    final notes = rawNotes
+        .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+        .replaceAll(RegExp(r'\[COMPLETED_AT:[^\]]+\]\s*\|?\s*'), '')
+        .replaceAll(RegExp(r'\[PHONE:[^\]]+\]\s*\|?\s*'), '')
+        .trim();
     if (postMortem == 'Failed') return 'Condemned';
     if (notes.isNotEmpty && notes != 'null') return notes;
     return 'Passed Inspection';
   }
 
   // ════════════════════════════════════════════
-  //  PDF EXPORT ACTIONS
+  //  PDF & CSV EXPORT ACTIONS
   // ════════════════════════════════════════════
-  Future<void> _exportActiveReport() async {
-    // Naturally exports everything in a single PDF:
-    // Sections 1, 2, and 3, plus Total Revenue and Livestock Processed
-    await _exportReportBySection('all', 'Complete_Report');
-  }
-
   Future<void> _exportReportAsCsv(String section, String filePrefix) async {
     try {
       final periodReqs = _getRequestsInActivePeriod();
@@ -471,7 +660,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           r['barangay'] ?? r['address'] ?? '',
           r['livestock_type'] ?? '',
           r['animal_count'] ?? 1,
-          r['carcass_weight'] ?? '',
+          _netCarcassWeight(r) > 0 ? _netCarcassWeight(r).toStringAsFixed(1) : (r['carcass_weight'] ?? ''),
           r['status'] ?? '',
           r['anti_mortem'] ?? '',
           r['post_mortem'] ?? '',
@@ -505,157 +694,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         );
       }
     }
-  }
-
-  void _showExportOptionsDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D6A4F).withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.picture_as_pdf, color: Color(0xFF2D6A4F), size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Export Report Options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  Text(_getActivePeriodLabel(), style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ],
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildExportOptionTile(
-              icon: Icons.file_copy_outlined,
-              color: const Color(0xFF1B4332),
-              title: 'Complete Slaughterhouse Report',
-              subtitle: 'Includes Total Revenue, Processed, Health Issues & Uninspected',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportBySection('all', 'Complete_Report');
-              },
-            ),
-            const Divider(height: 20),
-            _buildExportOptionTile(
-              icon: Icons.assignment_outlined,
-              color: const Color(0xFF2D6A4F),
-              title: '1. Production Report Only',
-              subtitle: 'Incoming Livestock & Carcass Production (Passed Inspection)',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportBySection('production', 'Production_Report');
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildExportOptionTile(
-              icon: Icons.health_and_safety_outlined,
-              color: const Color(0xFFC53030),
-              title: '2. Health Issues & Condemnations Only',
-              subtitle: 'Ante-mortem rejections, pathology & post-mortem condemnations',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportBySection('health_issues', 'Health_Issues_Report');
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildExportOptionTile(
-              icon: Icons.cancel_outlined,
-              color: const Color(0xFF4A5568),
-              title: '3. Uninspected Livestock Report Only',
-              subtitle: 'Registrations cancelled, withdrawn, or awaiting inspection',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportBySection('uninspected', 'Uninspected_Report');
-              },
-            ),
-            const Divider(height: 20),
-            _buildExportOptionTile(
-              icon: Icons.table_view_outlined,
-              color: const Color(0xFF0F766E),
-              title: 'Export Complete Report as CSV (Excel)',
-              subtitle: 'Spreadsheet-ready CSV for LGU Treasury & accounting',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportAsCsv('all', 'Complete_Report');
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildExportOptionTile(
-              icon: Icons.grid_on_outlined,
-              color: const Color(0xFF15803D),
-              title: 'Export Production Records as CSV (Excel)',
-              subtitle: 'Passed & slaughtered livestock with carcass weights & fees',
-              onTap: () {
-                Navigator.pop(ctx);
-                _exportReportAsCsv('production', 'Production_Report');
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close', style: TextStyle(color: Colors.grey)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExportOptionTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1A202C))),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                ],
-              ),
-            ),
-            const Icon(Icons.download, size: 18, color: Colors.grey),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _exportReportBySection(String sectionKey, String label) async {
@@ -770,12 +808,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   // ════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now());
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: Column(
         children: [
-          _buildHeader(dateStr),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFF2D6A4F)))
@@ -784,87 +820,89 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                     color: const Color(0xFF2D6A4F),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: AdminResponsive.pagePadding(context),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (_activeTab == 'Analytics') ...[
-                            _buildFilterBar(),
-                            const SizedBox(height: 20),
-                            _buildSummaryCards(),
-                            const SizedBox(height: 24),
-                            _buildCalendarAndChart(),
-                            const SizedBox(height: 24),
-                            _buildOperationsRecordsSection(),
-                            const SizedBox(height: 24),
-                            _buildHealthIssuesSection(),
-                            const SizedBox(height: 24),
-                            _buildUninspectedSection(),
-                            const SizedBox(height: 24),
-                            _buildRecentReports(),
-                          ] else if (_activeTab == 'Daily Production (Abattoir)') ...[
-                            _buildDailyAbattoirProductionTab(),
-                          ] else if (_activeTab == 'Monthly Dealer Log') ...[
-                            _buildMonthlyDealerLogTab(),
-                          ] else if (_activeTab == 'NMIS Reports & Transmittal') ...[
-                            _buildNmisReportsTab(),
-                          ] else if (_activeTab == 'Customer Records') ...[
-                            _buildCustomerHistoricalRecordsTab(),
-                          ] else if (_activeTab == 'Meat Dealers Directory') ...[
-                            _buildMeatDealersDirectoryTab(),
-                          ] else if (_activeTab == 'Customer Reviews') ...[
-                            const CustomerReviewsView(),
-                          ] else if (_activeTab == 'Audit Logs' && AppSettingsService.instance.isAdmin) ...[
-                            AuditLogsTab(activeDateRange: _getActiveDateRange()),
-                          ],
+                          _buildUnifiedToolbar(),
+                          const SizedBox(height: 20),
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            switchInCurve: Curves.easeOutCubic,
+                            switchOutCurve: Curves.easeInCubic,
+                            transitionBuilder: (child, animation) {
+                              return FadeTransition(
+                                opacity: animation,
+                                child: SlideTransition(
+                                  position: Tween<Offset>(
+                                    begin: const Offset(0, 0.015),
+                                    end: Offset.zero,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              );
+                            },
+                            child: KeyedSubtree(
+                              key: ValueKey(_activeTab),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (_activeTab == 'Analytics') ...[
+                                    _buildSummaryCards(),
+                                    const SizedBox(height: 24),
+                                    _buildAnalyticsChartsRow(),
+                                    const SizedBox(height: 24),
+                                    _buildAnalyticsSectionFilterBar(),
+                                    const SizedBox(height: 14),
+                                    AnimatedSwitcher(
+                                      duration: const Duration(milliseconds: 200),
+                                      switchInCurve: Curves.easeOutCubic,
+                                      switchOutCurve: Curves.easeInCubic,
+                                      child: KeyedSubtree(
+                                        key: ValueKey(_analyticsSectionFilter),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            if (_analyticsSectionFilter == 'section1' || _analyticsSectionFilter == 'all') ...[
+                                              _buildOperationsRecordsSection(),
+                                              if (_analyticsSectionFilter == 'all') const SizedBox(height: 20),
+                                            ],
+                                            if (_analyticsSectionFilter == 'section2' || _analyticsSectionFilter == 'all') ...[
+                                              _buildHealthIssuesSection(),
+                                              if (_analyticsSectionFilter == 'all') const SizedBox(height: 20),
+                                            ],
+                                            if (_analyticsSectionFilter == 'section3' || _analyticsSectionFilter == 'all') ...[
+                                              _buildUninspectedSection(),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    _buildRecentReports(),
+                                  ] else if (_activeTab == 'Daily Production (Abattoir)') ...[
+                                    _buildDailyAbattoirProductionTab(),
+                                  ] else if (_activeTab == 'Monthly Dealer Log') ...[
+                                    _buildMonthlyDealerLogTab(),
+                                  ] else if (_activeTab == 'NMIS Reports & Transmittal') ...[
+                                    _buildNmisReportsTab(),
+                                  ] else if (_activeTab == 'Customer Records') ...[
+                                    _buildCustomerHistoricalRecordsTab(),
+                                  ] else if (_activeTab == 'Meat Dealers Directory') ...[
+                                    _buildMeatDealersDirectoryTab(),
+                                  ] else if (_activeTab == 'Customer Reviews') ...[
+                                    const CustomerReviewsView(),
+                                  ] else if (_activeTab == 'Audit Logs' && AppSettingsService.instance.isSuperAdmin) ...[
+                                    AuditLogsTab(activeDateRange: _getActiveDateRange()),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
                   ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ════════════════════════════════════════════
-  //  HEADER
-  // ════════════════════════════════════════════
-  Widget _buildHeader(String dateStr) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Reports & Records',
-                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
-                ),
-                SizedBox(height: 3),
-                Text(
-                  'Analytics, abattoir records, dealer logs, customer reviews & audit trails',
-                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          _buildReportViewDropdown(),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
           ),
         ],
       ),
@@ -898,77 +936,47 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     final views = _availableReportViews;
     final current = views.contains(_activeTab) ? _activeTab : 'Analytics';
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.35)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: current,
-          isDense: false,
-          borderRadius: BorderRadius.circular(12),
-          dropdownColor: Colors.white,
-          icon: const Padding(
-            padding: EdgeInsets.only(left: 6),
-            child: Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF2D6A4F), size: 20),
-          ),
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF1B4332),
-          ),
-          items: views.map((view) {
-            final isSelected = view == current;
-            return DropdownMenuItem<String>(
-              value: view,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _iconForReportView(view),
-                    size: 16,
-                    color: isSelected ? const Color(0xFF2D6A4F) : const Color(0xFF64748B),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    view,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                      color: isSelected ? const Color(0xFF1B4332) : const Color(0xFF334155),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-          onChanged: (val) {
-            if (val != null && val != _activeTab) {
-              setState(() => _activeTab = val);
-            }
-          },
-        ),
-      ),
+    return AnimatedSelectDropdown<String>(
+      value: current,
+      items: views,
+      labelBuilder: (view) => view,
+      iconBuilder: _iconForReportView,
+      minMenuWidth: 260,
+      backgroundColor: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
+      borderColor: const Color(0xFF2D6A4F).withValues(alpha: 0.35),
+      textColor: const Color(0xFF1B4332),
+      iconColor: const Color(0xFF2D6A4F),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+      onChanged: (val) {
+        if (val != _activeTab) {
+          setState(() => _activeTab = val);
+          if (val == 'Meat Dealers Directory') {
+            _loadRoleChangeRequests();
+          }
+        }
+      },
     );
   }
 
   // ════════════════════════════════════════════
-  //  FILTER & TIMEFRAME NAVIGATOR BAR
+  //  UNIFIED TOOLBAR (VIEW + SINGLE DATE + EXPORT MODAL)
   // ════════════════════════════════════════════
-  Widget _buildFilterBar() {
-    final periodLabel = _getActivePeriodLabel();
+  Widget _buildUnifiedToolbar() {
+    final dateLabel = _getUnifiedDateLabel();
     String quickResetText = 'Today';
-    if (_reportType == 'Weekly Report') quickResetText = 'This Week';
-    if (_reportType == 'Monthly Report') quickResetText = 'This Month';
+    if (_isMonthlyOnlyTab || (_usesPeriodSelector && _reportType == 'Monthly Report')) {
+      quickResetText = 'This Month';
+    } else if (_usesPeriodSelector && _reportType == 'Weekly Report') {
+      quickResetText = 'This Week';
+    }
 
     return Container(
-      padding: const EdgeInsets.all(14),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 3)),
         ],
@@ -979,155 +987,423 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
         alignment: WrapAlignment.spaceBetween,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
+          // Left + Middle: Report View Dropdown aligned with Unified Date Filter
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _dropdownChip(
-                value: _reportType,
-                items: ['Daily Report', 'Weekly Report', 'Monthly Report', 'Custom Range'],
-                onChanged: (v) {
-                  if (v == 'Custom Range') {
-                    _pickCustomDateRange();
-                  } else {
-                    setState(() => _reportType = v);
-                  }
-                },
-              ),
-              const SizedBox(width: 14),
-              // Timeframe Navigation Buttons
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF7FAFC),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey.shade200),
+              _buildReportViewDropdown(),
+              if (_usesDateFilter && _usesPeriodSelector)
+                _dropdownChip(
+                  value: _reportType,
+                  items: ['Daily Report', 'Weekly Report', 'Monthly Report', 'Custom Range'],
+                  onChanged: (v) {
+                    if (v == 'Custom Range') {
+                      _activateCustomDateRange();
+                    } else {
+                      setState(() {
+                        _reportType = v;
+                        _dealerLogStartDay = 1;
+                      });
+                    }
+                  },
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (_reportType != 'Custom Range')
-                      IconButton(
-                        icon: const Icon(Icons.chevron_left, size: 20),
-                        onPressed: _prevPeriod,
-                        splashRadius: 18,
-                        tooltip: 'Previous period',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      ),
-                    const SizedBox(width: 6),
-                    if (_reportType == 'Custom Range')
-                      InkWell(
-                        onTap: _pickCustomDateRange,
-                        borderRadius: BorderRadius.circular(6),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.calendar_today_outlined, size: 14, color: Color(0xFF2D6A4F)),
-                              const SizedBox(width: 6),
-                              Text(
-                                periodLabel,
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF2D3748),
-                                ),
-                              ),
-                            ],
-                          ),
+              if (_usesDateFilter) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!(_usesPeriodSelector && _reportType == 'Custom Range'))
+                        IconButton(
+                          icon: const Icon(Icons.chevron_left, size: 20),
+                          onPressed: _prevPeriod,
+                          splashRadius: 18,
+                          tooltip: _isMonthlyOnlyTab ? 'Previous month' : 'Previous period',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                         ),
-                      )
-                    else
-                      AnimatedDateDropdown(
-                        selectedDate: _activeDate(),
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime(2035),
-                        label: periodLabel,
-                        onDateSelected: (picked) {
-                          setState(() {
-                            _selectedDate = picked;
-                            _calendarMonth = DateTime(picked.year, picked.month);
-                          });
-                        },
-                      ),
-                    const SizedBox(width: 6),
-                    if (_reportType != 'Custom Range')
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right, size: 20),
-                        onPressed: _nextPeriod,
-                        splashRadius: 18,
-                        tooltip: 'Next period',
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              TextButton(
-                onPressed: _resetToCurrentPeriod,
-                style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF2D6A4F),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                ),
-                child: Text(quickResetText, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
-              ),
-            ],
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ElevatedButton.icon(
-                onPressed: _exportActiveReport,
-                icon: const Icon(Icons.picture_as_pdf, size: 16, color: Colors.white),
-                label: Text(
-                  'Export $_reportType',
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                  shape: const RoundedRectangleBorder(
-                    borderRadius: BorderRadius.horizontal(left: Radius.circular(8)),
+                      const SizedBox(width: 4),
+                      if (_usesPeriodSelector && _reportType == 'Custom Range')
+                        AnimatedDateRangeDropdown(
+                          selectedRange: _customDateRange ??
+                              DateTimeRange(
+                                start: DateTime(DateTime.now().year, DateTime.now().month, 1),
+                                end: DateTime.now(),
+                              ),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035),
+                          label: dateLabel,
+                          autoOpenVersion: _customRangeOpenVersion,
+                          onRangeSelected: (picked) {
+                            setState(() {
+                              _customDateRange = picked;
+                              _selectedDate = picked.start;
+                              _dealerLogStartDay = 1;
+                            });
+                          },
+                        )
+                      else
+                        AnimatedDateDropdown(
+                          selectedDate: _activeDate(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035),
+                          label: dateLabel,
+                          onDateSelected: (picked) {
+                            setState(() {
+                              _selectedDate = picked;
+                              _dealerLogStartDay = 1;
+                            });
+                          },
+                        ),
+                      const SizedBox(width: 4),
+                      if (!(_usesPeriodSelector && _reportType == 'Custom Range'))
+                        IconButton(
+                          icon: const Icon(Icons.chevron_right, size: 20),
+                          onPressed: _nextPeriod,
+                          splashRadius: 18,
+                          tooltip: _isMonthlyOnlyTab ? 'Next month' : 'Next period',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                        ),
+                    ],
                   ),
                 ),
-              ),
-              Container(
-                height: 46,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF1B4332),
-                  borderRadius: BorderRadius.horizontal(right: Radius.circular(8)),
+                TextButton(
+                  onPressed: _resetToCurrentPeriod,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF2D6A4F),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  ),
+                  child: Text(quickResetText, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
                 ),
-                child: IconButton(
-                  icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-                  tooltip: 'Export options (individual sections)',
-                  onPressed: _showExportOptionsDialog,
-                ),
-              ),
+              ],
             ],
           ),
+
+          // Right: Single Unified Animated Export Dropdown
+          if (_canExportActiveView)
+            AnimatedExportDropdown(
+              activeReportName: _activeTab,
+              periodLabel: _usesDateFilter ? dateLabel : 'All Registered Records',
+              showAnalyticsSections: _activeTab == 'Analytics',
+              canSendToNmis: _canSendToNmis,
+              onExportPdf: (section) => _exportActiveViewPdf(analyticsSection: section),
+              onExportCsv: (section) => _exportActiveViewCsv(analyticsSection: section),
+              onSendToNmis: _triggerNmisTransmittalForActiveView,
+            ),
         ],
       ),
     );
   }
 
-  Widget _dropdownChip({required String value, required List<String> items, required ValueChanged<String> onChanged}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFEDF2F7),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
-          items: items.map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)))).toList(),
-          onChanged: (val) {
-            if (val != null) onChanged(val);
-          },
+  Future<void> _exportActiveViewPdf({String analyticsSection = 'all'}) async {
+    try {
+      if (_activeTab == 'Analytics') {
+        final prefix = analyticsSection == 'production'
+            ? 'Production_Report'
+            : analyticsSection == 'health_issues'
+                ? 'Health_Issues_Report'
+                : analyticsSection == 'uninspected'
+                    ? 'Uninspected_Report'
+                    : 'Complete_Report';
+        await _exportReportBySection(analyticsSection, prefix);
+        return;
+      }
+      if (_activeTab == 'Daily Production (Abattoir)') {
+        final pdfBytes = await NmicReportPdfGenerator.generateDailyProductionReport(
+          date: _nmicReportDate,
+          requests: _allRequests,
+        );
+        await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+        return;
+      }
+      if (_activeTab == 'Monthly Dealer Log') {
+        final pdfBytes = await NmicReportPdfGenerator.generateMonthlyDealerLog(
+          month: _monthlyLogMonth,
+          requests: _allRequests,
+        );
+        await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+        return;
+      }
+      if (_activeTab == 'NMIS Reports & Transmittal') {
+        final Uint8List pdfBytes = _selectedNmicFormType == 'Weekly Summary'
+            ? await NmicReportPdfGenerator.generateNmisWeeklySummary(
+                month: _monthlyLogMonth,
+                requests: _allRequests,
+              )
+            : await NmicReportPdfGenerator.generateNmisServiceTransactionReport(
+                month: _monthlyLogMonth,
+                species: _selectedNmicSpecies,
+                requests: _allRequests,
+              );
+        await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+        return;
+      }
+      if (_activeTab == 'Customer Records') {
+        final dealersService = RegularDealersService.instance;
+        final filtered = _getFilteredCustomerRecords();
+        RegularDealer? activeDealer;
+        if (_selectedCustomerFilter != null && _selectedCustomerFilter!.isNotEmpty) {
+          activeDealer = dealersService.findDealerByName(_selectedCustomerFilter!) ??
+              dealersService.findDealerByMarking(_selectedCustomerFilter!);
+        }
+        final pdfBytes = await NmicReportPdfGenerator.generateCustomerSlaughterHistoryReport(
+          customerName: activeDealer?.name ?? _selectedCustomerFilter ?? 'All Customers / Dealers',
+          marking: activeDealer?.markings ?? 'ALL',
+          periodLabel: _getActivePeriodLabel(),
+          requests: filtered,
+        );
+        await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+        return;
+      }
+      if (_activeTab == 'Meat Dealers Directory') {
+        final pdfBytes = await NmicReportPdfGenerator.generateDealersDirectoryPdf(
+          dealers: _getFilteredDealers(),
+          dealerHeadsCount: _calcDealerLifetimeHeads(),
+        );
+        await Printing.layoutPdf(onLayout: (_) => pdfBytes);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error exporting PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportActiveViewCsv({String analyticsSection = 'all'}) async {
+    try {
+      final dateStamp = DateFormat('yyyy-MM-dd').format(_activeDate());
+      if (_activeTab == 'Analytics') {
+        final prefix = analyticsSection == 'production'
+            ? 'Production_Report'
+            : analyticsSection == 'health_issues'
+                ? 'Health_Issues_Report'
+                : analyticsSection == 'uninspected'
+                    ? 'Uninspected_Report'
+                    : 'Complete_Report';
+        await _exportReportAsCsv(analyticsSection, prefix);
+        return;
+      }
+      if (_activeTab == 'Daily Production (Abattoir)') {
+        final target = DateTime(_nmicReportDate.year, _nmicReportDate.month, _nmicReportDate.day);
+        final dailyReqs = _allRequests.where((r) {
+          final dtStr = r['scheduled_date'] ?? r['created_at'];
+          if (dtStr == null) return false;
+          final dt = DateTime.tryParse(dtStr.toString());
+          return dt != null && DateTime(dt.year, dt.month, dt.day) == target;
+        }).toList();
+        final rows = dailyReqs.map((r) => [
+          dateStamp,
+          (r['customer_name'] ?? r['owner_name'] ?? '—').toString(),
+          (r['customer_marking'] ?? r['animal_tag'] ?? '—').toString(),
+          (r['request_type'] ?? 'barangay').toString().toUpperCase(),
+          (r['livestock_type'] ?? 'Hog').toString(),
+          r['animal_count'] ?? 1,
+          r['carcass_weight'] ?? 0,
+          _calcRequestFee(r).toStringAsFixed(2),
+        ]).toList();
+        await downloadCsvFile(
+          filename: 'Daily_Production_Abattoir_$dateStamp.csv',
+          headers: ['Date', 'Dealer / Owner', 'Mark', 'Section', 'Species', 'Heads', 'Carcass Wt (kg)', 'Total Fee (PHP)'],
+          rows: rows,
+        );
+      } else if (_activeTab == 'Monthly Dealer Log') {
+        final month = _monthlyLogMonth;
+        final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+        final monthSlug = DateFormat('yyyy-MM').format(month);
+        final tally = _computeMonthlyDealerTally(month);
+        final dealers = RegularDealersService.instance.allDealers;
+        final headers = ['No.', 'Name of Owner', 'Mark', 'Section', ...List.generate(daysInMonth, (i) => '${i + 1}'), 'Total'];
+        final rows = dealers.map((d) {
+          final key = d.name.trim().toLowerCase();
+          final dayMap = tally[key] ?? const <int, int>{};
+          int total = 0;
+          final dayCells = List.generate(daysInMonth, (i) {
+            final c = dayMap[i + 1] ?? 0;
+            total += c;
+            return c > 0 ? c : '';
+          });
+          return [d.dealerNumber, d.name, d.markings, d.category.toUpperCase(), ...dayCells, total];
+        }).toList();
+        await downloadCsvFile(
+          filename: 'Monthly_Dealer_Log_$monthSlug.csv',
+          headers: headers,
+          rows: rows,
+        );
+      } else if (_activeTab == 'NMIS Reports & Transmittal') {
+        final month = _monthlyLogMonth;
+        final monthSlug = DateFormat('yyyy-MM').format(month);
+        final monthReqs = _allRequests.where((r) {
+          final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at'] ?? '').toString());
+          return dt != null && dt.year == month.year && dt.month == month.month;
+        }).toList();
+        final rows = monthReqs.map((r) => [
+          (r['scheduled_date'] ?? r['created_at'] ?? '').toString().split('T').first,
+          (r['reference_no'] ?? r['id'] ?? '').toString(),
+          (r['customer_name'] ?? r['owner_name'] ?? '').toString(),
+          (r['livestock_type'] ?? 'Hog').toString(),
+          r['animal_count'] ?? 1,
+          r['carcass_weight'] ?? 0,
+          (r['status'] ?? '').toString(),
+        ]).toList();
+        await downloadCsvFile(
+          filename: 'NMIS_Report_$monthSlug.csv',
+          headers: ['Date', 'Reference #', 'Dealer', 'Species', 'Heads', 'Carcass Wt (kg)', 'Status'],
+          rows: rows,
+        );
+      } else if (_activeTab == 'Customer Records') {
+        final filtered = _getFilteredCustomerRecords();
+        final rows = filtered.map((r) => [
+          (r['scheduled_date'] ?? r['created_at'] ?? '').toString().split('T').first,
+          (r['reference_no'] ?? 'MI-2026-${(r['id'] ?? '').toString().padLeft(3, '0')}').toString(),
+          (r['customer_name'] ?? r['owner_name'] ?? '').toString(),
+          (r['livestock_type'] ?? 'Hog').toString(),
+          r['animal_count'] ?? 1,
+          r['carcass_weight'] ?? 0,
+          (r['status'] ?? '').toString(),
+          _calcRequestFee(r).toStringAsFixed(2),
+        ]).toList();
+        await downloadCsvFile(
+          filename: 'Customer_Records_$dateStamp.csv',
+          headers: ['Date', 'Reference #', 'Customer', 'Species', 'Heads', 'Carcass Wt (kg)', 'Status', 'Fee Paid (PHP)'],
+          rows: rows,
+        );
+      } else if (_activeTab == 'Meat Dealers Directory') {
+        final lifetime = _calcDealerLifetimeHeads();
+        final dealers = _getFilteredDealers();
+        final rows = dealers.map((d) => [
+          d.dealerNumber,
+          d.name,
+          d.markings,
+          d.category.toUpperCase(),
+          d.phone ?? '',
+          lifetime[d.name.trim().toLowerCase()] ?? 0,
+        ]).toList();
+        await downloadCsvFile(
+          filename: 'Meat_Dealers_Directory_$dateStamp.csv',
+          headers: ['No.', 'Dealer Name', 'Official Mark', 'Section', 'Contact Number', 'Lifetime Heads'],
+          rows: rows,
+        );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Exported $_activeTab to Excel (.csv) successfully.'),
+            backgroundColor: const Color(0xFF2D6A4F),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error exporting Excel file: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _triggerNmisTransmittalForActiveView() {
+    if (_activeTab == 'Daily Production (Abattoir)') {
+      _openNmicTransmittalDialog(
+        reportType: 'Daily Production Report',
+        periodLabel: DateFormat('MMMM d, yyyy').format(_nmicReportDate),
+        getPdfBytes: () => NmicReportPdfGenerator.generateDailyProductionReport(
+          date: _nmicReportDate,
+          requests: _allRequests,
         ),
-      ),
+      );
+    } else if (_activeTab == 'Monthly Dealer Log') {
+      final monthStr = DateFormat('MMMM yyyy').format(_monthlyLogMonth);
+      _openNmicTransmittalDialog(
+        reportType: 'Monthly Dealer Log',
+        periodLabel: monthStr,
+        getPdfBytes: () => NmicReportPdfGenerator.generateMonthlyDealerLog(
+          month: _monthlyLogMonth,
+          requests: _allRequests,
+        ),
+      );
+    } else if (_activeTab == 'NMIS Reports & Transmittal') {
+      final monthStr = DateFormat('MMMM yyyy').format(_monthlyLogMonth);
+      _openNmicTransmittalDialog(
+        reportType: _selectedNmicFormType == 'Weekly Summary'
+            ? 'NMIS Weekly Summary Report'
+            : 'NMIS Form NMIS-POSM-F-034 ($_selectedNmicSpecies)',
+        periodLabel: monthStr,
+        getPdfBytes: () {
+          if (_selectedNmicFormType == 'Weekly Summary') {
+            return NmicReportPdfGenerator.generateNmisWeeklySummary(
+              month: _monthlyLogMonth,
+              requests: _allRequests,
+            );
+          } else {
+            return NmicReportPdfGenerator.generateNmisServiceTransactionReport(
+              month: _monthlyLogMonth,
+              species: _selectedNmicSpecies,
+              requests: _allRequests,
+            );
+          }
+        },
+      );
+    }
+  }
+
+  Map<String, Map<int, int>> _computeMonthlyDealerTally(DateTime month) {
+    final Map<String, Map<int, int>> tally = {};
+    for (final r in _allRequests) {
+      final dtStr = r['scheduled_date'] ?? r['created_at'];
+      if (dtStr == null) continue;
+      final dt = DateTime.tryParse(dtStr.toString());
+      if (dt == null || dt.year != month.year || dt.month != month.month) continue;
+      final name = (r['customer_name'] ?? r['owner_name'] ?? '').toString().trim().toLowerCase();
+      if (name.isEmpty) continue;
+      final count = int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+      final dayMap = tally.putIfAbsent(name, () => <int, int>{});
+      dayMap[dt.day] = (dayMap[dt.day] ?? 0) + count;
+    }
+    return tally;
+  }
+
+  List<Map<String, dynamic>> _getFilteredCustomerRecords() {
+    final range = _getActiveDateRange();
+    List<Map<String, dynamic>> filtered = _allRequests.where((r) {
+      final dt = _getRequestDate(r);
+      if (dt == null) return false;
+      return !dt.isBefore(range.start) && !dt.isAfter(range.end);
+    }).toList();
+
+    if (_selectedCustomerFilter != null && _selectedCustomerFilter!.isNotEmpty) {
+      final query = _selectedCustomerFilter!.toUpperCase().trim();
+      filtered = filtered.where((r) {
+        final name = (r['customer_name'] ?? r['owner_name'] ?? '').toString().toUpperCase().trim();
+        final mark = (r['customer_marking'] ?? r['animal_tag'] ?? r['tag_id'] ?? '').toString().toUpperCase().trim();
+        return name == query || mark == query || name.contains(query);
+      }).toList();
+    }
+    return filtered;
+  }
+
+  Widget _dropdownChip({required String value, required List<String> items, required ValueChanged<String> onChanged}) {
+    return AnimatedSelectDropdown<String>(
+      value: value,
+      items: items,
+      labelBuilder: (e) => e,
+      minMenuWidth: 180,
+      backgroundColor: const Color(0xFFEDF2F7),
+      borderColor: const Color(0xFFE2E8F0),
+      textColor: const Color(0xFF1E293B),
+      iconColor: const Color(0xFF64748B),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      onChanged: onChanged,
     );
   }
 
@@ -1148,49 +1424,44 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
       livestockProcessed += int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
     }
 
-    return Row(
-      children: [
-        _summaryCard(
-          label: 'Total Revenue',
-          value: '\u20b1 ${NumberFormat('#,##0.00').format(totalRevenue)}',
-          accent: const Color(0xFF1B4332),
-          changeText: 'Fees collected for processed livestock',
-          changeColor: const Color(0xFF2D6A4F),
-          icon: Icons.payments_outlined,
-          iconColor: const Color(0xFF1B4332),
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
-          label: 'Livestock Processed',
-          value: '$livestockProcessed Heads',
-          accent: const Color(0xFF2D6A4F),
-          changeText: '${processed.length} operations passed inspection',
-          changeColor: const Color(0xFF2D6A4F),
-          showDot: true,
-          dotColor: const Color(0xFF2D6A4F),
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
-          label: 'Health Issues / Condemned',
-          value: '${healthIssues.length} Cases',
-          accent: const Color(0xFFC53030),
-          changeText: healthIssues.isEmpty ? 'Clean record (100% Passed)' : 'Listed separately below',
-          changeColor: const Color(0xFFC53030),
-          icon: Icons.health_and_safety_outlined,
-          iconColor: const Color(0xFFC53030),
-        ),
-        const SizedBox(width: 16),
-        _summaryCard(
-          label: 'Did Not Undergo Inspection',
-          value: '${uninspected.length} Cases',
-          accent: const Color(0xFF4A5568),
-          changeText: uninspected.isEmpty ? 'None (all underwent inspection)' : 'Pending / cancelled / withdrawn',
-          changeColor: const Color(0xFF718096),
-          icon: Icons.pending_actions_outlined,
-          iconColor: const Color(0xFF4A5568),
-        ),
-      ],
-    );
+    return AdminResponsive.kpiGrid([
+      _summaryCard(
+        label: 'Total Revenue',
+        value: '\u20b1 ${NumberFormat('#,##0.00').format(totalRevenue)}',
+        accent: const Color(0xFF1B4332),
+        changeText: 'Fees collected for processed livestock',
+        changeColor: const Color(0xFF2D6A4F),
+        icon: Icons.payments_outlined,
+        iconColor: const Color(0xFF1B4332),
+      ),
+      _summaryCard(
+        label: 'Livestock Processed',
+        value: '$livestockProcessed Heads',
+        accent: const Color(0xFF2D6A4F),
+        changeText: '${processed.length} operations passed inspection',
+        changeColor: const Color(0xFF2D6A4F),
+        showDot: true,
+        dotColor: const Color(0xFF2D6A4F),
+      ),
+      _summaryCard(
+        label: 'Health Issues / Condemned',
+        value: '${healthIssues.length} Cases',
+        accent: const Color(0xFFC53030),
+        changeText: healthIssues.isEmpty ? 'Clean record (100% Passed)' : 'Listed separately below',
+        changeColor: const Color(0xFFC53030),
+        icon: Icons.health_and_safety_outlined,
+        iconColor: const Color(0xFFC53030),
+      ),
+      _summaryCard(
+        label: 'Held / Confined (Ante-Mortem)',
+        value: '${uninspected.length} Cases',
+        accent: const Color(0xFFB45309),
+        changeText: uninspected.isEmpty ? 'No livestock in 2-day confinement' : 'Under 2-day observation hold',
+        changeColor: const Color(0xFFD97706),
+        icon: Icons.medical_services_outlined,
+        iconColor: const Color(0xFFB45309),
+      ),
+    ], spacing: 14);
   }
 
   Widget _summaryCard({
@@ -1204,91 +1475,134 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     bool showDot = false,
     Color? dotColor,
   }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF0F172A).withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-            BoxShadow(
-              color: const Color(0xFF0F172A).withValues(alpha: 0.05),
-              blurRadius: 3,
-              offset: const Offset(0, 1),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Flexible(child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500))),
-                if (showDot)
-                  Container(width: 10, height: 10, decoration: BoxDecoration(color: dotColor ?? accent, shape: BoxShape.circle))
-                else if (icon != null)
-                  Icon(icon, size: 18, color: iconColor ?? accent),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: accent)),
-            const SizedBox(height: 6),
-            Text(changeText, style: TextStyle(fontSize: 10.5, color: changeColor), overflow: TextOverflow.ellipsis),
-          ],
-        ),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Flexible(child: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500))),
+              if (showDot)
+                Container(width: 10, height: 10, decoration: BoxDecoration(color: dotColor ?? accent, shape: BoxShape.circle))
+              else if (icon != null)
+                Icon(icon, size: 18, color: iconColor ?? accent),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: accent)),
+          const SizedBox(height: 6),
+          Text(changeText, style: TextStyle(fontSize: 10.5, color: changeColor), overflow: TextOverflow.ellipsis),
+        ],
       ),
     );
   }
 
   // ════════════════════════════════════════════
-  //  CALENDAR + DONUT CHART
+  //  ANALYTICS CHARTS ROW (REVENUE/VOLUME BAR CHART + DONUT CHART)
   // ════════════════════════════════════════════
-  Widget _buildCalendarAndChart() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: _buildCalendarCard()),
-        const SizedBox(width: 24),
-        Expanded(child: _buildDonutChartCard()),
-      ],
+  Widget _buildAnalyticsChartsRow() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 900) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _buildRevenueVolumeBarChartCard()),
+              const SizedBox(width: 24),
+              Expanded(child: _buildDonutChartCard()),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            _buildRevenueVolumeBarChartCard(),
+            const SizedBox(height: 20),
+            _buildDonutChartCard(),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildCalendarCard() {
-    final month = _calendarMonth;
-    final monthStr = DateFormat('MMMM yyyy').format(month);
-    final firstDay = DateTime(month.year, month.month, 1);
-    final lastDay = DateTime(month.year, month.month + 1, 0);
-    final startWeekday = firstDay.weekday % 7;
-    final daysInMonth = lastDay.day;
+  Widget _buildRevenueVolumeBarChartCard() {
+    final base = _activeDate();
+    final List<({String label, double revenue, int heads, bool isActive})> buckets = [];
 
-    final cells = <Widget>[];
-    for (int i = 0; i < startWeekday; i++) {
-      final prevMonthLastDay = DateTime(month.year, month.month, 0).day;
-      cells.add(_calendarDay((prevMonthLastDay - startWeekday + i + 1).toString(), isOtherMonth: true));
+    if (_reportType == 'Monthly Report') {
+      // 4–5 weekly buckets for the selected month
+      final daysInMonth = DateTime(base.year, base.month + 1, 0).day;
+      for (int startDay = 1; startDay <= daysInMonth; startDay += 7) {
+        final endDay = min(startDay + 6, daysInMonth);
+        final bStart = DateTime(base.year, base.month, startDay, 0, 0, 0);
+        final bEnd = DateTime(base.year, base.month, endDay, 23, 59, 59, 999);
+        double rev = 0;
+        int heads = 0;
+        for (final r in _allRequests) {
+          if (!_isProcessed(r)) continue;
+          final dt = _getRequestDate(r);
+          if (dt != null && !dt.isBefore(bStart) && !dt.isAfter(bEnd)) {
+            rev += _calcRequestFee(r);
+            heads += int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+          }
+        }
+        buckets.add((
+          label: '$startDay–$endDay',
+          revenue: rev,
+          heads: heads,
+          isActive: base.day >= startDay && base.day <= endDay,
+        ));
+      }
+    } else {
+      // 7-day rolling window ending on selected date (or Mon–Sun for Weekly)
+      final DateTime start = _reportType == 'Weekly Report'
+          ? DateTime(base.year, base.month, base.day - (base.weekday - 1))
+          : DateTime(base.year, base.month, base.day).subtract(const Duration(days: 6));
+      for (int i = 0; i < 7; i++) {
+        final day = start.add(Duration(days: i));
+        double rev = 0;
+        int heads = 0;
+        for (final r in _allRequests) {
+          if (!_isProcessed(r)) continue;
+          final dt = _getRequestDate(r);
+          if (dt != null && dt.year == day.year && dt.month == day.month && dt.day == day.day) {
+            rev += _calcRequestFee(r);
+            heads += int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+          }
+        }
+        final isSel = day.year == base.year && day.month == base.month && day.day == base.day;
+        buckets.add((
+          label: DateFormat('EEE\nd').format(day),
+          revenue: rev,
+          heads: heads,
+          isActive: isSel,
+        ));
+      }
     }
-    for (int d = 1; d <= daysInMonth; d++) {
-      final date = DateTime(month.year, month.month, d);
-      final isSelected = _selectedDate != null &&
-          _selectedDate!.year == date.year &&
-          _selectedDate!.month == date.month &&
-          _selectedDate!.day == date.day;
-      final isToday = DateTime.now().year == date.year &&
-          DateTime.now().month == date.month &&
-          DateTime.now().day == date.day;
-      cells.add(_calendarDay(d.toString(), isSelected: isSelected, isToday: isToday, onTap: () {
-        setState(() {
-          _selectedDate = date;
-        });
-      }));
-    }
+
+    final maxVal = buckets.fold<double>(
+      0.0,
+      (m, b) => max(m, _trendShowRevenue ? b.revenue : b.heads.toDouble()),
+    );
+    final safeMax = maxVal <= 0 ? 1.0 : maxVal;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1300,51 +1614,122 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Date Selection', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-          const SizedBox(height: 4),
-          Text('Select date to jump Daily / Weekly / Monthly report timeframe', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          const SizedBox(height: 16),
           Row(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              IconButton(
-                onPressed: () => setState(() {
-                  _calendarMonth = DateTime(month.year, month.month - 1);
-                }),
-                icon: const Icon(Icons.chevron_left, size: 20),
-                splashRadius: 18,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _trendShowRevenue ? 'Revenue Trend' : 'Slaughter Volume Trend',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _reportType == 'Monthly Report'
+                          ? 'Weekly breakdown for ${DateFormat('MMMM yyyy').format(base)}'
+                          : '7-day performance window around ${DateFormat('MMM d, yyyy').format(base)}',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    ),
+                  ],
+                ),
               ),
-              Text(monthStr, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-              IconButton(
-                onPressed: () => setState(() {
-                  _calendarMonth = DateTime(month.year, month.month + 1);
-                }),
-                icon: const Icon(Icons.chevron_right, size: 20),
-                splashRadius: 18,
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _trendToggleChip('Revenue (₱)', _trendShowRevenue, () => setState(() => _trendShowRevenue = true)),
+                    _trendToggleChip('Heads', !_trendShowRevenue, () => setState(() => _trendShowRevenue = false)),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
-                .map((d) => Expanded(
-                      child: Center(
-                        child: Text(d, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
+          const SizedBox(height: 22),
+          SizedBox(
+            height: 230,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: buckets.map((b) {
+                final val = _trendShowRevenue ? b.revenue : b.heads.toDouble();
+                final ratio = (val / safeMax).clamp(0.0, 1.0);
+                final barColor = b.isActive
+                    ? const Color(0xFF2D6A4F)
+                    : const Color(0xFF52B788).withValues(alpha: 0.65);
+                final tooltipText = _trendShowRevenue
+                    ? '${b.label.replaceAll('\n', ' ')}: ₱${NumberFormat('#,##0.00').format(b.revenue)} (${b.heads} heads)'
+                    : '${b.label.replaceAll('\n', ' ')}: ${b.heads} heads (₱${NumberFormat('#,##0.00').format(b.revenue)})';
+                final topLabel = val <= 0
+                    ? ''
+                    : (_trendShowRevenue
+                        ? (b.revenue >= 1000
+                            ? '₱${(b.revenue / 1000).toStringAsFixed(1)}k'
+                            : '₱${b.revenue.toStringAsFixed(0)}')
+                        : '${b.heads}');
+
+                return Expanded(
+                  child: Tooltip(
+                    message: tooltipText,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 5),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            topLabel,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: b.isActive ? FontWeight.w700 : FontWeight.w600,
+                              color: b.isActive ? const Color(0xFF1B4332) : const Color(0xFF64748B),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              child: TweenAnimationBuilder<double>(
+                                tween: Tween<double>(begin: 0, end: ratio),
+                                duration: const Duration(milliseconds: 520),
+                                curve: Curves.easeOutCubic,
+                                builder: (context, animRatio, _) {
+                                  return FractionallySizedBox(
+                                    heightFactor: max(animRatio, val > 0 ? 0.05 : 0.015),
+                                    widthFactor: 0.72,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: val > 0 ? barColor : const Color(0xFFE2E8F0),
+                                        borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            b.label,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11,
+                              height: 1.2,
+                              fontWeight: b.isActive ? FontWeight.w700 : FontWeight.w500,
+                              color: b.isActive ? const Color(0xFF2D6A4F) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ],
                       ),
-                    ))
-                .toList(),
-          ),
-          const SizedBox(height: 6),
-          ...List.generate(
-            ((cells.length + 6) ~/ 7),
-            (row) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: List.generate(7, (col) {
-                  final idx = row * 7 + col;
-                  return Expanded(child: idx < cells.length ? cells[idx] : const SizedBox.shrink());
-                }),
-              ),
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
           ),
         ],
@@ -1352,32 +1737,26 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     );
   }
 
-  Widget _calendarDay(String day, {bool isSelected = false, bool isToday = false, bool isOtherMonth = false, VoidCallback? onTap}) {
-    return GestureDetector(
+  Widget _trendToggleChip(String label, bool isSelected, VoidCallback onTap) {
+    return InkWell(
       onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.all(2),
-        height: 36,
+      borderRadius: BorderRadius.circular(6),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF2D6A4F)
-              : isToday
-                  ? const Color(0xFF2D6A4F).withValues(alpha: 0.1)
-                  : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+          boxShadow: isSelected
+              ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 4, offset: const Offset(0, 1))]
+              : null,
         ),
-        child: Center(
-          child: Text(
-            day,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: (isSelected || isToday) ? FontWeight.bold : FontWeight.w500,
-              color: isSelected
-                  ? Colors.white
-                  : isOtherMonth
-                      ? Colors.grey.shade300
-                      : const Color(0xFF2D3748),
-            ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? const Color(0xFF1B4332) : const Color(0xFF64748B),
           ),
         ),
       ),
@@ -1433,13 +1812,136 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   }
 
   // ════════════════════════════════════════════
+  //  ANALYTICS SECTION FILTER BAR (SECTION 1 / 2 / 3 / ALL)
+  // ════════════════════════════════════════════
+  Widget _buildAnalyticsSectionFilterBar() {
+    final periodReqs = _getRequestsInActivePeriod();
+    final processedCount = periodReqs.where(_isProcessed).length;
+    final healthCount = periodReqs.where(_isHealthIssue).length;
+    final uninspectedCount = periodReqs.where(_isUninspected).length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.025), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.filter_list_rounded, size: 17, color: Color(0xFF475569)),
+              const SizedBox(width: 6),
+              Text(
+                'Show Section:',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.grey.shade700),
+              ),
+            ],
+          ),
+          _analyticsSectionChip(
+            keyName: 'section1',
+            label: 'Section 1: Processed',
+            count: processedCount,
+            activeColor: const Color(0xFF2D6A4F),
+          ),
+          _analyticsSectionChip(
+            keyName: 'section2',
+            label: 'Section 2: Health Issues',
+            count: healthCount,
+            activeColor: const Color(0xFFC53030),
+          ),
+          _analyticsSectionChip(
+            keyName: 'section3',
+            label: 'Section 3: Held / Confined',
+            count: uninspectedCount,
+            activeColor: const Color(0xFFB45309),
+          ),
+          _analyticsSectionChip(
+            keyName: 'all',
+            label: 'All Sections',
+            count: processedCount + healthCount + uninspectedCount,
+            activeColor: const Color(0xFF1E3A8A),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _analyticsSectionChip({
+    required String keyName,
+    required String label,
+    required int count,
+    required Color activeColor,
+  }) {
+    final isSelected = _analyticsSectionFilter == keyName;
+    return InkWell(
+      onTap: () {
+        if (_analyticsSectionFilter != keyName) {
+          setState(() => _analyticsSectionFilter = keyName);
+        }
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? activeColor : const Color(0xFFE2E8F0),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                color: isSelected ? Colors.white : const Color(0xFF334155),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? Colors.white.withValues(alpha: 0.22)
+                    : activeColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? Colors.white : activeColor,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════
   //  SECTION 1: PROCESSED OPERATIONS RECORDS
   // ════════════════════════════════════════════
   Widget _buildOperationsRecordsSection() {
     final periodReqs = _getRequestsInActivePeriod();
     final records = periodReqs.where(_isProcessed).toList();
     final periodLabel = _getActivePeriodLabel();
-    final scrollController = ScrollController();
 
     return Container(
       width: double.infinity,
@@ -1481,12 +1983,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                     ],
                   ),
                 ),
-                IconButton(
-                  onPressed: () => _exportReportBySection('production', 'Production_Report'),
-                  icon: const Icon(Icons.download, size: 20, color: Color(0xFF2D6A4F)),
-                  splashRadius: 20,
-                  tooltip: 'Export Production Report PDF',
-                ),
               ],
             ),
           ),
@@ -1506,69 +2002,113 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final availableWidth = constraints.maxWidth;
-                final tableWidth = max(1050.0, availableWidth);
-                final colSpacing = (availableWidth > 1400)
-                    ? 32.0
-                    : (availableWidth > 1100 ? 22.0 : 16.0);
-
-                return Scrollbar(
-                  controller: scrollController,
-                  thumbVisibility: false,
-                  trackVisibility: false,
-                  child: ScrollConfiguration(
-                    behavior: ScrollConfiguration.of(context).copyWith(
-                      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse},
-                    ),
-                    child: SingleChildScrollView(
-                      controller: scrollController,
-                      scrollDirection: Axis.horizontal,
-                      child: ConstrainedBox(
-                        constraints: BoxConstraints(minWidth: tableWidth),
-                        child: DataTable(
-                          headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                          dataRowMinHeight: 52,
-                          dataRowMaxHeight: 68,
-                          columnSpacing: colSpacing,
-                          columns: const [
-                            DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Commodity', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Carcass Weight', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Revenue (PHP)', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Inspector', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                            DataColumn(label: Text('Status / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          ],
-                          rows: records.map((req) {
-                            final ref = _refNo(req);
-                            final type = req['request_type']?.toString() ?? '';
-                            final isBarangay = type == 'barangay';
-                            final livestock = req['livestock_type']?.toString() ?? '\u2014';
-                            final animalCount = req['animal_count'] ?? 1;
-                            final weight = _carcassWeight(req);
-                            final fee = _calcRequestFee(req);
-                            final inspector = req['inspector_name']?.toString() ?? '\u2014';
-                            final remark = _remarkForRequest(req);
-
-                            return DataRow(cells: [
-                              DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                              DataCell(Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                              DataCell(_buildTypeBadge(isBarangay ? 'Barangay' : 'Market')),
-                              DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                              DataCell(Text('$animalCount', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                              DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(1)} kg' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                              DataCell(Text(fee > 0 ? '\u20b1 ${NumberFormat('#,##0.00').format(fee)}' : '\u2014',
-                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1B4332)))),
-                              DataCell(Text(inspector, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568)))),
-                              DataCell(Text(remark, style: const TextStyle(fontSize: 11, color: Color(0xFF2D6A4F), fontWeight: FontWeight.w500))),
-                            ]);
-                          }).toList(),
-                        ),
-                      ),
-                    ),
+                final isCompact = constraints.maxWidth < 820;
+                return Table(
+                  border: TableBorder(
+                    horizontalInside: BorderSide(color: Colors.grey.shade200),
+                    top: BorderSide(color: Colors.grey.shade200),
+                    bottom: BorderSide(color: Colors.grey.shade200),
                   ),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: isCompact
+                      ? const {
+                          0: FlexColumnWidth(1.3),
+                          1: FlexColumnWidth(2.0),
+                          2: FlexColumnWidth(1.2),
+                          3: FlexColumnWidth(0.7),
+                          4: FlexColumnWidth(1.2),
+                        }
+                      : const {
+                          0: FlexColumnWidth(1.2),
+                          1: FlexColumnWidth(1.8),
+                          2: FlexColumnWidth(1.0),
+                          3: FlexColumnWidth(1.1),
+                          4: FlexColumnWidth(0.6),
+                          5: FlexColumnWidth(1.0),
+                          6: FlexColumnWidth(1.1),
+                          7: FlexColumnWidth(1.2),
+                          8: FlexColumnWidth(1.4),
+                        },
+                  children: [
+                    TableRow(
+                      decoration: const BoxDecoration(color: Color(0xFFF7FAFC)),
+                      children: [
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact)
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Section', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Commodity', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Heads', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact)
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Weight', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Revenue', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact) ...[
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Inspector', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        ],
+                      ],
+                    ),
+                    ...records.map((req) {
+                      final ref = _refNo(req);
+                      final type = req['request_type']?.toString() ?? '';
+                      final isBarangay = type == 'barangay';
+                      final livestock = req['livestock_type']?.toString() ?? '\u2014';
+                      final animalCount = req['animal_count'] ?? 1;
+                      final grossWeight = _carcassWeight(req);
+                      final condemnedWt = _condemnedPartWeight(req);
+                      final netWeight = _netCarcassWeight(req);
+                      final isPartial = _isPartialPartCondemnation(req);
+                      final fee = _calcRequestFee(req);
+                      final inspector = req['inspector_name']?.toString() ?? '\u2014';
+                      final remark = _remarkForRequest(req);
+
+                      return TableRow(
+                        children: [
+                          Padding(padding: const EdgeInsets.all(10), child: Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11.5), overflow: TextOverflow.ellipsis)),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+                          if (!isCompact)
+                            Padding(padding: const EdgeInsets.all(8), child: _buildTypeBadge(isBarangay ? 'Barangay' : 'Market')),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(livestock, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+                          Padding(padding: const EdgeInsets.all(10), child: Text('$animalCount', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold))),
+                          if (!isCompact)
+                            Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: grossWeight > 0
+                                  ? Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text('${netWeight.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                                        if (condemnedWt > 0)
+                                          Text(
+                                            'net of ${grossWeight.toStringAsFixed(0)} kg (-${condemnedWt.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg)',
+                                            style: const TextStyle(fontSize: 9.5, color: Color(0xFFB45309), fontWeight: FontWeight.w600),
+                                          ),
+                                      ],
+                                    )
+                                  : const Text('\u2014', style: TextStyle(fontSize: 12)),
+                            ),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(fee > 0 ? '\u20b1 ${NumberFormat('#,##0.00').format(fee)}' : '\u2014',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1B4332)), overflow: TextOverflow.ellipsis)),
+                          if (!isCompact) ...[
+                            Padding(padding: const EdgeInsets.all(10), child: Text(inspector, style: const TextStyle(fontSize: 11.5, color: Color(0xFF4A5568)), overflow: TextOverflow.ellipsis)),
+                            Padding(
+                              padding: const EdgeInsets.all(10),
+                              child: Text(
+                                remark,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isPartial ? const Color(0xFFB45309) : const Color(0xFF2D6A4F),
+                                  fontWeight: isPartial ? FontWeight.w600 : FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    }),
+                  ],
                 );
               },
             ),
@@ -1583,7 +2123,6 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   Widget _buildHealthIssuesSection() {
     final periodReqs = _getRequestsInActivePeriod();
     final healthIssues = periodReqs.where(_isHealthIssue).toList();
-    final scrollController = ScrollController();
 
     return Container(
       width: double.infinity,
@@ -1638,17 +2177,11 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Ante-mortem rejection, pathology detected, or post-mortem carcass condemnation',
+                        'Post-mortem carcass condemnation or livestock condemned after 2-day confinement',
                         style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                       ),
                     ],
                   ),
-                ),
-                IconButton(
-                  onPressed: () => _exportReportBySection('health_issues', 'Health_Issues_Report'),
-                  icon: const Icon(Icons.download, size: 20, color: Color(0xFFC53030)),
-                  splashRadius: 20,
-                  tooltip: 'Export Health Issues & Condemnations Report PDF',
                 ),
               ],
             ),
@@ -1673,83 +2206,89 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final availableWidth = constraints.maxWidth;
-                final tableWidth = max(1050.0, availableWidth);
-                final colSpacing = (availableWidth > 1400)
-                    ? 32.0
-                    : (availableWidth > 1100 ? 22.0 : 16.0);
-
-                return Scrollbar(
-                  controller: scrollController,
-                  thumbVisibility: false,
-                  trackVisibility: false,
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: tableWidth),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFFFF5F5)),
-                        dataRowMinHeight: 52,
-                        dataRowMaxHeight: 70,
-                        columnSpacing: colSpacing,
-                        columns: const [
-                          DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Color(0xFF9B2C2C)))),
-                          DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Inspection Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Veterinary Findings / Health Issues', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Action Taken / Disposition', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        ],
-                        rows: healthIssues.map((req) {
-                          final ref = _refNo(req);
-                          final name = req['customer_name']?.toString() ?? '\u2014';
-                          final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
-
-                          final anti = (req['anti_mortem'] ?? '').toString();
-                          final post = (req['post_mortem'] ?? '').toString();
-                          final status = (req['status'] ?? '').toString();
-
-                          String stage = 'Ante-Mortem';
-                          String disposition = 'Ante-Mortem Failed — Taken Back';
-
-                          if (post == 'Failed' || status == 'condemned' || status == 'post_mortem_failed') {
-                            stage = 'Post-Mortem Inspection';
-                            disposition = 'Carcass Condemned';
-                          } else if (anti == 'Failed' || status == 'anti_mortem_failed' || status == 'taken_back') {
-                            stage = 'Ante-Mortem Inspection';
-                            disposition = 'Rejected / Taken Back by Owner';
-                          }
-
-                          String findings = (req['veterinary_findings']?.toString() ??
-                                  req['condemnation_reason']?.toString() ??
-                                  req['process_notes']?.toString() ??
-                                  'Health abnormality detected')
-                              .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
-                              .trim();
-                          if (findings.isEmpty || findings == 'null') {
-                            findings = 'Did not meet health & inspection standards';
-                          }
-
-                          return DataRow(cells: [
-                            DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF9B2C2C)))),
-                            DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                            DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                            DataCell(Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFFED7D7),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(stage, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFC53030))),
-                            )),
-                            DataCell(Text(findings, style: const TextStyle(fontSize: 12, color: Color(0xFF742A2A)))),
-                            DataCell(Text(disposition, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF9B2C2C)))),
-                          ]);
-                        }).toList(),
-                      ),
-                    ),
+                final isCompact = constraints.maxWidth < 760;
+                return Table(
+                  border: TableBorder(
+                    horizontalInside: BorderSide(color: Colors.grey.shade200),
+                    top: BorderSide(color: Colors.grey.shade200),
+                    bottom: BorderSide(color: Colors.grey.shade200),
                   ),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: isCompact
+                      ? const {
+                          0: FlexColumnWidth(1.2),
+                          1: FlexColumnWidth(1.8),
+                          2: FlexColumnWidth(1.5),
+                          3: FlexColumnWidth(1.8),
+                        }
+                      : const {
+                          0: FlexColumnWidth(1.1),
+                          1: FlexColumnWidth(1.5),
+                          2: FlexColumnWidth(1.3),
+                          3: FlexColumnWidth(1.4),
+                          4: FlexColumnWidth(2.2),
+                          5: FlexColumnWidth(1.6),
+                        },
+                  children: [
+                    TableRow(
+                      decoration: const BoxDecoration(color: Color(0xFFFFF5F5)),
+                      children: [
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF9B2C2C)))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact)
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Stage', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact)
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Veterinary Findings', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Disposition', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                      ],
+                    ),
+                    ...healthIssues.map((req) {
+                      final ref = _refNo(req);
+                      final name = req['customer_name']?.toString() ?? '\u2014';
+                      final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
+                      final anti = (req['anti_mortem'] ?? '').toString();
+                      final post = (req['post_mortem'] ?? '').toString();
+                      final status = (req['status'] ?? '').toString();
+                      String stage = 'Ante-Mortem';
+                      String disposition = 'Ante-Mortem Failed — Taken Back';
+                      if (post == 'Failed' || status == 'condemned' || status == 'post_mortem_failed') {
+                        stage = 'Post-Mortem';
+                        disposition = 'Carcass Condemned';
+                      } else if (anti == 'Failed' || status == 'anti_mortem_failed' || status == 'taken_back') {
+                        stage = 'Ante-Mortem';
+                        disposition = 'Rejected / Taken Back';
+                      }
+                      String findings = (req['veterinary_findings']?.toString() ??
+                              req['condemnation_reason']?.toString() ??
+                              req['process_notes']?.toString() ??
+                              'Health abnormality detected')
+                          .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+                          .trim();
+                      if (findings.isEmpty || findings == 'null') {
+                        findings = 'Did not meet health & inspection standards';
+                      }
+                      return TableRow(
+                        children: [
+                          Padding(padding: const EdgeInsets.all(10), child: Text(ref, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: Color(0xFF9B2C2C)), overflow: TextOverflow.ellipsis)),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(name, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+                          if (!isCompact)
+                            Padding(padding: const EdgeInsets.all(10), child: Text(livestock, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: const Color(0xFFFED7D7), borderRadius: BorderRadius.circular(12)),
+                              child: Text(stage, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFC53030)), overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                          if (!isCompact)
+                            Padding(padding: const EdgeInsets.all(10), child: Text(findings, style: const TextStyle(fontSize: 11.5, color: Color(0xFF742A2A)))),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(disposition, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF9B2C2C)))),
+                        ],
+                      );
+                    }),
+                  ],
                 );
               },
             ),
@@ -1758,13 +2297,23 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     );
   }
 
+  String _cleanDisplayRemarks(String raw, {String fallback = '—'}) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+        .replaceAll(RegExp(r'\[PHONE:[^\]]+\]\s*\|?\s*'), '')
+        .trim();
+    if (cleaned.isEmpty || cleaned.toLowerCase() == 'null') {
+      return fallback;
+    }
+    return cleaned;
+  }
+
   // ════════════════════════════════════════════
-  //  SECTION 3: CASES THAT DID NOT UNDERGO INSPECTION (SEPARATE LIST)
+  //  SECTION 3: HELD / CONFINED LIVESTOCK (FAILED ANTE-MORTEM — 2-DAY HOLD)
   // ════════════════════════════════════════════
   Widget _buildUninspectedSection() {
     final periodReqs = _getRequestsInActivePeriod();
-    final uninspected = periodReqs.where(_isUninspected).toList();
-    final scrollController = ScrollController();
+    final heldConfined = periodReqs.where(_isUninspected).toList();
 
     return Container(
       width: double.infinity,
@@ -1782,7 +2331,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             decoration: const BoxDecoration(
-              color: Color(0xFFF7FAFC),
+              color: Color(0xFFFFFBEB),
               borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
             ),
             child: Row(
@@ -1790,7 +2339,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF4A5568),
+                    color: const Color(0xFFB45309),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Text('SECTION 3', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
@@ -1801,27 +2350,21 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Cases Involving Livestock That Did Not Undergo Inspection (${uninspected.length})',
+                        'Held / Confined Livestock — Failed Ante-Mortem (${heldConfined.length})',
                         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Registrations that were cancelled, withdrawn, or are still awaiting arrival & inspection',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                        'Livestock that failed ante-mortem inspection and are under mandatory 2-day confinement awaiting re-evaluation (slaughter or condemnation)',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                       ),
                     ],
                   ),
                 ),
-                IconButton(
-                  onPressed: () => _exportReportBySection('uninspected', 'Uninspected_Report'),
-                  icon: Icon(Icons.download, size: 20, color: Colors.grey.shade600),
-                  splashRadius: 20,
-                  tooltip: 'Export Uninspected Livestock Report PDF',
-                ),
               ],
             ),
           ),
-          if (uninspected.isEmpty)
+          if (heldConfined.isEmpty)
             Padding(
               padding: const EdgeInsets.all(28),
               child: Center(
@@ -1831,7 +2374,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                     const Icon(Icons.check_circle_outline, color: Color(0xFF2D6A4F), size: 22),
                     const SizedBox(width: 8),
                     Text(
-                      'All registered livestock underwent inspection as scheduled.',
+                      'No livestock currently held or confined from ante-mortem inspection during this period.',
                       style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontStyle: FontStyle.italic),
                     ),
                   ],
@@ -1841,70 +2384,74 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final availableWidth = constraints.maxWidth;
-                final tableWidth = max(1050.0, availableWidth);
-                final colSpacing = (availableWidth > 1400)
-                    ? 32.0
-                    : (availableWidth > 1100 ? 22.0 : 16.0);
-
-                return Scrollbar(
-                  controller: scrollController,
-                  thumbVisibility: false,
-                  trackVisibility: false,
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: tableWidth),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFEDF2F7)),
-                        dataRowMinHeight: 52,
-                        dataRowMaxHeight: 68,
-                        columnSpacing: colSpacing,
-                        columns: const [
-                          DataColumn(label: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Customer Name', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Livestock / Heads', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Scheduled Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Registration Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                          DataColumn(label: Text('Reason / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                        ],
-                        rows: uninspected.map((req) {
-                          final ref = _refNo(req);
-                          final name = req['customer_name']?.toString() ?? '\u2014';
-                          final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
-                          final sched = req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
-                          final schedFmt = sched.length > 10 ? sched.substring(0, 10) : sched;
-                          final status = (req['status'] ?? 'Pending').toString();
-
-                          String reason = 'Inspection pending or omitted before slaughter';
-                          if (status == 'cancelled') {
-                            reason = 'Booking cancelled by customer prior to arrival';
-                          } else if (status == 'rejected') {
-                            reason = 'Registration rejected during document verification';
-                          } else if (status == 'pending' || status == 'approved') {
-                            reason = 'Awaiting animal arrival & ante-mortem inspection';
-                          }
-
-                          return DataRow(cells: [
-                            DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                            DataCell(Text(name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                            DataCell(Text(livestock, style: const TextStyle(fontSize: 12))),
-                            DataCell(Text(schedFmt, style: const TextStyle(fontSize: 12))),
-                            DataCell(Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFE2E8F0),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF4A5568))),
-                            )),
-                            DataCell(Text(reason, style: const TextStyle(fontSize: 12, color: Color(0xFF718096)))),
-                          ]);
-                        }).toList(),
-                      ),
-                    ),
+                final isCompact = constraints.maxWidth < 760;
+                return Table(
+                  border: TableBorder(
+                    horizontalInside: BorderSide(color: Colors.grey.shade200),
+                    top: BorderSide(color: Colors.grey.shade200),
+                    bottom: BorderSide(color: Colors.grey.shade200),
                   ),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: isCompact
+                      ? const {
+                          0: FlexColumnWidth(1.2),
+                          1: FlexColumnWidth(1.8),
+                          2: FlexColumnWidth(1.3),
+                          3: FlexColumnWidth(1.8),
+                        }
+                      : const {
+                          0: FlexColumnWidth(1.1),
+                          1: FlexColumnWidth(1.6),
+                          2: FlexColumnWidth(1.3),
+                          3: FlexColumnWidth(1.0),
+                          4: FlexColumnWidth(1.4),
+                          5: FlexColumnWidth(2.2),
+                        },
+                  children: [
+                    TableRow(
+                      decoration: const BoxDecoration(color: Color(0xFFEDF2F7)),
+                      children: [
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Reference', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        if (!isCompact) ...[
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Livestock', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Date Held', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        ],
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Hold Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                        const Padding(padding: EdgeInsets.all(10), child: Text('Ante-Mortem Findings / Remarks', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+                      ],
+                    ),
+                    ...heldConfined.map((req) {
+                      final ref = _refNo(req);
+                      final name = req['customer_name']?.toString() ?? '\u2014';
+                      final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
+                      final sched = req['inspection_created_at']?.toString() ?? req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
+                      final schedFmt = sched.length > 10 ? sched.substring(0, 10) : sched;
+                      final findings = _cleanDisplayRemarks(
+                        (req['veterinary_findings'] ?? req['process_notes'] ?? '').toString(),
+                        fallback: 'Failed ante-mortem — held under mandatory 2-day confinement for re-evaluation',
+                      );
+                      return TableRow(
+                        children: [
+                          Padding(padding: const EdgeInsets.all(10), child: Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11.5), overflow: TextOverflow.ellipsis)),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(name, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis)),
+                          if (!isCompact) ...[
+                            Padding(padding: const EdgeInsets.all(10), child: Text(livestock, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
+                            Padding(padding: const EdgeInsets.all(10), child: Text(schedFmt, style: const TextStyle(fontSize: 11.5))),
+                          ],
+                          Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(12)),
+                              child: const Text('CONFINED (2-DAY HOLD)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFB45309)), overflow: TextOverflow.ellipsis),
+                            ),
+                          ),
+                          Padding(padding: const EdgeInsets.all(10), child: Text(findings, style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)))),
+                        ],
+                      );
+                    }),
+                  ],
                 );
               },
             ),
@@ -2074,72 +2621,17 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               ),
             ],
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Daily Slaughterhouse Production Report',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Official Abattoir Record (Incoming Livestock & Carcass Production) • $dateStr',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                    ),
-                  ],
-                ),
+              const Text(
+                'Daily Slaughterhouse Production Report',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
               ),
-              AnimatedDateDropdown(
-                selectedDate: _nmicReportDate,
-                firstDate: DateTime(2024),
-                lastDate: DateTime(2030),
-                label: DateFormat('yyyy-MM-dd').format(_nmicReportDate),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                backgroundColor: Colors.white,
-                borderColor: Colors.grey.shade300,
-                onDateSelected: (picked) {
-                  setState(() => _nmicReportDate = picked);
-                },
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.picture_as_pdf, size: 16),
-                label: const Text('Export Official PDF'),
-                onPressed: () async {
-                  final pdfBytes = await NmicReportPdfGenerator.generateDailyProductionReport(
-                    date: _nmicReportDate,
-                    requests: _allRequests,
-                  );
-                  await Printing.layoutPdf(onLayout: (_) => pdfBytes);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.send_rounded, size: 16),
-                label: const Text('Send to NMIC via Email'),
-                onPressed: () {
-                  _openNmicTransmittalDialog(
-                    reportType: 'Daily Production Report',
-                    periodLabel: DateFormat('MMMM d, yyyy').format(_nmicReportDate),
-                    getPdfBytes: () => NmicReportPdfGenerator.generateDailyProductionReport(
-                      date: _nmicReportDate,
-                      requests: _allRequests,
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E3A8A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
+              const SizedBox(height: 4),
+              Text(
+                'Official Abattoir Record (Incoming Livestock & Carcass Production) • $dateStr',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
               ),
             ],
           ),
@@ -2331,106 +2823,14 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
     int totalMonthHeads = monthReqs.fold(0, (a, b) => a + (int.tryParse((b['animal_count'] ?? 1).toString()) ?? 1));
 
+    final tally = _computeMonthlyDealerTally(_monthlyLogMonth);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Action Bar
+        // Header Banner (Date & Export controlled by Unified Toolbar above)
         Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF0F172A).withValues(alpha: 0.08),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-              BoxShadow(
-                color: const Color(0xFF0F172A).withValues(alpha: 0.05),
-                blurRadius: 3,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Meat Dealer Licensing – Monthly Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-                    const SizedBox(height: 4),
-                    Text('Tabaco City Abattoir Office 31-Day Production Matrix • $monthStr', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.chevron_left),
-                onPressed: () => setState(() => _monthlyLogMonth = DateTime(_monthlyLogMonth.year, _monthlyLogMonth.month - 1)),
-              ),
-              Text(monthStr, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              IconButton(
-                icon: const Icon(Icons.chevron_right),
-                onPressed: () => setState(() => _monthlyLogMonth = DateTime(_monthlyLogMonth.year, _monthlyLogMonth.month + 1)),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.print, size: 16),
-                label: const Text('Export Landscape PDF'),
-                onPressed: () async {
-                  final pdfBytes = await NmicReportPdfGenerator.generateMonthlyDealerLog(
-                    month: _monthlyLogMonth,
-                    requests: _allRequests,
-                  );
-                  await Printing.layoutPdf(onLayout: (_) => pdfBytes);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
-              ),
-              const SizedBox(width: 12),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.send_rounded, size: 16),
-                label: const Text('Send to NMIC via Email'),
-                onPressed: () {
-                  _openNmicTransmittalDialog(
-                    reportType: 'Monthly Dealer Log',
-                    periodLabel: monthStr,
-                    getPdfBytes: () => NmicReportPdfGenerator.generateMonthlyDealerLog(
-                      month: _monthlyLogMonth,
-                      requests: _allRequests,
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1E3A8A),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-
-        Row(
-          children: [
-            _buildKpiCard('Total Heads (Month)', '$totalMonthHeads heads', const Color(0xFF2D6A4F), Icons.pets),
-            const SizedBox(width: 16),
-            _buildKpiCard('Market Dealers', '${dealersService.marketDealers.length} registered', const Color(0xFF2B6CB0), Icons.storefront),
-            const SizedBox(width: 16),
-            _buildKpiCard('Barangay Dealers', '${dealersService.barangayDealers.length} registered', const Color(0xFFD69E2E), Icons.home_work),
-            const SizedBox(width: 16),
-            _buildKpiCard('Days Covered', '$daysInMonth days', const Color(0xFF805AD5), Icons.calendar_month),
-          ],
-        ),
-        const SizedBox(height: 20),
-
-        Container(
+          width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -2452,52 +2852,250 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Monthly Dealer 31-Day Tally Overview', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-                  Text('Showing all ${allDealers.length} registered dealers', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ],
-              ),
-              const SizedBox(height: 12),
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final availableWidth = constraints.maxWidth;
-                  final tableWidth = max(1200.0, availableWidth);
+              const Text('Meat Dealer Licensing – Monthly Log', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+              const SizedBox(height: 4),
+              Text('Tabaco City Abattoir Office 31-Day Production Matrix • $monthStr', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
 
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: tableWidth),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                        columns: [
-                          const DataColumn(label: Text('No.', style: TextStyle(fontWeight: FontWeight.bold))),
-                          const DataColumn(label: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold))),
-                          const DataColumn(label: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold))),
-                          const DataColumn(label: Text('Section', style: TextStyle(fontWeight: FontWeight.bold))),
-                          ...List.generate(daysInMonth, (i) => DataColumn(label: Text('${i + 1}'))),
-                        ],
-                        rows: allDealers.take(20).map((d) {
-                          return DataRow(cells: [
-                            DataCell(Text('${d.dealerNumber}')),
-                            DataCell(Text(d.name, style: const TextStyle(fontWeight: FontWeight.w600))),
-                            DataCell(Text(d.markings, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)))),
-                            DataCell(Text(d.category.toUpperCase())),
-                            ...List.generate(daysInMonth, (_) => const DataCell(Text('—'))),
-                          ]);
-                        }).toList(),
-                      ),
-                    ),
-                  );
-                },
+        _buildResponsiveKpiRow([
+          _buildKpiCard('Total Heads (Month)', '$totalMonthHeads heads', const Color(0xFF2D6A4F), Icons.pets),
+          _buildKpiCard('Market Dealers', '${dealersService.marketDealers.length} registered', const Color(0xFF2B6CB0), Icons.storefront),
+          _buildKpiCard('Barangay Dealers', '${dealersService.barangayDealers.length} registered', const Color(0xFFD69E2E), Icons.home_work),
+          _buildKpiCard('Days Covered', '$daysInMonth days', const Color(0xFF805AD5), Icons.calendar_month),
+        ]),
+        const SizedBox(height: 20),
+
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
               ),
-              const SizedBox(height: 8),
-              Center(
-                child: Text('Preview showing top 20 rows. Click "Export Landscape PDF" to print the complete 31-day matrix.',
-                    style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey.shade600)),
+              BoxShadow(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                blurRadius: 3,
+                offset: const Offset(0, 1),
               ),
             ],
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final int windowSize = constraints.maxWidth >= 980
+                  ? 7
+                  : (constraints.maxWidth >= 760
+                      ? 5
+                      : (constraints.maxWidth >= 520 ? 4 : 3));
+              final int clampedStart = _dealerLogStartDay.clamp(1, daysInMonth);
+              final int endDay = min(clampedStart + windowSize - 1, daysInMonth);
+              final List<int> visibleDays = [
+                for (int d = clampedStart; d <= endDay; d++) d,
+              ];
+              final bool canPrev = clampedStart > 1;
+              final bool canNext = endDay < daysInMonth;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Monthly Dealer 31-Day Tally Overview',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF2D3748)),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Showing ${allDealers.length} registered dealers • Name, Mark & Section stay pinned',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                          ),
+                        ],
+                      ),
+                      // Day-window pager (< Days 1–7 of 30 >)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                              tooltip: 'Previous days',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                              onPressed: canPrev
+                                  ? () => setState(() {
+                                        _dealerLogStartDay = max(1, clampedStart - windowSize);
+                                      })
+                                  : null,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(
+                                'Days $clampedStart–$endDay of $daysInMonth',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1E293B),
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                              tooltip: 'Next days',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                              onPressed: canNext
+                                  ? () => setState(() {
+                                        _dealerLogStartDay = min(daysInMonth, endDay + 1);
+                                      })
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Table(
+                    border: TableBorder(
+                      horizontalInside: BorderSide(color: Colors.grey.shade200),
+                      top: BorderSide(color: Colors.grey.shade200),
+                      bottom: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    columnWidths: {
+                      0: const FixedColumnWidth(42),
+                      1: const FlexColumnWidth(2.6),
+                      2: const FlexColumnWidth(1.0),
+                      3: const FlexColumnWidth(1.2),
+                      for (int i = 0; i < visibleDays.length; i++)
+                        4 + i: const FlexColumnWidth(0.65),
+                      4 + visibleDays.length: const FlexColumnWidth(0.85),
+                    },
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(color: Colors.grey.shade100),
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                            child: Text('No.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                            child: Text('Name of Owner', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                            child: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                            child: Text('Section', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                          ...visibleDays.map(
+                            (d) => Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                              child: Text(
+                                '$d',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1B4332)),
+                              ),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                            child: Text('Total', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                      ...allDealers.map((d) {
+                        final key = d.name.trim().toLowerCase();
+                        final dayMap = tally[key] ?? const <int, int>{};
+                        final monthTotal = dayMap.values.fold<int>(0, (a, b) => a + b);
+                        return TableRow(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                              child: Text('${d.dealerNumber}', style: const TextStyle(fontSize: 12)),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                              child: Text(
+                                d.name,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                              child: Text(
+                                d.markings,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1E3A8A)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                              child: Text(
+                                d.category.toUpperCase(),
+                                style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            ...visibleDays.map((day) {
+                              final count = dayMap[day] ?? 0;
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                                child: Text(
+                                  count > 0 ? '$count' : '—',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: count > 0 ? FontWeight.w700 : FontWeight.normal,
+                                    color: count > 0 ? const Color(0xFF2D6A4F) : Colors.grey.shade400,
+                                  ),
+                                ),
+                              );
+                            }),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+                              child: Text(
+                                monthTotal > 0 ? '$monthTotal' : '—',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: monthTotal > 0 ? const Color(0xFF0F172A) : Colors.grey.shade400,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -2538,113 +3136,54 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              const Text('National Meat Inspection Service (NMIS) Regulatory Reports',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+              const SizedBox(height: 4),
+              Text('Form No. NMIS-POSM-F-034 • Official Transmittal & Compliance Suite • $monthStr',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              const Divider(height: 24),
+              // Filter selectors (responsive Wrap)
+              Wrap(
+                spacing: 16,
+                runSpacing: 10,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Report Form: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(width: 8),
+                      DropdownButton<String>(
+                        value: _selectedNmicFormType,
+                        items: const [
+                          DropdownMenuItem(value: 'Weekly Summary', child: Text('Weekly Summary Report (All Species)')),
+                          DropdownMenuItem(value: 'Species Transaction', child: Text('Service Transaction Description (Per Species)')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedNmicFormType = v);
+                        },
+                      ),
+                    ],
+                  ),
+                  if (_selectedNmicFormType == 'Species Transaction')
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Text('National Meat Inspection Service (NMIS) Regulatory Reports',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-                        const SizedBox(height: 4),
-                        Text('Form No. NMIS-POSM-F-034 • Official Transmittal & Compliance Suite',
-                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                        const Text('Species: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        ...['HOG', 'CATTLE', 'CARABAO', 'GOAT'].map((sp) {
+                          final isSel = _selectedNmicSpecies == sp;
+                          return ChoiceChip(
+                            label: Text(sp),
+                            selected: isSel,
+                            onSelected: (_) => setState(() => _selectedNmicSpecies = sp),
+                            selectedColor: const Color(0xFF2D6A4F),
+                            labelStyle: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
+                          );
+                        }),
                       ],
                     ),
-                  ),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, size: 16),
-                    label: const Text('Export Selected NMIS Form'),
-                    onPressed: () async {
-                      Uint8List pdfBytes;
-                      if (_selectedNmicFormType == 'Weekly Summary') {
-                        pdfBytes = await NmicReportPdfGenerator.generateNmisWeeklySummary(
-                          month: _monthlyLogMonth,
-                          requests: _allRequests,
-                        );
-                      } else {
-                        pdfBytes = await NmicReportPdfGenerator.generateNmisServiceTransactionReport(
-                          month: _monthlyLogMonth,
-                          species: _selectedNmicSpecies,
-                          requests: _allRequests,
-                        );
-                      }
-                      await Printing.layoutPdf(onLayout: (_) => pdfBytes);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D6A4F),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.send_rounded, size: 16),
-                    label: const Text('Send Transmittal & Form to NMIC'),
-                    onPressed: () {
-                      _openNmicTransmittalDialog(
-                        reportType: _selectedNmicFormType == 'Weekly Summary'
-                            ? 'NMIS Weekly Summary Report'
-                            : 'NMIS Form NMIS-POSM-F-034 ($_selectedNmicSpecies)',
-                        periodLabel: monthStr,
-                        getPdfBytes: () {
-                          if (_selectedNmicFormType == 'Weekly Summary') {
-                            return NmicReportPdfGenerator.generateNmisWeeklySummary(
-                              month: _monthlyLogMonth,
-                              requests: _allRequests,
-                            );
-                          } else {
-                            return NmicReportPdfGenerator.generateNmisServiceTransactionReport(
-                              month: _monthlyLogMonth,
-                              species: _selectedNmicSpecies,
-                              requests: _allRequests,
-                            );
-                          }
-                        },
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E3A8A),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(height: 24),
-              // Filter selectors
-              Row(
-                children: [
-                  const Text('Report Form: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
-                    value: _selectedNmicFormType,
-                    items: const [
-                      DropdownMenuItem(value: 'Weekly Summary', child: Text('Weekly Summary Report (All Species)')),
-                      DropdownMenuItem(value: 'Species Transaction', child: Text('Service Transaction Description (Per Species)')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setState(() => _selectedNmicFormType = v);
-                    },
-                  ),
-                  const SizedBox(width: 24),
-                  if (_selectedNmicFormType == 'Species Transaction') ...[
-                    const Text('Species: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    const SizedBox(width: 8),
-                    ...['HOG', 'CATTLE', 'CARABAO', 'GOAT'].map((sp) {
-                      final isSel = _selectedNmicSpecies == sp;
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text(sp),
-                          selected: isSel,
-                          onSelected: (_) => setState(() => _selectedNmicSpecies = sp),
-                          selectedColor: const Color(0xFF2D6A4F),
-                          labelStyle: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 12),
-                        ),
-                      );
-                    }),
-                  ],
                 ],
               ),
             ],
@@ -2815,37 +3354,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
   Widget _buildCustomerHistoricalRecordsTab() {
     final dealersService = RegularDealersService.instance;
     final allDealers = dealersService.allDealers;
-
-    // Filter requests by customer
-    List<Map<String, dynamic>> filtered = _allRequests;
-    if (_selectedCustomerFilter != null && _selectedCustomerFilter!.isNotEmpty) {
-      final query = _selectedCustomerFilter!.toUpperCase().trim();
-      filtered = filtered.where((r) {
-        final name = (r['customer_name'] ?? r['owner_name'] ?? '').toString().toUpperCase().trim();
-        final mark = (r['customer_marking'] ?? r['animal_tag'] ?? r['tag_id'] ?? '').toString().toUpperCase().trim();
-        return name == query || mark == query || name.contains(query);
-      }).toList();
-    }
-
-    // Filter by period
-    final now = DateTime.now();
-    if (_customerPeriodFilter == 'This Week') {
-      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-      filtered = filtered.where((r) {
-        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
-        return dt != null && dt.isAfter(startOfWeek);
-      }).toList();
-    } else if (_customerPeriodFilter == 'This Month') {
-      filtered = filtered.where((r) {
-        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
-        return dt != null && dt.year == now.year && dt.month == now.month;
-      }).toList();
-    } else if (_customerPeriodFilter == 'This Year') {
-      filtered = filtered.where((r) {
-        final dt = DateTime.tryParse((r['scheduled_date'] ?? r['created_at']).toString());
-        return dt != null && dt.year == now.year;
-      }).toList();
-    }
+    final filtered = _getFilteredCustomerRecords();
 
     int heads = filtered.fold(0, (a, b) => a + (int.tryParse((b['animal_count'] ?? 1).toString()) ?? 1));
     double wt = filtered.fold(0.0, (a, b) => a + (double.tryParse((b['carcass_weight'] ?? 0).toString()) ?? 0));
@@ -2861,7 +3370,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Action Bar & Filters
+        // Header & Customer Filter (Date & Export controlled by Unified Toolbar above)
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
@@ -2884,85 +3393,27 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Customer Slaughter Historical Audit Records',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
-                        const SizedBox(height: 4),
-                        Text('Individual dealer slaughter totals required for NMIC inspection audit',
-                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-                      ],
-                    ),
-                  ),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, size: 16),
-                    label: const Text('Export Customer Record (PDF)'),
-                    onPressed: () async {
-                      if (_selectedCustomerFilter == null || _selectedCustomerFilter!.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Please select a customer or dealer first')),
-                        );
-                        return;
-                      }
-                      final pdfBytes = await NmicReportPdfGenerator.generateCustomerSlaughterHistoryReport(
-                        customerName: activeDealer?.name ?? _selectedCustomerFilter!,
-                        marking: activeDealer?.markings ?? 'TAG',
-                        periodLabel: _customerPeriodFilter,
-                        requests: filtered,
-                      );
-                      await Printing.layoutPdf(onLayout: (_) => pdfBytes);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D6A4F),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                ],
-              ),
+              const Text('Customer Slaughter Historical Audit Records',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2D3748))),
+              const SizedBox(height: 4),
+              Text('Individual dealer slaughter totals required for NMIC inspection audit • ${_getActivePeriodLabel()}',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
               const Divider(height: 24),
-              Row(
-                children: [
-                  // Customer selector
-                  Expanded(
-                    flex: 2,
-                    child: DropdownButtonFormField<String>(
-                      initialValue: _selectedCustomerFilter,
-                      decoration: const InputDecoration(
-                        labelText: 'Select Customer / Regular Dealer',
-                        border: OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      ),
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('All Customers / Dealers')),
-                        ...allDealers.map((d) => DropdownMenuItem(
-                              value: d.name,
-                              child: Text('${d.name} [Mark: ${d.markings}] (${d.category.toUpperCase()})'),
-                            )),
-                      ],
-                      onChanged: (v) => setState(() => _selectedCustomerFilter = v),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  // Period selector
-                  ...['This Week', 'This Month', 'This Year', 'All Time'].map((p) {
-                    final isSel = _customerPeriodFilter == p;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(p),
-                        selected: isSel,
-                        onSelected: (_) => setState(() => _customerPeriodFilter = p),
-                        selectedColor: const Color(0xFF2D6A4F),
-                        labelStyle: TextStyle(color: isSel ? Colors.white : Colors.black87, fontWeight: FontWeight.bold),
-                      ),
-                    );
-                  }),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedCustomerFilter,
+                decoration: const InputDecoration(
+                  labelText: 'Select Customer / Regular Dealer',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                items: [
+                  const DropdownMenuItem(value: null, child: Text('All Customers / Dealers')),
+                  ...allDealers.map((d) => DropdownMenuItem(
+                        value: d.name,
+                        child: Text('${d.name} [Mark: ${d.markings}] (${d.category.toUpperCase()})'),
+                      )),
                 ],
+                onChanged: (v) => setState(() => _selectedCustomerFilter = v),
               ),
               if (activeDealer != null) ...[
                 const SizedBox(height: 14),
@@ -3114,186 +3565,225 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
     if (!mounted) return;
 
+    bool isSending = false;
+
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.mark_email_read_outlined, color: Color(0xFF1E3A8A)),
-            const SizedBox(width: 10),
-            const Text('Send Transmittal & Reports to NMIC', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: SizedBox(
-          width: 580,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.info_outline, color: Color(0xFF1E3A8A), size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Sending official soft copy to NMIC. This fulfills the digital report requirement so only hard copies are required during weekly physical inspections.',
-                          style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.mark_email_read_outlined, color: Color(0xFF1E3A8A)),
+              SizedBox(width: 10),
+              Text('Send Transmittal & Reports to NMIS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SizedBox(
+            width: AdminResponsive.dialogWidth(context, 580),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Color(0xFF1E3A8A), size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Direct 1-click transmission: generates the certified PDF report and emails it directly with the PDF attached — no manual file download or browser email compose required.',
+                            style: TextStyle(fontSize: 12, color: Colors.blue.shade900),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'NMIC Recipient Email',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email_outlined),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: emailCtrl,
+                    enabled: !isSending,
+                    decoration: const InputDecoration(
+                      labelText: 'NMIC Recipient Email',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.email_outlined),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: subjectCtrl,
-                  textCapitalization: TextCapitalization.words,
-                  inputFormatters: const [WordsCapitalizationFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Transmittal Subject',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.subject),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: subjectCtrl,
+                    enabled: !isSending,
+                    textCapitalization: TextCapitalization.words,
+                    inputFormatters: const [WordsCapitalizationFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'Transmittal Subject',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.subject),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: bodyCtrl,
-                  maxLines: 7,
-                  textCapitalization: TextCapitalization.sentences,
-                  inputFormatters: const [SentencesCapitalizationFormatter()],
-                  decoration: const InputDecoration(
-                    labelText: 'Transmittal Letter Message',
-                    border: OutlineInputBorder(),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: bodyCtrl,
+                    enabled: !isSending,
+                    maxLines: 7,
+                    textCapitalization: TextCapitalization.sentences,
+                    inputFormatters: const [SentencesCapitalizationFormatter()],
+                    decoration: const InputDecoration(
+                      labelText: 'Transmittal Letter Message',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.grey.shade300),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.attach_file, size: 18, color: Colors.grey),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text('Auto-Attached PDF: ${reportType.replaceAll(" ", "_")}_$periodLabel.pdf',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.attach_file, size: 18, color: Colors.grey),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text('Attached: ${reportType.replaceAll(" ", "_")}_$periodLabel.pdf (Soft Copy)',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(
+              onPressed: isSending ? null : () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.download, size: 16),
+              label: const Text('Download PDF'),
+              onPressed: isSending
+                  ? null
+                  : () async {
+                      final bytes = await getPdfBytes();
+                      await Printing.sharePdf(bytes: bytes, filename: '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf');
+                    },
+            ),
+            ElevatedButton.icon(
+              icon: isSending
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    )
+                  : const Icon(Icons.send_rounded, size: 16),
+              label: Text(isSending ? 'Sending...' : 'Send to NMIS'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
+              onPressed: isSending
+                  ? null
+                  : () async {
+                      final recipient = emailCtrl.text.trim();
+                      final subject = subjectCtrl.text.trim();
+                      final body = bodyCtrl.text.trim();
+                      final messenger = ScaffoldMessenger.of(context);
+                      final navigator = Navigator.of(ctx);
+
+                      if (recipient.isEmpty) {
+                        messenger.showSnackBar(
+                          const SnackBar(content: Text('Please enter recipient email address'), backgroundColor: Colors.redAccent),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() => isSending = true);
+                      try {
+                        await AppSettingsService.instance.ensureAdminAuthSession();
+                        final pdfBytes = await getPdfBytes();
+                        final filename = '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf';
+                        final result = await dealersService.sendReportViaResend(
+                          recipientEmail: recipient,
+                          subject: subject,
+                          body: body,
+                          pdfBytes: pdfBytes,
+                          filename: filename,
+                          reportType: reportType,
+                          periodLabel: periodLabel,
+                        );
+
+                        if (result['success'] == true) {
+                          final updatedList = await dealersService.getTransmissions();
+                          if (mounted) setState(() => _nmicTransmissionsList = updatedList);
+                          if (navigator.canPop()) navigator.pop();
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Report sent directly to $recipient with PDF attached!'),
+                              backgroundColor: const Color(0xFF2D6A4F),
+                            ),
+                          );
+                        } else {
+                          setDialogState(() => isSending = false);
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(result['error']?.toString() ?? 'Failed to send report directly to NMIS.'),
+                              backgroundColor: Colors.redAccent,
+                              duration: const Duration(seconds: 6),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDialogState(() => isSending = false);
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Error sending report: $e'),
+                            backgroundColor: Colors.redAccent,
+                          ),
+                        );
+                      }
+                    },
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          OutlinedButton.icon(
-            icon: const Icon(Icons.download, size: 16),
-            label: const Text('Download Soft Copy PDF'),
-            onPressed: () async {
-              final bytes = await getPdfBytes();
-              await Printing.sharePdf(bytes: bytes, filename: '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf');
-            },
-          ),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.send_rounded, size: 16),
-            label: const Text('Send to NMIC via Gmail'),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D6A4F), foregroundColor: Colors.white),
-            onPressed: () async {
-              final recipient = emailCtrl.text.trim();
-              final subject = subjectCtrl.text.trim();
-              final body = bodyCtrl.text.trim();
-              final messenger = ScaffoldMessenger.of(context);
-              final navigator = Navigator.of(ctx);
-
-              if (recipient.isEmpty) {
-                messenger.showSnackBar(
-                  const SnackBar(content: Text('Please enter recipient email address'), backgroundColor: Colors.redAccent),
-                );
-                return;
-              }
-
-              await _sendViaGmail(
-                recipient: recipient,
-                subject: subject,
-                body: body,
-                reportType: reportType,
-                periodLabel: periodLabel,
-                getPdfBytes: getPdfBytes,
-                messenger: messenger,
-                navigator: navigator,
-              );
-            },
-          ),
-        ],
       ),
     );
   }
 
-  Future<void> _sendViaGmail({
-    required String recipient,
-    required String subject,
-    required String body,
-    required String reportType,
-    required String periodLabel,
-    required Future<Uint8List> Function() getPdfBytes,
-    required ScaffoldMessengerState messenger,
-    required NavigatorState navigator,
-  }) async {
-    final dealersService = RegularDealersService.instance;
-    // 1. Download soft copy PDF so the user can easily attach it
-    try {
-      final bytes = await getPdfBytes();
-      await Printing.sharePdf(bytes: bytes, filename: '${reportType.replaceAll(" ", "_")}_$periodLabel.pdf');
-    } catch (_) {}
-
-    // 2. Open Gmail Web in new tab with pre-filled fields
-    final gmailUrl = 'https://mail.google.com/mail/?view=cm&fs=1'
-        '&to=${Uri.encodeComponent(recipient)}'
-        '&su=${Uri.encodeComponent(subject)}'
-        '&body=${Uri.encodeComponent(body)}';
-
-    try {
-      await launchUrl(Uri.parse(gmailUrl), mode: LaunchMode.externalApplication);
-    } catch (_) {}
-
-    await dealersService.logNmicTransmission(
-      reportType: reportType,
-      periodLabel: periodLabel,
-      recipientEmail: recipient,
-      transmittalSubject: subject,
-      transmittalBody: body,
-    );
-
-    final updatedList = await dealersService.getTransmissions();
-    if (mounted) setState(() => _nmicTransmissionsList = updatedList);
-
-    if (navigator.canPop()) {
-      navigator.pop();
-    }
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Opened Gmail Web! Attach the downloaded PDF report to complete sending.'),
-        backgroundColor: Color(0xFF2D6A4F),
-      ),
+  Widget _buildResponsiveKpiRow(List<Widget> cards) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 900) {
+          return Row(
+            children: [
+              for (int i = 0; i < cards.length; i++) ...[
+                if (i > 0) const SizedBox(width: 16),
+                cards[i],
+              ],
+            ],
+          );
+        }
+        // 2-column grid on medium screens, 1-column on very narrow screens
+        final cols = constraints.maxWidth >= 520 ? 2 : 1;
+        final List<Widget> rows = [];
+        for (int i = 0; i < cards.length; i += cols) {
+          final slice = cards.sublist(i, min(i + cols, cards.length));
+          rows.add(
+            Row(
+              children: [
+                for (int j = 0; j < slice.length; j++) ...[
+                  if (j > 0) const SizedBox(width: 12),
+                  slice[j],
+                ],
+                if (slice.length < cols) const Spacer(),
+              ],
+            ),
+          );
+          if (i + cols < cards.length) rows.add(const SizedBox(height: 12));
+        }
+        return Column(children: rows);
+      },
     );
   }
 
@@ -3323,7 +3813,9 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
-              child: Icon(icon, color: color, size: 22),
+              child: icon == Icons.pets
+                  ? _CowHeadIcon(size: 22, color: color)
+                  : Icon(icon, color: color, size: 22),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -3388,7 +3880,7 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
           ],
         ),
         content: SizedBox(
-          width: 480,
+          width: AdminResponsive.dialogWidth(context, 480),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3789,13 +4281,10 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
     }
   }
 
-  Widget _buildMeatDealersDirectoryTab() {
-    final dealersService = RegularDealersService.instance;
-    final allDealers = dealersService.allDealers;
-    final headsMap = _calcDealerLifetimeHeads();
-
-    final filteredDealers = allDealers.where((d) {
-      final q = _dealerSearchQuery.toLowerCase().trim();
+  List<RegularDealer> _getFilteredDealers() {
+    final allDealers = RegularDealersService.instance.allDealers;
+    final q = _dealerSearchQuery.toLowerCase().trim();
+    return allDealers.where((d) {
       final matchesQuery = q.isEmpty ||
           d.name.toLowerCase().contains(q) ||
           d.markings.toLowerCase().contains(q);
@@ -3811,6 +4300,14 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
 
       return matchesQuery && matchesCat;
     }).toList();
+  }
+
+  Widget _buildMeatDealersDirectoryTab() {
+    final dealersService = RegularDealersService.instance;
+    final allDealers = dealersService.allDealers;
+    final headsMap = _calcDealerLifetimeHeads();
+
+    final filteredDealers = _getFilteredDealers();
 
     final totalDealers = allDealers.length;
     final marketCount = dealersService.marketDealers.length;
@@ -3859,43 +4356,16 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                   ],
                 ),
               ),
-              Row(
-                children: [
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.picture_as_pdf, size: 16),
-                    label: const Text('Export Directory (PDF)'),
-                    onPressed: () async {
-                      final messenger = ScaffoldMessenger.of(context);
-                      try {
-                        final bytes = await NmicReportPdfGenerator.generateDealersDirectoryPdf(
-                          dealers: filteredDealers,
-                          dealerHeadsCount: headsMap,
-                        );
-                        await Printing.sharePdf(bytes: bytes, filename: 'NMIS_Meat_Dealers_Directory.pdf');
-                      } catch (e) {
-                        messenger.showSnackBar(
-                          SnackBar(content: Text('Failed to generate PDF: $e'), backgroundColor: Colors.redAccent),
-                        );
-                      }
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF2D6A4F),
-                      side: const BorderSide(color: Color(0xFF2D6A4F)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.person_add, size: 16),
-                    label: const Text('+ Register Meat Dealer'),
-                    onPressed: () => _openRegisterDealerDialog(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2D6A4F),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    ),
-                  ),
-                ],
+              const SizedBox(width: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.person_add, size: 16),
+                label: const Text('+ Register Meat Dealer'),
+                onPressed: () => _openRegisterDealerDialog(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D6A4F),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
               ),
             ],
           ),
@@ -3913,6 +4383,203 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
             const SizedBox(width: 16),
             _buildKpiCard('New Dealers (Last 30 Days)', '$newCount newly registered', const Color(0xFF38A169), Icons.fiber_new_rounded),
           ],
+        ),
+        const SizedBox(height: 20),
+
+        // Dealer Role Change Requests Panel (Barangay <-> Market 2-Step Verification)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _roleChangeRequests.isNotEmpty
+                  ? const Color(0xFFFDE68A)
+                  : const Color(0xFFE2E8F0),
+              width: _roleChangeRequests.isNotEmpty ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF0F172A).withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _roleChangeRequests.isNotEmpty
+                          ? const Color(0xFFFEF3C7)
+                          : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      Icons.swap_horiz_rounded,
+                      color: _roleChangeRequests.isNotEmpty
+                          ? const Color(0xFFB45309)
+                          : const Color(0xFF475569),
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Dealer Role Change Requests (${_roleChangeRequests.length})',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E293B),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Approve Barangay ↔ Market switch requests. Approved dealers must complete formal role verification in the mobile app before their role updates.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    onPressed: _loadingRoleChanges ? null : _loadRoleChangeRequests,
+                    icon: _loadingRoleChanges
+                        ? const SizedBox(
+                            width: 13,
+                            height: 13,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh_rounded, size: 15),
+                    label: const Text('Refresh', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF0F5132),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                  ),
+                ],
+              ),
+              if (_roleChangeRequests.isEmpty && !_loadingRoleChanges) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'No pending Barangay ↔ Market role change requests right now.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey.shade500),
+                ),
+              ] else if (_roleChangeRequests.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                ..._roleChangeRequests.map((req) {
+                  final name = (req['customer_name'] ?? 'Dealer').toString();
+                  final fromRole = (req['from_role'] ?? 'barangay').toString().toLowerCase();
+                  final toRole = (req['requested_role'] ?? 'market').toString().toLowerCase();
+                  final reason = (req['reason'] ?? '').toString().trim();
+                  final status = (req['status'] ?? 'pending').toString();
+                  final isAwaitingVerification = status == 'approved_awaiting_verification';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: isAwaitingVerification ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isAwaitingVerification ? const Color(0xFF86EFAC) : const Color(0xFFFCD34D),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    name,
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Color(0xFF0F172A)),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                                    ),
+                                    child: Text(
+                                      '${fromRole == 'market' ? 'Market' : 'Barangay'} → ${toRole == 'market' ? 'Market' : 'Barangay'}',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (reason.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Reason: $reason',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        if (isAwaitingVerification)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFF4ADE80)),
+                            ),
+                            child: const Text(
+                              'Approved • Awaiting Customer Verification',
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF166534)),
+                            ),
+                          )
+                        else
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              OutlinedButton(
+                                onPressed: () => _handleRoleChangeDecision(req, approve: false),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.red.shade700,
+                                  side: BorderSide(color: Colors.red.shade300),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                                child: const Text('Reject', style: TextStyle(fontSize: 12)),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                onPressed: () => _handleRoleChangeDecision(req, approve: true),
+                                icon: const Icon(Icons.check_rounded, size: 15),
+                                label: const Text('Approve Switch', style: TextStyle(fontSize: 12)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2D6A4F),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ],
+          ),
         ),
         const SizedBox(height: 20),
 
@@ -3954,17 +4621,28 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               const SizedBox(width: 16),
               const Text('Filter Category:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(width: 8),
-              DropdownButton<String>(
+              AnimatedSelectDropdown<String>(
                 value: _dealerCategoryFilter,
-                items: const [
-                  DropdownMenuItem(value: 'All', child: Text('All Dealers')),
-                  DropdownMenuItem(value: 'Market', child: Text('Market Dealers')),
-                  DropdownMenuItem(value: 'Barangay', child: Text('Barangay Dealers')),
-                  DropdownMenuItem(value: 'New', child: Text('New Dealers (30 Days)')),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _dealerCategoryFilter = v);
+                items: const ['All', 'Market', 'Barangay', 'New'],
+                labelBuilder: (v) {
+                  switch (v) {
+                    case 'Market':
+                      return 'Market Dealers';
+                    case 'Barangay':
+                      return 'Barangay Dealers';
+                    case 'New':
+                      return 'New Dealers (30 Days)';
+                    default:
+                      return 'All Dealers';
+                  }
                 },
+                minMenuWidth: 200,
+                backgroundColor: const Color(0xFFF7FAFC),
+                borderColor: const Color(0xFFE2E8F0),
+                textColor: const Color(0xFF1E293B),
+                iconColor: const Color(0xFF2D6A4F),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                onChanged: (v) => setState(() => _dealerCategoryFilter = v),
               ),
             ],
           ),
@@ -4008,74 +4686,77 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
               const SizedBox(height: 14),
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final availableWidth = constraints.maxWidth;
-                  final tableWidth = max(900.0, availableWidth);
-                  final colSpacing = (availableWidth > 1400)
-                      ? 34.0
-                      : (availableWidth > 1100 ? 26.0 : 18.0);
-
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: tableWidth),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(Colors.grey.shade100),
-                        columnSpacing: colSpacing,
-                        columns: const [
-                          DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Meat Dealer Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Permanent Marking', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Category', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Lifetime Heads', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Status / Badge', style: TextStyle(fontWeight: FontWeight.bold))),
-                          DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                  final isCompact = constraints.maxWidth < 820;
+                  return Table(
+                    border: TableBorder(
+                      horizontalInside: BorderSide(color: Colors.grey.shade200),
+                      top: BorderSide(color: Colors.grey.shade200),
+                      bottom: BorderSide(color: Colors.grey.shade200),
+                    ),
+                    defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                    columnWidths: isCompact
+                        ? const {
+                            0: FixedColumnWidth(34),
+                            1: FlexColumnWidth(2.2),
+                            2: FlexColumnWidth(1.1),
+                            3: FlexColumnWidth(1.1),
+                            4: FlexColumnWidth(1.4),
+                          }
+                        : const {
+                            0: FixedColumnWidth(36),
+                            1: FlexColumnWidth(2.1),
+                            2: FlexColumnWidth(1.0),
+                            3: FlexColumnWidth(1.0),
+                            4: FlexColumnWidth(1.3),
+                            5: FlexColumnWidth(1.1),
+                            6: FlexColumnWidth(1.2),
+                            7: FlexColumnWidth(1.3),
+                          },
+                    children: [
+                      TableRow(
+                        decoration: BoxDecoration(color: Colors.grey.shade100),
+                        children: [
+                          const Padding(padding: EdgeInsets.all(10), child: Text('#', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Meat Dealer Name', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Mark', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Category', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          if (!isCompact) ...[
+                            const Padding(padding: EdgeInsets.all(10), child: Text('Contact', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                            const Padding(padding: EdgeInsets.all(10), child: Text('Lifetime Heads', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                            const Padding(padding: EdgeInsets.all(10), child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+                          ],
+                          const Padding(padding: EdgeInsets.all(10), child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
                         ],
-                        rows: filteredDealers.asMap().entries.map((entry) {
-                          final idx = entry.key + 1;
-                          final d = entry.value;
-                          final heads = headsMap[d.name.toLowerCase().trim()] ?? 0;
+                      ),
+                      ...filteredDealers.asMap().entries.map((entry) {
+                        final idx = entry.key + 1;
+                        final d = entry.value;
+                        final heads = headsMap[d.name.toLowerCase().trim()] ?? 0;
+                        final isPendingMarking = d.markings.trim().isEmpty || d.markings.trim().toUpperCase() == 'PENDING';
 
-                          return DataRow(cells: [
-                            DataCell(Text(idx.toString(), style: const TextStyle(fontSize: 12, color: Colors.grey))),
-                            DataCell(
-                              Text(
-                                d.name,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF2D3748)),
+                        return TableRow(
+                          children: [
+                            Padding(padding: const EdgeInsets.all(10), child: Text(idx.toString(), style: const TextStyle(fontSize: 12, color: Colors.grey))),
+                            Padding(padding: const EdgeInsets.all(10), child: Text(d.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: Color(0xFF2D3748)), overflow: TextOverflow.ellipsis)),
+                            Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isPendingMarking ? Colors.grey.shade100 : const Color(0xFFE6F9F0),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: isPendingMarking ? Colors.grey.shade300 : const Color(0xFF2D6A4F).withValues(alpha: 0.4)),
+                                ),
+                                child: Text(
+                                  isPendingMarking ? '—' : d.markings,
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: isPendingMarking ? Colors.grey.shade600 : const Color(0xFF2D6A4F)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ),
-                            DataCell(
-                              Builder(builder: (_) {
-                                final isPendingMarking = d.markings.trim().isEmpty ||
-                                    d.markings.trim().toUpperCase() == 'PENDING';
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: isPendingMarking
-                                        ? Colors.grey.shade100
-                                        : const Color(0xFFE6F9F0),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                      color: isPendingMarking
-                                          ? Colors.grey.shade300
-                                          : const Color(0xFF2D6A4F).withValues(alpha: 0.4),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    isPendingMarking ? '—' : d.markings,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
-                                      color: isPendingMarking
-                                          ? Colors.grey.shade600
-                                          : const Color(0xFF2D6A4F),
-                                    ),
-                                  ),
-                                );
-                              }),
-                            ),
-                            DataCell(
-                              Container(
+                            Padding(
+                              padding: const EdgeInsets.all(8),
+                              child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
                                   color: d.category == 'market' ? const Color(0xFFEBF8FF) : const Color(0xFFFEFCBF),
@@ -4083,86 +4764,63 @@ class _ReportsRecordsPageState extends State<ReportsRecordsPage> {
                                 ),
                                 child: Text(
                                   d.category == 'market' ? 'Market' : 'Barangay',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: d.category == 'market' ? const Color(0xFF2B6CB0) : const Color(0xFFB7791F),
-                                  ),
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: d.category == 'market' ? const Color(0xFF2B6CB0) : const Color(0xFFB7791F)),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ),
-                            DataCell(Text(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', style: const TextStyle(fontSize: 12))),
-                            DataCell(
-                              Row(
-                                children: [
-                                  const _PigIcon(size: 16, color: Color(0xFF2D6A4F)),
-                                  const SizedBox(width: 5),
-                                  Text('$heads heads', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                ],
+                            if (!isCompact) ...[
+                              Padding(padding: const EdgeInsets.all(10), child: Text(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', style: const TextStyle(fontSize: 11.5), overflow: TextOverflow.ellipsis)),
+                              Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Row(
+                                  children: [
+                                    const _PigIcon(size: 15, color: Color(0xFF2D6A4F)),
+                                    const SizedBox(width: 4),
+                                    Flexible(child: Text('$heads heads', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+                                  ],
+                                ),
                               ),
-                            ),
-                            DataCell(
-                              Row(
-                                children: [
-                                  if (d.isNew)
-                                    Container(
-                                      margin: const EdgeInsets.only(right: 6),
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFDEF7EC),
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: const Color(0xFF31C48D)),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.star, size: 11, color: Color(0xFF046C4E)),
-                                          SizedBox(width: 2),
-                                          Text('New Dealer', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF046C4E))),
-                                        ],
-                                      ),
-                                    ),
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: d.isActive ? Colors.green : Colors.grey,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(d.isActive ? 'Active' : 'Inactive', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                                ],
+                              Padding(
+                                padding: const EdgeInsets.all(10),
+                                child: Row(
+                                  children: [
+                                    Container(width: 7, height: 7, decoration: BoxDecoration(shape: BoxShape.circle, color: d.isActive ? Colors.green : Colors.grey)),
+                                    const SizedBox(width: 5),
+                                    Flexible(child: Text(d.isActive ? 'Active' : 'Inactive', style: const TextStyle(fontSize: 11, color: Colors.grey), overflow: TextOverflow.ellipsis)),
+                                  ],
+                                ),
                               ),
-                            ),
-                            DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
+                            ],
+                            Padding(
+                              padding: const EdgeInsets.all(6),
+                              child: Wrap(
+                                spacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
                                   OutlinedButton(
                                     onPressed: () => _openRegisterDealerDialog(editDealer: d),
                                     style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                      minimumSize: const Size(0, 30),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      minimumSize: const Size(0, 28),
                                     ),
                                     child: const Text('Edit', style: TextStyle(fontSize: 11)),
                                   ),
-                                  const SizedBox(width: 6),
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
                                     tooltip: 'Remove Dealer',
-                                    splashRadius: 18,
+                                    splashRadius: 16,
                                     padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                     onPressed: () => _confirmDeleteDealer(d),
                                   ),
                                 ],
                               ),
                             ),
-                          ]);
-                        }).toList(),
-                      ),
-                    ),
+                          ],
+                        );
+                      }),
+                    ],
                   );
                 },
               ),
@@ -4682,4 +5340,141 @@ class _PigIconPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _PigIconPainter oldDelegate) => oldDelegate.color != color;
+}
+
+/// Clean outline cow/cattle head vector icon matching the livestock reference.
+class _CowHeadIcon extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _CowHeadIcon({this.size = 22, this.color = const Color(0xFF2D6A4F)});
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.square(size),
+      painter: _CowHeadIconPainter(color: color),
+    );
+  }
+}
+
+class _CowHeadIconPainter extends CustomPainter {
+  final Color color;
+
+  _CowHeadIconPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final sx = size.width / 24.0;
+    final sy = size.height / 24.0;
+    canvas.save();
+    canvas.scale(sx, sy);
+
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.65
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..isAntiAlias = true;
+
+    final fill = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    // Left & right upward-curving horns
+    final leftHorn = Path()
+      ..moveTo(7.4, 8.2)
+      ..cubicTo(5.6, 6.8, 5.2, 4.6, 6.4, 3.0)
+      ..cubicTo(6.8, 4.5, 7.6, 5.8, 9.2, 6.5);
+    canvas.drawPath(leftHorn, stroke);
+
+    final rightHorn = Path()
+      ..moveTo(16.6, 8.2)
+      ..cubicTo(18.4, 6.8, 18.8, 4.6, 17.6, 3.0)
+      ..cubicTo(17.2, 4.5, 16.4, 5.8, 14.8, 6.5);
+    canvas.drawPath(rightHorn, stroke);
+
+    // Top crown connecting horns
+    final crown = Path()
+      ..moveTo(8.8, 6.6)
+      ..quadraticBezierTo(12.0, 5.6, 15.2, 6.6);
+    canvas.drawPath(crown, stroke);
+
+    // Left & right leaf-shaped ears
+    final leftEar = Path()
+      ..moveTo(7.3, 8.8)
+      ..cubicTo(5.2, 7.6, 3.2, 8.0, 2.0, 9.2)
+      ..cubicTo(3.1, 11.4, 5.4, 11.8, 7.1, 10.6);
+    canvas.drawPath(leftEar, stroke);
+
+    final rightEar = Path()
+      ..moveTo(16.7, 8.8)
+      ..cubicTo(18.8, 7.6, 20.8, 8.0, 22.0, 9.2)
+      ..cubicTo(20.9, 11.4, 18.6, 11.8, 16.9, 10.6);
+    canvas.drawPath(rightEar, stroke);
+
+    // Outer face cheeks tapering down to muzzle
+    final faceSides = Path()
+      ..moveTo(7.4, 8.2)
+      ..cubicTo(7.0, 11.2, 7.8, 14.0, 8.8, 16.2)
+      ..moveTo(16.6, 8.2)
+      ..cubicTo(17.0, 11.2, 16.2, 14.0, 15.2, 16.2);
+    canvas.drawPath(faceSides, stroke);
+
+    // Inner brow-to-muzzle bridge contour lines (signature reference detail)
+    final innerContours = Path()
+      ..moveTo(7.5, 9.1)
+      ..cubicTo(9.7, 10.2, 10.3, 12.6, 9.6, 15.6)
+      ..moveTo(16.5, 9.1)
+      ..cubicTo(14.3, 10.2, 13.7, 12.6, 14.4, 15.6);
+    canvas.drawPath(innerContours, stroke);
+
+    // Rounded snout / muzzle
+    final muzzle = Path()
+      ..moveTo(8.6, 16.5)
+      ..cubicTo(8.5, 14.8, 15.5, 14.8, 15.4, 16.5)
+      ..cubicTo(15.7, 18.7, 14.4, 19.6, 12.0, 19.6)
+      ..cubicTo(9.6, 19.6, 8.3, 18.7, 8.6, 16.5)
+      ..close();
+    canvas.drawPath(muzzle, stroke);
+
+    // Lower chin/lip curve
+    final chin = Path()
+      ..moveTo(9.8, 19.6)
+      ..quadraticBezierTo(12.0, 21.1, 14.2, 19.6);
+    canvas.drawPath(chin, stroke);
+
+    // Eyes (small angled ovals)
+    canvas.save();
+    canvas.translate(8.8, 11.7);
+    canvas.rotate(0.45);
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 1.0, height: 1.5), fill);
+    canvas.restore();
+
+    canvas.save();
+    canvas.translate(15.2, 11.7);
+    canvas.rotate(-0.45);
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 1.0, height: 1.5), fill);
+    canvas.restore();
+
+    // Nostrils (angled teardrops inside muzzle)
+    canvas.save();
+    canvas.translate(10.5, 17.5);
+    canvas.rotate(-0.55);
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 0.9, height: 1.5), fill);
+    canvas.restore();
+
+    canvas.save();
+    canvas.translate(13.5, 17.5);
+    canvas.rotate(0.55);
+    canvas.drawOval(Rect.fromCenter(center: Offset.zero, width: 0.9, height: 1.5), fill);
+    canvas.restore();
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CowHeadIconPainter oldDelegate) => oldDelegate.color != color;
 }

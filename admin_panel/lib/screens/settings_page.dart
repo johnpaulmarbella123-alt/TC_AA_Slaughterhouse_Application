@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
+import '../services/notification_service.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../utils/admin_responsive.dart';
 
 class SettingsPage extends StatefulWidget {
   final int initialTab;
@@ -74,19 +77,23 @@ class _SettingsPageState extends State<SettingsPage>
 
   // ─── 5. CUSTOMER ACCOUNTS STATE ───
   List<Map<String, dynamic>>? _customerAccounts = [];
+  List<Map<String, dynamic>> _deletedCustomerAccounts = [];
   bool _loadingCustomers = false;
   String _customerSearchQuery = '';
-  String _customerStatusFilter = 'all'; // 'all' | 'active' | 'deactivated'
+  String _customerStatusFilter = 'all'; // 'all' | 'active' | 'deactivated' | 'deleted'
   final TextEditingController _customerSearchCtrl = TextEditingController();
 
   int _currentTabIndex = 0;
 
+  int get _tabCount => _settingsService.isSuperAdmin ? 6 : 5;
+  int get _customersTabIndex => _settingsService.isSuperAdmin ? 5 : 4;
+
   @override
   void initState() {
     super.initState();
-    _currentTabIndex = widget.initialTab.clamp(0, 5);
+    _currentTabIndex = widget.initialTab.clamp(0, _tabCount - 1);
     _tabController = TabController(
-      length: 6,
+      length: _tabCount,
       vsync: this,
       initialIndex: _currentTabIndex,
     );
@@ -111,11 +118,16 @@ class _SettingsPageState extends State<SettingsPage>
     _additionalFeeCtrl.text = initialSchedule.additionalFee.toStringAsFixed(2);
     _additionalFeeLabelCtrl.text = initialSchedule.additionalFeeLabel;
 
-    // Reload latest settings from Supabase (fees, staff, schedule)
+    // Reload latest settings from Supabase (fees, staff, schedule, appearance)
     _settingsService.reloadFromSupabase().then((_) {
       if (mounted) {
         _loadAnimalFeeControllers(_selectedAnimal);
         _loadScheduleControllers(_settingsService.scheduleCapacity);
+        setState(() {
+          _headerTitleCtrl.text = _settingsService.headerTitle;
+          _headerSubtitleCtrl.text = _settingsService.headerSubtitle;
+          _selectedLogoPath = _settingsService.cityLogoPath;
+        });
       }
     });
 
@@ -158,14 +170,14 @@ class _SettingsPageState extends State<SettingsPage>
     super.didUpdateWidget(oldWidget);
     if (widget.initialTab != oldWidget.initialTab ||
         widget.navVersion != oldWidget.navVersion) {
-      final target = widget.initialTab.clamp(0, 5);
+      final target = widget.initialTab.clamp(0, _tabCount - 1);
       if (_currentTabIndex != target) {
         setState(() {
           _currentTabIndex = target;
         });
         _tabController.animateTo(target);
       }
-      if (target == 5) {
+      if (target == _customersTabIndex) {
         _loadCustomerAccounts();
       }
     }
@@ -294,14 +306,17 @@ class _SettingsPageState extends State<SettingsPage>
 
   @override
   Widget build(BuildContext context) {
-    // Hot-reload resilience for Flutter Web
+    // Hot-reload & role-switch resilience for Flutter Web
     _customerAccounts ??= [];
-    if (_tabController.length != 6) {
+    final isSuperAdmin = _settingsService.isSuperAdmin;
+    final tabCount = isSuperAdmin ? 6 : 5;
+    if (_tabController.length != tabCount) {
       _tabController.dispose();
+      _currentTabIndex = _currentTabIndex.clamp(0, tabCount - 1);
       _tabController = TabController(
-        length: 6,
+        length: tabCount,
         vsync: this,
-        initialIndex: _currentTabIndex.clamp(0, 5),
+        initialIndex: _currentTabIndex,
       );
       _tabController.addListener(() {
         if (_tabController.index != _currentTabIndex && !_tabController.indexIsChanging) {
@@ -321,7 +336,6 @@ class _SettingsPageState extends State<SettingsPage>
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(isDark),
             Expanded(child: _buildMyProfileTab(isDark)),
           ],
         ),
@@ -333,9 +347,6 @@ class _SettingsPageState extends State<SettingsPage>
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ─── TOP APP BAR / HEADER ───
-          _buildHeader(isDark),
-
           // ─── TAB NAVIGATION BAR ───
           Container(
             decoration: BoxDecoration(
@@ -365,13 +376,14 @@ class _SettingsPageState extends State<SettingsPage>
                   const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
               unselectedLabelStyle:
                   const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-              tabs: const [
-                Tab(icon: Icon(Icons.payments_outlined, size: 20), text: 'Fees & Rates'),
-                Tab(icon: Icon(Icons.badge_outlined, size: 20), text: 'Staff Accounts & Roles'),
-                Tab(icon: Icon(Icons.schedule_outlined, size: 20), text: 'Schedule & Capacity'),
-                Tab(icon: Icon(Icons.person_outline, size: 20), text: 'My Profile'),
-                Tab(icon: Icon(Icons.palette_outlined, size: 20), text: 'Appearance'),
-                Tab(icon: Icon(Icons.people_outline, size: 20), text: 'Customer Accounts'),
+              tabs: [
+                const Tab(icon: Icon(Icons.payments_outlined, size: 20), text: 'Fees & Rates'),
+                if (isSuperAdmin)
+                  const Tab(icon: Icon(Icons.badge_outlined, size: 20), text: 'Staff Accounts & Roles'),
+                const Tab(icon: Icon(Icons.schedule_outlined, size: 20), text: 'Schedule & Capacity'),
+                const Tab(icon: Icon(Icons.person_outline, size: 20), text: 'My Profile'),
+                const Tab(icon: Icon(Icons.palette_outlined, size: 20), text: 'Appearance'),
+                const Tab(icon: Icon(Icons.people_outline, size: 20), text: 'Customer Accounts'),
               ],
             ),
           ),
@@ -379,103 +391,14 @@ class _SettingsPageState extends State<SettingsPage>
           // ─── TAB CONTENT (Instant zero-lag tab switching) ───
           Expanded(
             child: IndexedStack(
-              index: _currentTabIndex.clamp(0, 5),
+              index: _currentTabIndex.clamp(0, tabCount - 1),
               children: [
                 _buildFeesAndRatesTab(isDark),
-                _buildStaffRolesTab(isDark),
+                if (isSuperAdmin) _buildStaffRolesTab(isDark),
                 _buildScheduleCapacityTab(isDark),
                 _buildMyProfileTab(isDark),
                 _buildAppearanceTab(isDark),
                 _buildCustomerAccountsTab(isDark),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════
-  //  TOP HEADER
-  // ═══════════════════════════════════════════════════════════
-  Widget _buildHeader(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
-            width: 1,
-          ),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2D6A4F).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.settings,
-              color: Color(0xFF2D6A4F),
-              size: 26,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'System Settings & Administration',
-                  style: TextStyle(
-                    fontSize: 24,
-                    height: 32 / 24,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  'Configure slaughter fees, staff roles & module access, capacity schedules, administrator profile, and branding.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    height: 20 / 14,
-                    fontWeight: FontWeight.w400,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : const Color(0xFF475569),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          // Current Role Indicator Tag
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFF2D6A4F).withValues(alpha: 0.25),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.admin_panel_settings,
-                    color: Color(0xFF2D6A4F), size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  'Current Role: ${_settingsService.currentRole}',
-                  style: const TextStyle(
-                    color: Color(0xFF2D6A4F),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12.5,
-                  ),
-                ),
               ],
             ),
           ),
@@ -594,94 +517,94 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           const SizedBox(height: 24),
 
-          // 2-Column Layout: Fee Inputs + Live Calculator Preview
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Column 1: Editable Fee Rates
-              Expanded(
-                flex: 3,
-                child: Card(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              '${_selectedAnimal.toUpperCase()} Rates & Tariff',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : const Color(0xFF1E293B),
-                              ),
-                            ),
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                _settingsService.resetFeesToDefaults();
-                                _loadAnimalFeeControllers(_selectedAnimal);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Reset fee rates to standard ordinance defaults.'),
-                                    backgroundColor: Color(0xFF475569),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('Reset Defaults'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
-                                side: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Form Grid
-                        _buildFeeInputField('Slaughter / Facility Fee', _facilityFeeCtrl,
-                            'City operational & slaughter line fee per head', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Permit to Slaughter Fee', _permitFeeCtrl,
-                            'Municipal regulatory slaughter authorization permit', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Veterinary Health Certificate Fee', _vetCertFeeCtrl,
-                            'Official Veterinary issuance & validation fee', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Corral / Holding Fee', _corralFeeCtrl,
-                            'Ante-mortem holding pen stay fee per head', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Ante-Mortem Examination Fee', _anteMortemCtrl,
-                            'Pre-slaughter clinical health examination fee', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Post-Mortem Rate (₱ per kg Carcass)', _postMortemRateCtrl,
-                            'Rate multiplied by actual carcass dressed weight (kg)', isDark),
-                        const SizedBox(height: 14),
-                        _buildFeeInputField('Delivery Van Fee (Market Distribution)', _deliveryVanCtrl,
-                            'Refrigerated delivery dispatch fee (Market request type only)', isDark),
-                        const SizedBox(height: 20),
-
-                        // Additional Charges Section
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+          // Responsive 2-Column Layout: Fee Inputs + Live Calculator Preview
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final feeInputsCard = Card(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.spaceBetween,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            '${_selectedAnimal.toUpperCase()} Rates & Tariff',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : const Color(0xFF1E293B),
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.add_circle_outline, color: Color(0xFF2D6A4F), size: 18),
-                                  const SizedBox(width: 8),
-                                  Text(
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              _settingsService.resetFeesToDefaults();
+                              _loadAnimalFeeControllers(_selectedAnimal);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Reset fee rates to standard ordinance defaults.'),
+                                  backgroundColor: Color(0xFF475569),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.refresh, size: 16),
+                            label: const Text('Reset Defaults'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                              side: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Form Grid
+                      _buildFeeInputField('Slaughter / Facility Fee', _facilityFeeCtrl,
+                          'City operational & slaughter line fee per head', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Permit to Slaughter Fee', _permitFeeCtrl,
+                          'Municipal regulatory slaughter authorization permit', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Veterinary Health Certificate Fee', _vetCertFeeCtrl,
+                          'Official Veterinary issuance & validation fee', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Corral / Holding Fee', _corralFeeCtrl,
+                          'Ante-mortem holding pen stay fee per head', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Ante-Mortem Examination Fee', _anteMortemCtrl,
+                          'Pre-slaughter clinical health examination fee', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Post-Mortem Rate (₱ per kg Carcass)', _postMortemRateCtrl,
+                          'Rate multiplied by actual carcass dressed weight (kg)', isDark),
+                      const SizedBox(height: 14),
+                      _buildFeeInputField('Delivery Van Fee (Market Distribution)', _deliveryVanCtrl,
+                          'Refrigerated delivery dispatch fee (Market request type only)', isDark),
+                      const SizedBox(height: 20),
+
+                      // Additional Charges Section
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.add_circle_outline, color: Color(0xFF2D6A4F), size: 18),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
                                     'Additional Administrative Charges (${_selectedAnimal.toUpperCase()})',
                                     style: TextStyle(
                                       fontSize: 13.5,
@@ -689,159 +612,169 @@ class _SettingsPageState extends State<SettingsPage>
                                       color: isDark ? Colors.white : const Color(0xFF1E293B),
                                     ),
                                   ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'If administration adds any specific charge or surcharge for this livestock, specify the description and amount below.',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                                 ),
-                              ),
-                              const SizedBox(height: 12),
-                              _buildFeeInputField(
-                                'Charge Description / Label',
-                                _additionalFeeLabelCtrl,
-                                'e.g. Cold Storage Surcharge, Waste Management, Sanitation Fee',
-                                isDark,
-                                isNumeric: false,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildFeeInputField(
-                                'Additional Charge Amount (₱)',
-                                _additionalFeeCtrl,
-                                'Fee amount added per head (₱0.00 if none)',
-                                isDark,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-
-                        // Save Button
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _saveCurrentAnimalRates,
-                            icon: const Icon(Icons.save, size: 18),
-                            label: Text('Save ${_selectedAnimal.toUpperCase()} Rates'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2D6A4F),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              ],
                             ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'If administration adds any specific charge or surcharge for this livestock, specify the description and amount below.',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            _buildFeeInputField(
+                              'Charge Description / Label',
+                              _additionalFeeLabelCtrl,
+                              'e.g. Cold Storage Surcharge, Waste Management, Sanitation Fee',
+                              isDark,
+                              isNumeric: false,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildFeeInputField(
+                              'Additional Charge Amount (₱)',
+                              _additionalFeeCtrl,
+                              'Fee amount added per head (₱0.00 if none)',
+                              isDark,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Save Button
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _saveCurrentAnimalRates,
+                          icon: const Icon(Icons.save, size: 18),
+                          label: Text('Save ${_selectedAnimal.toUpperCase()} Rates'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2D6A4F),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(width: 20),
+              );
 
-              // Column 2: Live Calculation Preview
-              Expanded(
-                flex: 2,
-                child: Card(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                  child: Padding(
-                    padding: const EdgeInsets.all(22),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+              final previewCard = Card(
+                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.calculate_outlined,
+                              color: Color(0xFF2D6A4F), size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Live Cashiering Preview',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : const Color(0xFF1E293B),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Test fee calculations in real-time as cashier will see them:',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _testWeightCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Sample Carcass Weight (kg)',
+                          suffixText: 'kg',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      _buildPreviewRow('Vet Health Certificate', vet, isDark),
+                      _buildPreviewRow('Permit to Slaughter', permit, isDark),
+                      _buildPreviewRow('Facility Fee', facility, isDark),
+                      _buildPreviewRow('Corral Fee', corral, isDark),
+                      _buildPreviewRow('Ante-Mortem Fee', ante, isDark),
+                      _buildPreviewRow(
+                        'Post-Mortem (${testWeight.toStringAsFixed(0)} kg @ ₱${postRate.toStringAsFixed(2)})',
+                        postMortemTotal,
+                        isDark,
+                      ),
+                      if (additional > 0)
+                        _buildPreviewRow(additionalLabel, additional, isDark),
+                      const Divider(),
+                      _buildPreviewRow('Barangay Subtotal (Self Pickup)', subtotal, isDark, isBold: true),
+                      _buildPreviewRow('Market Delivery Fee', van, isDark),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2D6A4F).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                              color: const Color(0xFF2D6A4F).withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Icon(Icons.calculate_outlined,
-                                color: Color(0xFF2D6A4F), size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Live Cashiering Preview',
+                            const Text(
+                              'TOTAL (Market Intake):',
                               style: TextStyle(
-                                fontSize: 15,
                                 fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                color: Color(0xFF2D6A4F),
+                                fontSize: 13,
+                              ),
+                            ),
+                            Text(
+                              '₱${marketTotal.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2D6A4F),
+                                fontSize: 16,
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Test fee calculations in real-time as cashier will see them:',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Test Weight Input
-                        TextField(
-                          controller: _testWeightCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          onChanged: (_) => setState(() {}),
-                          decoration: InputDecoration(
-                            labelText: 'Sample Carcass Weight (kg)',
-                            suffixText: 'kg',
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        const Divider(),
-                        const SizedBox(height: 8),
-
-                        _buildPreviewRow('Vet Health Certificate', vet, isDark),
-                        _buildPreviewRow('Permit to Slaughter', permit, isDark),
-                        _buildPreviewRow('Facility Fee', facility, isDark),
-                        _buildPreviewRow('Corral Fee', corral, isDark),
-                        _buildPreviewRow('Ante-Mortem Fee', ante, isDark),
-                        _buildPreviewRow(
-                          'Post-Mortem (${testWeight.toStringAsFixed(0)} kg @ ₱${postRate.toStringAsFixed(2)})',
-                          postMortemTotal,
-                          isDark,
-                        ),
-                        if (additional > 0)
-                          _buildPreviewRow(additionalLabel, additional, isDark),
-                        const Divider(),
-                        _buildPreviewRow('Barangay Subtotal (Self Pickup)', subtotal, isDark, isBold: true),
-                        _buildPreviewRow('Market Delivery Fee', van, isDark),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2D6A4F).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFF2D6A4F).withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'TOTAL (Market Intake):',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF2D6A4F),
-                                  fontSize: 13,
-                                ),
-                              ),
-                              Text(
-                                '₱${marketTotal.toStringAsFixed(2)}',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF2D6A4F),
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+              );
+
+              if (constraints.maxWidth >= 860) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: feeInputsCard),
+                    const SizedBox(width: 20),
+                    Expanded(flex: 2, child: previewCard),
+                  ],
+                );
+              }
+              return Column(
+                children: [
+                  feeInputsCard,
+                  const SizedBox(height: 16),
+                  previewCard,
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -1032,7 +965,7 @@ class _SettingsPageState extends State<SettingsPage>
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Provision Clerk and Inspector accounts, assign their roles, and set their exclusive login passwords.',
+                    'Provision Admin, Clerk, and Inspector accounts, assign their roles, and set or reset their login passwords.',
                     style: TextStyle(
                       fontSize: 12.5,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
@@ -1105,7 +1038,8 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                   ),
                   const SizedBox(height: 14),
-                  _buildMatrixRow('Admin', 'Executive Dashboard, Reports & Records, Settings & Full Supervisory Oversight', isDark),
+                  _buildMatrixRow('Super Admin', 'Full Governance: Staff Account Provisioning, Password Resets, Role Access, Audit Logs & All Executive Modules', isDark),
+                  _buildMatrixRow('Admin', 'Executive Dashboard, Operational Modules, Reports (excl. Audit Logs) & Operational Settings', isDark),
                   _buildMatrixRow('Clerk', 'Clerk Pending-Tasks Dashboard, Receiving & New Requests, Document Verification, Payment & Cashiering, Meat Releasing, My Profile', isDark),
                   _buildMatrixRow('Inspector', 'Inspector Pending-Tasks Dashboard, Slaughter & Inspection (Ante/Post-Mortem & MIC), My Profile', isDark),
                 ],
@@ -1119,6 +1053,8 @@ class _SettingsPageState extends State<SettingsPage>
 
   Color _roleColor(String role) {
     switch (StaffAccount.normalizeRole(role)) {
+      case 'Super Admin':
+        return const Color(0xFFB45309);
       case 'Admin':
         return const Color(0xFF2D6A4F);
       case 'Clerk':
@@ -1180,7 +1116,7 @@ class _SettingsPageState extends State<SettingsPage>
           backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
           title: const Text('Add Staff Member'),
           content: SizedBox(
-            width: 420,
+            width: AdminResponsive.dialogWidth(context, 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1325,17 +1261,20 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   void _showResetStaffPasswordDialog(StaffAccount staff, bool isDark) {
-    final passCtrl = TextEditingController(text: staff.password ?? '');
+    final passCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
     bool obscure = true;
+    bool obscureConfirm = true;
+    String? errorMsg;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
           backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-          title: Text('Set Login Password — ${staff.fullName}'),
+          title: Text('Set / Reset Password — ${staff.fullName}'),
           content: SizedBox(
-            width: 380,
+            width: AdminResponsive.dialogWidth(context, 400),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1351,8 +1290,12 @@ class _SettingsPageState extends State<SettingsPage>
                 TextField(
                   controller: passCtrl,
                   obscureText: obscure,
+                  onChanged: (_) {
+                    if (errorMsg != null) setDlgState(() => errorMsg = null);
+                  },
                   decoration: InputDecoration(
                     labelText: 'New Login Password',
+                    helperText: 'Minimum 6 characters',
                     prefixIcon: const Icon(Icons.key_outlined, size: 18),
                     suffixIcon: IconButton(
                       icon: Icon(
@@ -1363,6 +1306,37 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmCtrl,
+                  obscureText: obscureConfirm,
+                  onChanged: (_) {
+                    if (errorMsg != null) setDlgState(() => errorMsg = null);
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Confirm New Password',
+                    prefixIcon: const Icon(Icons.lock_outline, size: 18),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        obscureConfirm ? Icons.visibility_off : Icons.visibility,
+                        size: 18,
+                      ),
+                      onPressed: () =>
+                          setDlgState(() => obscureConfirm = !obscureConfirm),
+                    ),
+                  ),
+                ),
+                if (errorMsg != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    errorMsg!,
+                    style: const TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1374,14 +1348,24 @@ class _SettingsPageState extends State<SettingsPage>
             ElevatedButton(
               onPressed: () async {
                 final newPass = passCtrl.text.trim();
-                if (newPass.isEmpty) return;
+                final confirmPass = confirmCtrl.text.trim();
+                if (newPass.length < 6) {
+                  setDlgState(() =>
+                      errorMsg = 'Password must be at least 6 characters.');
+                  return;
+                }
+                if (newPass != confirmPass) {
+                  setDlgState(() => errorMsg = 'Passwords do not match.');
+                  return;
+                }
                 Navigator.pop(ctx);
                 await _settingsService.updateStaffPassword(staff.id, newPass);
                 if (mounted) {
                   setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Updated login password for ${staff.fullName} (${staff.role}).'),
+                      content: Text(
+                          'Updated login password for ${staff.fullName} (${StaffAccount.normalizeRole(staff.role)}).'),
                       backgroundColor: const Color(0xFF2D6A4F),
                     ),
                   );
@@ -1401,6 +1385,9 @@ class _SettingsPageState extends State<SettingsPage>
 
   Widget _buildStaffRow(StaffAccount staff, bool isDark, List<String> rolesList) {
     final normalizedStaffRole = StaffAccount.normalizeRole(staff.role);
+    final isSuperAdminRow = normalizedStaffRole == 'Super Admin';
+    final assignableRoles =
+        rolesList.where((r) => r != 'Super Admin').toList();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       child: Row(
@@ -1408,7 +1395,7 @@ class _SettingsPageState extends State<SettingsPage>
           CircleAvatar(
             radius: 20,
             backgroundColor: staff.isActive
-                ? const Color(0xFF2D6A4F).withValues(alpha: 0.15)
+                ? _roleColor(normalizedStaffRole).withValues(alpha: 0.15)
                 : Colors.grey.shade300,
             child: Text(
               staff.fullName.isNotEmpty
@@ -1417,7 +1404,7 @@ class _SettingsPageState extends State<SettingsPage>
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: staff.isActive
-                    ? const Color(0xFF2D6A4F)
+                    ? _roleColor(normalizedStaffRole)
                     : Colors.grey.shade600,
               ),
             ),
@@ -1450,43 +1437,76 @@ class _SettingsPageState extends State<SettingsPage>
               ],
             ),
           ),
-          // Role Selector
+          // Role Selector (locked badge for Super Admin)
           Expanded(
             flex: 3,
-            child: DropdownButton<String>(
-              value: rolesList.contains(normalizedStaffRole) ? normalizedStaffRole : 'Clerk',
-              dropdownColor:
-                  isDark ? const Color(0xFF1E293B) : Colors.white,
-              underline: const SizedBox(),
-              items: rolesList.map((r) {
-                return DropdownMenuItem(
-                  value: r,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _roleColor(r).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      r,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: _roleColor(r),
+            child: isSuperAdminRow
+                ? Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _roleColor('Super Admin').withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: _roleColor('Super Admin').withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shield_outlined,
+                              size: 14, color: _roleColor('Super Admin')),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Super Admin',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: _roleColor('Super Admin'),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
+                  )
+                : DropdownButton<String>(
+                    value: assignableRoles.contains(normalizedStaffRole)
+                        ? normalizedStaffRole
+                        : 'Clerk',
+                    dropdownColor:
+                        isDark ? const Color(0xFF1E293B) : Colors.white,
+                    underline: const SizedBox(),
+                    items: assignableRoles.map((r) {
+                      return DropdownMenuItem(
+                        value: r,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _roleColor(r).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            r,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _roleColor(r),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (newRole) async {
+                      if (newRole != null) {
+                        await _settingsService.updateStaffRole(
+                            staff.id, newRole);
+                        if (mounted) setState(() {});
+                      }
+                    },
                   ),
-                );
-              }).toList(),
-              onChanged: (newRole) async {
-                if (newRole != null) {
-                  await _settingsService.updateStaffRole(
-                      staff.id, newRole);
-                  if (mounted) setState(() {});
-                }
-              },
-            ),
           ),
           // Active Status Switch
           Row(
@@ -1504,10 +1524,12 @@ class _SettingsPageState extends State<SettingsPage>
               Switch(
                 value: staff.isActive,
                 activeThumbColor: const Color(0xFF2D6A4F),
-                onChanged: (_) async {
-                  await _settingsService.toggleStaffStatus(staff.id);
-                  if (mounted) setState(() {});
-                },
+                onChanged: isSuperAdminRow
+                    ? null
+                    : (_) async {
+                        await _settingsService.toggleStaffStatus(staff.id);
+                        if (mounted) setState(() {});
+                      },
               ),
             ],
           ),
@@ -1519,25 +1541,34 @@ class _SettingsPageState extends State<SettingsPage>
             tooltip: 'Set / Reset Login Password',
             onPressed: () => _showResetStaffPasswordDialog(staff, isDark),
           ),
-          // Delete Action
-          IconButton(
-            icon: const Icon(Icons.delete_outline,
-                color: Colors.redAccent, size: 20),
-            tooltip: 'Remove Staff',
-            onPressed: () async {
-              final staffName = staff.fullName;
-              await _settingsService.deleteStaffAccount(staff.id);
-              if (!mounted) return;
-              setState(() {});
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Removed $staffName from staff accounts.'),
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
+          // Delete Action (protected for Super Admin)
+          if (isSuperAdminRow)
+            const Tooltip(
+              message: 'Protected Super Admin account',
+              child: Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Icon(Icons.lock_outline, color: Colors.grey, size: 18),
+              ),
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.delete_outline,
+                  color: Colors.redAccent, size: 20),
+              tooltip: 'Remove Staff',
+              onPressed: () async {
+                final staffName = staff.fullName;
+                await _settingsService.deleteStaffAccount(staff.id);
+                if (!mounted) return;
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Removed $staffName from staff accounts.'),
+                    backgroundColor: const Color(0xFF2D6A4F),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+            ),
         ],
       ),
     );
@@ -2498,8 +2529,8 @@ class _SettingsPageState extends State<SettingsPage>
                     textCapitalization: TextCapitalization.words,
                     inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
-                      labelText: 'Header Title Text',
-                      hintText: 'Tabaco City Slaughterhouse',
+                      labelText: 'Header Title Text (Main Bold Line)',
+                      hintText: 'City Abattoir System',
                       prefixIcon: Icon(Icons.title),
                     ),
                   ),
@@ -2509,8 +2540,8 @@ class _SettingsPageState extends State<SettingsPage>
                     textCapitalization: TextCapitalization.words,
                     inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
-                      labelText: 'Header Subtitle Text',
-                      hintText: 'Management System',
+                      labelText: 'Header Subtitle Text (Top Line)',
+                      hintText: 'CITY OF TABACO, ALBAY',
                       prefixIcon: Icon(Icons.subtitles_outlined),
                     ),
                   ),
@@ -2696,9 +2727,22 @@ class _SettingsPageState extends State<SettingsPage>
         });
       }
 
+      List<Map<String, dynamic>> deletedArchive = [];
+      try {
+        final delData = await client
+            .from('deleted_customer_accounts')
+            .select()
+            .isFilter('restored_at', null)
+            .order('deleted_at', ascending: false);
+        deletedArchive = List<Map<String, dynamic>>.from(delData);
+      } catch (e) {
+        debugPrint('Deleted customer archive query notice: $e');
+      }
+
       if (mounted) {
         setState(() {
           _customerAccounts = customers;
+          _deletedCustomerAccounts = deletedArchive;
           _loadingCustomers = false;
         });
       }
@@ -2732,15 +2776,183 @@ class _SettingsPageState extends State<SettingsPage>
     return 'No location provided yet';
   }
 
+  Future<void> _issueCustomerWarning(Map<String, dynamic> customer) async {
+    final id = customer['id']?.toString() ?? '';
+    if (id.isEmpty) return;
+    final name = (customer['display_name'] ?? customer['phone'] ?? customer['email'] ?? 'this customer').toString();
+    final currentWarnings = (customer['warning_count'] as num?)?.toInt() ?? 0;
+
+    final reasonCtrl = TextEditingController();
+    final presets = [
+      'Repeated booking no-show / cancellation',
+      'Unpaid fees or overdue meat pickup',
+      'Incomplete or invalid ownership documents',
+      'Violation of slaughterhouse facility guidelines',
+    ];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 22),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Issue Account Warning — $name', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+            ],
+          ),
+          content: SizedBox(
+            width: 460,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Send an official warning notifying $name that their account will be deactivated if the issue persists. (Current warnings: $currentWarnings)',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: presets.map((p) {
+                    return ActionChip(
+                      label: Text(p, style: const TextStyle(fontSize: 11)),
+                      backgroundColor: const Color(0xFFFFFBEB),
+                      side: const BorderSide(color: Color(0xFFFDE68A)),
+                      onPressed: () => setDlgState(() => reasonCtrl.text = p),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonCtrl,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Warning Reason (sent to customer)',
+                    hintText: 'Explain the issue clearly so the customer can correct it...',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706), foregroundColor: Colors.white),
+              onPressed: () {
+                if (reasonCtrl.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please enter a warning reason.'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx, true);
+              },
+              icon: const Icon(Icons.notification_important_outlined, size: 16),
+              label: const Text('Send Warning'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+
+    final warningReason = reasonCtrl.text.trim();
+    final newCount = currentWarnings + 1;
+
+    try {
+      final client = Supabase.instance.client;
+      await client.from('profiles').update({
+        'warning_count': newCount,
+        'last_warning_at': DateTime.now().toUtc().toIso8601String(),
+        'last_warning_reason': warningReason,
+      }).eq('id', id);
+
+      await NotificationService.sendNotificationSafely(
+        client,
+        userId: id,
+        title: 'Official Account Warning (#$newCount)',
+        message: 'Notice from Tabaco City Slaughterhouse Admin: $warningReason. Please address this issue promptly — your account may be deactivated if the issue persists.',
+        type: 'account_warning',
+        data: {'warning_count': newCount, 'reason': warningReason},
+      );
+
+      await AuditLogService.instance.log(
+        action: 'customer_warned',
+        module: 'Settings',
+        targetId: id,
+        targetRef: (customer['phone'] ?? customer['email'] ?? name).toString(),
+        details: {'customer_name': name, 'warning_count': newCount, 'reason': warningReason},
+      );
+
+      await _loadCustomerAccounts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Warning #$newCount sent to $name. Deactivation is now unlocked if the issue persists.'),
+            backgroundColor: const Color(0xFFD97706),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to issue warning: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _toggleCustomerActive(Map<String, dynamic> customer) async {
     final id = customer['id']?.toString() ?? '';
     if (id.isEmpty) return;
     final currentlyActive = customer['is_active'] != false;
     final name = (customer['display_name'] ?? customer['phone'] ?? customer['email'] ?? 'this customer').toString();
+    final warningCount = (customer['warning_count'] as num?)?.toInt() ?? 0;
+
+    // Enforce mandatory Warn-Before-Deactivate policy
+    if (currentlyActive && warningCount < 1) {
+      final sendWarn = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Row(
+            children: [
+              Icon(Icons.shield_outlined, color: Color(0xFFD97706), size: 22),
+              SizedBox(width: 8),
+              Expanded(child: Text('Warning Required First', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+            ],
+          ),
+          content: Text(
+            'Before deactivating $name, you must first issue at least one official warning so the customer is informed and given a chance to resolve the issue.',
+            style: const TextStyle(fontSize: 13.5),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.warning_amber_rounded, size: 16),
+              label: const Text('Issue Warning First'),
+            ),
+          ],
+        ),
+      );
+      if (sendWarn == true && mounted) {
+        await _issueCustomerWarning(customer);
+      }
+      return;
+    }
 
     String? reason;
     if (currentlyActive) {
-      final reasonCtrl = TextEditingController(text: 'Accumulated multiple penalties');
+      final lastWarnReason = (customer['last_warning_reason'] ?? '').toString().trim();
+      final reasonCtrl = TextEditingController(
+        text: lastWarnReason.isNotEmpty ? lastWarnReason : 'Issue persisted after official warning',
+      );
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -2749,15 +2961,15 @@ class _SettingsPageState extends State<SettingsPage>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Deactivating blocks this customer from logging in or submitting new slaughter requests.',
-                style: TextStyle(fontSize: 13),
+              Text(
+                'This account has $warningCount prior warning(s). Deactivating blocks this customer from logging in or submitting new slaughter requests.',
+                style: const TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: reasonCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Reason (shown to customer)',
+                  labelText: 'Deactivation Reason (shown to customer)',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -2778,11 +2990,30 @@ class _SettingsPageState extends State<SettingsPage>
     }
 
     try {
-      await Supabase.instance.client.from('profiles').update({
+      final client = Supabase.instance.client;
+      await client.from('profiles').update({
         'is_active': !currentlyActive,
         'deactivated_at': currentlyActive ? DateTime.now().toUtc().toIso8601String() : null,
         'deactivation_reason': currentlyActive ? reason : null,
       }).eq('id', id);
+
+      await NotificationService.sendNotificationSafely(
+        client,
+        userId: id,
+        title: currentlyActive ? 'Account Deactivated' : 'Account Reactivated',
+        message: currentlyActive
+            ? 'Your account has been deactivated by the Slaughterhouse Admin ($reason). Please contact the office if you wish to appeal.'
+            : 'Your account has been reactivated by the Slaughterhouse Admin. You may now submit slaughter requests again.',
+        type: currentlyActive ? 'account_deactivated' : 'account_reactivated',
+      );
+
+      await AuditLogService.instance.log(
+        action: currentlyActive ? 'customer_deactivated' : 'customer_reactivated',
+        module: 'Settings',
+        targetId: id,
+        targetRef: (customer['phone'] ?? customer['email'] ?? name).toString(),
+        details: {'customer_name': name, 'reason': ?reason},
+      );
 
       await _loadCustomerAccounts();
       if (mounted) {
@@ -2808,50 +3039,105 @@ class _SettingsPageState extends State<SettingsPage>
     final id = customer['id']?.toString() ?? '';
     if (id.isEmpty) return;
     final name = (customer['display_name'] ?? customer['phone'] ?? customer['email'] ?? 'this customer').toString();
+    final reasonCtrl = TextEditingController();
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Customer Account?'),
-        content: Text(
-          'Permanently delete $name? Their profile and authentication login will be removed and they will no longer be able to sign in.',
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Archive & Delete Customer Account?'),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Remove $name from active accounts and move their record to the Deleted Accounts Archive? Their login will be blocked, and you can restore the account later if they submit a valid request.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Deletion Reason (required)',
+                  hintText: 'e.g., Duplicate account, user request, unresolved violation...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete Permanently'),
+            onPressed: () {
+              if (reasonCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a deletion reason.'), backgroundColor: Colors.orange),
+                );
+                return;
+              }
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Archive & Delete'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
+    final deletionReason = reasonCtrl.text.trim();
+    final deletedBy = _settingsService.profileName.isNotEmpty ? _settingsService.profileName : 'Admin';
 
     try {
+      final client = Supabase.instance.client;
       try {
-        await Supabase.instance.client.rpc(
-          'admin_delete_customer_account',
-          params: {'target_user_id': id},
+        await client.rpc(
+          'admin_archive_and_delete_customer',
+          params: {
+            'target_user_id': id,
+            'p_deletion_reason': deletionReason,
+            'p_deleted_by': deletedBy,
+          },
         );
       } catch (rpcErr) {
-        debugPrint('admin_delete_customer_account RPC fallback: $rpcErr');
-        await Supabase.instance.client.from('profiles').delete().eq('id', id);
+        debugPrint('admin_archive_and_delete_customer RPC fallback: $rpcErr');
+        await client.from('deleted_customer_accounts').insert({
+          'original_user_id': id,
+          'display_name': customer['display_name'],
+          'email': customer['email'],
+          'phone': customer['phone'],
+          'role': customer['role'] ?? 'customer',
+          'dealer_category': customer['dealer_category'],
+          'municipality': customer['municipality'],
+          'barangay': customer['barangay'],
+          'market_name': customer['market_name'],
+          'stall_number': customer['stall_number'],
+          'address': customer['address'],
+          'warning_count': customer['warning_count'] ?? 0,
+          'last_warning_reason': customer['last_warning_reason'],
+          'profile_snapshot': customer,
+          'deletion_reason': deletionReason,
+          'deleted_by': deletedBy,
+        });
+        await client.from('profiles').delete().eq('id', id);
       }
 
-      AuditLogService.instance.log(
-        action: 'customer_deleted',
+      await AuditLogService.instance.log(
+        action: 'customer_archived_deleted',
         module: 'Settings',
         targetId: id,
         targetRef: (customer['phone'] ?? customer['email'] ?? name).toString(),
-        details: {'customer_name': name},
+        details: {'customer_name': name, 'deletion_reason': deletionReason},
       );
 
       await _loadCustomerAccounts();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$name deleted permanently from Admin & Supabase Auth.'),
+            content: Text('$name moved to Deleted Accounts Archive (restorable anytime).'),
             backgroundColor: const Color(0xFFDC2626),
           ),
         );
@@ -2859,7 +3145,110 @@ class _SettingsPageState extends State<SettingsPage>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to delete customer: $e'), backgroundColor: Colors.red),
+          SnackBar(content: Text('Failed to archive & delete customer: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _restoreDeletedCustomer(Map<String, dynamic> archived) async {
+    final archiveId = archived['id']?.toString() ?? '';
+    final originalUserId = archived['original_user_id']?.toString() ?? '';
+    if (archiveId.isEmpty) return;
+    final name = (archived['display_name'] ?? archived['phone'] ?? archived['email'] ?? 'this customer').toString();
+    final reasonCtrl = TextEditingController(text: 'Valid restoration request verified by Admin');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Row(
+          children: [
+            const Icon(Icons.restore_rounded, color: Color(0xFF16A34A), size: 22),
+            const SizedBox(width: 8),
+            Expanded(child: Text('Restore $name?', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Reinstate $name back to Active Customer Accounts? Their profile and login access will be restored.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Restoration Reason',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF16A34A), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.restore_rounded, size: 16),
+            label: const Text('Restore Account'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    final restoreReason = reasonCtrl.text.trim().isEmpty ? 'Restored by Admin' : reasonCtrl.text.trim();
+    final restoredBy = _settingsService.profileName.isNotEmpty ? _settingsService.profileName : 'Admin';
+
+    try {
+      final client = Supabase.instance.client;
+      await client.rpc(
+        'admin_restore_deleted_customer',
+        params: {
+          'p_archive_id': archiveId,
+          'p_restoration_reason': restoreReason,
+          'p_restored_by': restoredBy,
+        },
+      );
+
+      if (originalUserId.isNotEmpty) {
+        await NotificationService.sendNotificationSafely(
+          client,
+          userId: originalUserId,
+          title: 'Account Restored',
+          message: 'Your Tabaco City Slaughterhouse account has been reinstated by the Admin ($restoreReason). Welcome back!',
+          type: 'account_restored',
+        );
+      }
+
+      await AuditLogService.instance.log(
+        action: 'customer_restored',
+        module: 'Settings',
+        targetId: originalUserId,
+        targetRef: (archived['phone'] ?? archived['email'] ?? name).toString(),
+        details: {'customer_name': name, 'restoration_reason': restoreReason},
+      );
+
+      await _loadCustomerAccounts();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$name has been restored to Active Customer Accounts.'),
+            backgroundColor: const Color(0xFF16A34A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to restore account: $e'), backgroundColor: Colors.red),
         );
       }
     }
@@ -2935,37 +3324,39 @@ class _SettingsPageState extends State<SettingsPage>
               _customerStatChip('Total Registered', all.length.toString(), const Color(0xFF0284C7), cardBg, borderCol, textCol, subCol),
               _customerStatChip('Active Accounts', activeCount.toString(), const Color(0xFF16A34A), cardBg, borderCol, textCol, subCol),
               _customerStatChip('Deactivated', deactivatedCount.toString(), const Color(0xFFD97706), cardBg, borderCol, textCol, subCol),
+              _customerStatChip('Deleted Archive', _deletedCustomerAccounts.length.toString(), const Color(0xFFDC2626), cardBg, borderCol, textCol, subCol),
             ],
           ),
           const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              Flexible(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 380),
-                  child: TextField(
-                    controller: _customerSearchCtrl,
-                    onChanged: (v) => setState(() => _customerSearchQuery = v.trim()),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Search by name, phone, email, barangay/market, or role...',
-                      prefixIcon: const Icon(Icons.search, size: 18),
-                      filled: true,
-                      fillColor: cardBg,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
-                    ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: TextField(
+                  controller: _customerSearchCtrl,
+                  onChanged: (v) => setState(() => _customerSearchQuery = v.trim()),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Search by name, phone, email, barangay/market, or role...',
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    filled: true,
+                    fillColor: cardBg,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderCol)),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
               SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'all', label: Text('All')),
-                  ButtonSegment(value: 'active', label: Text('Active')),
-                  ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
+                segments: [
+                  const ButtonSegment(value: 'all', label: Text('All')),
+                  const ButtonSegment(value: 'active', label: Text('Active')),
+                  const ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
+                  ButtonSegment(value: 'deleted', label: Text('Deleted (${_deletedCustomerAccounts.length})')),
                 ],
                 selected: {_customerStatusFilter},
                 onSelectionChanged: (s) => setState(() => _customerStatusFilter = s.first),
@@ -2975,7 +3366,116 @@ class _SettingsPageState extends State<SettingsPage>
           const SizedBox(height: 16),
           if (_loadingCustomers)
             const Center(child: Padding(padding: EdgeInsets.all(32), child: CircularProgressIndicator()))
-          else if (filtered.isEmpty)
+          else if (_customerStatusFilter == 'deleted') ...[
+            Builder(
+              builder: (_) {
+                final delFiltered = _deletedCustomerAccounts.where((d) {
+                  if (_customerSearchQuery.isEmpty) return true;
+                  final q = _customerSearchQuery.toLowerCase();
+                  final name = (d['display_name'] ?? '').toString().toLowerCase();
+                  final email = (d['email'] ?? '').toString().toLowerCase();
+                  final phone = (d['phone'] ?? '').toString().toLowerCase();
+                  final reason = (d['deletion_reason'] ?? '').toString().toLowerCase();
+                  return name.contains(q) || email.contains(q) || phone.contains(q) || reason.contains(q);
+                }).toList();
+
+                if (delFiltered.isEmpty) {
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(color: cardBg, borderRadius: BorderRadius.circular(12), border: Border.all(color: borderCol)),
+                    child: Center(
+                      child: Text(
+                        _deletedCustomerAccounts.isEmpty
+                            ? 'No deleted customer accounts in the archive.'
+                            : 'No archived accounts match your search.',
+                        style: TextStyle(color: subCol, fontSize: 14),
+                      ),
+                    ),
+                  );
+                }
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: delFiltered.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final d = delFiltered[index];
+                    final name = (d['display_name'] ?? '').toString().trim().isNotEmpty
+                        ? d['display_name'].toString()
+                        : 'Unnamed Customer';
+                    final contact = [
+                      if ((d['phone'] ?? '').toString().trim().isNotEmpty) d['phone'].toString().trim(),
+                      if ((d['email'] ?? '').toString().trim().isNotEmpty) d['email'].toString().trim(),
+                    ].join(' • ');
+                    final delReason = (d['deletion_reason'] ?? 'Deleted by Admin').toString();
+                    final delBy = (d['deleted_by'] ?? 'Admin').toString();
+                    final delDt = DateTime.tryParse((d['deleted_at'] ?? '').toString())?.toLocal();
+                    final delDateStr = delDt != null ? DateFormat('MMM d, yyyy • h:mm a').format(delDt) : '—';
+
+                    return Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFFCA5A5)),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const CircleAvatar(
+                            radius: 22,
+                            backgroundColor: Color(0xFFFEE2E2),
+                            child: Icon(Icons.archive_outlined, color: Color(0xFFDC2626)),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textCol)),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: const Color(0xFFFEE2E2), borderRadius: BorderRadius.circular(6)),
+                                      child: const Text('Deleted (Archived)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFDC2626))),
+                                    ),
+                                  ],
+                                ),
+                                if (contact.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(contact, style: TextStyle(fontSize: 12.5, color: subCol)),
+                                ],
+                                const SizedBox(height: 4),
+                                Text('Deleted on $delDateStr by $delBy', style: TextStyle(fontSize: 12, color: subCol)),
+                                const SizedBox(height: 4),
+                                Text('Reason: $delReason', style: const TextStyle(fontSize: 12, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            onPressed: () => _restoreDeletedCustomer(d),
+                            icon: const Icon(Icons.restore_rounded, size: 16),
+                            label: const Text('Restore Account'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF16A34A),
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ] else if (filtered.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(32),
@@ -3007,6 +3507,8 @@ class _SettingsPageState extends State<SettingsPage>
                 final location = _resolveDealerLocation(c);
                 final reqCount = (c['_request_count'] as int?) ?? 0;
                 final reason = (c['deactivation_reason'] ?? '').toString().trim();
+                final warnCount = (c['warning_count'] as num?)?.toInt() ?? 0;
+                final lastWarnReason = (c['last_warning_reason'] ?? '').toString().trim();
 
                 return Container(
                   padding: const EdgeInsets.all(16),
@@ -3071,6 +3573,19 @@ class _SettingsPageState extends State<SettingsPage>
                                     ),
                                   ),
                                 ),
+                                if (warnCount > 0)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFF7ED),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFFFDBA74)),
+                                    ),
+                                    child: Text(
+                                      '$warnCount ${warnCount == 1 ? 'Warning' : 'Warnings'}',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFC2410C)),
+                                    ),
+                                  ),
                               ],
                             ),
                             const SizedBox(height: 6),
@@ -3081,6 +3596,13 @@ class _SettingsPageState extends State<SettingsPage>
                               'Location: $location  •  Requests: $reqCount',
                               style: TextStyle(fontSize: 12, color: subCol),
                             ),
+                            if (warnCount > 0 && lastWarnReason.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                'Last warning: $lastWarnReason',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFFC2410C), fontWeight: FontWeight.w600),
+                              ),
+                            ],
                             if (!isActive && reason.isNotEmpty) ...[
                               const SizedBox(height: 4),
                               Text(
@@ -3128,6 +3650,16 @@ class _SettingsPageState extends State<SettingsPage>
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: const Color(0xFF0284C7),
                                 side: const BorderSide(color: Color(0xFF0284C7)),
+                              ),
+                            ),
+                          if (isActive)
+                            OutlinedButton.icon(
+                              onPressed: () => _issueCustomerWarning(c),
+                              icon: const Icon(Icons.warning_amber_rounded, size: 16),
+                              label: const Text('Warn'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFC2410C),
+                                side: const BorderSide(color: Color(0xFFFB923C)),
                               ),
                             ),
                           OutlinedButton.icon(

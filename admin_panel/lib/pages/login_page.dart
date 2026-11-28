@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/app_settings_service.dart';
+import '../services/audit_log_service.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -65,8 +66,8 @@ class _LoginPageState extends State<LoginPage> {
       if (matchedStaff != null) {
         final actualRole = StaffAccount.normalizeRole(matchedStaff.role);
 
-        if (actualRole == 'Admin') {
-          // For Admin, attempt Supabase Auth first, with configured password fallback
+        if (actualRole == 'Admin' || actualRole == 'Super Admin') {
+          // For Admin / Super Admin, attempt Supabase Auth first, with configured password fallback
           bool adminAuthOk = false;
           try {
             final res = await _supabase.auth.signInWithPassword(
@@ -120,7 +121,7 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 
-        if (actualRole == 'Admin') {
+        if (actualRole == 'Admin' || actualRole == 'Super Admin') {
           await prefs.setString('admin_auth_email', email);
           await prefs.setString('admin_auth_password', password);
         }
@@ -128,6 +129,13 @@ class _LoginPageState extends State<LoginPage> {
         await AppSettingsService.instance.setActiveStaffSession(matchedStaff);
         // Ensure background Admin Supabase session is active so Clerk & Inspector pass RLS for all tables
         await AppSettingsService.instance.ensureAdminAuthSession();
+
+        await AuditLogService.instance.log(
+          action: 'staff_login',
+          module: 'Authentication',
+          targetRef: email,
+          details: {'role': actualRole, 'name': matchedStaff.fullName},
+        );
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');
@@ -143,8 +151,11 @@ class _LoginPageState extends State<LoginPage> {
 
       final user = response.user;
       if (user != null) {
-        final metaRole = user.userMetadata?['role']?.toString() ?? '';
-        if (metaRole != 'admin' &&
+        final metaRole = (user.userMetadata?['role']?.toString() ?? '').trim().toLowerCase();
+        if (metaRole != 'super_admin' &&
+            metaRole != 'super admin' &&
+            metaRole != 'superadmin' &&
+            metaRole != 'admin' &&
             metaRole != 'clerk' &&
             metaRole != 'inspector') {
           await _supabase.auth.signOut();
@@ -160,7 +171,7 @@ class _LoginPageState extends State<LoginPage> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('keepMeLoggedIn', _keepMeLoggedIn);
 
-        if (actualRole == 'Admin') {
+        if (actualRole == 'Admin' || actualRole == 'Super Admin') {
           await prefs.setString('admin_auth_email', email);
           await prefs.setString('admin_auth_password', password);
           final existingAdminIdx = AppSettingsService.instance.staffAccounts.indexWhere(
@@ -177,7 +188,7 @@ class _LoginPageState extends State<LoginPage> {
                 id: user.id,
                 fullName: user.userMetadata?['full_name']?.toString() ?? 'Slaughterhouse Administrator',
                 email: email,
-                role: 'Admin',
+                role: actualRole,
                 isActive: true,
                 createdAt: DateTime.now(),
                 password: password,
@@ -188,6 +199,13 @@ class _LoginPageState extends State<LoginPage> {
 
         await AppSettingsService.instance.setActiveStaffSession(null);
         AppSettingsService.instance.syncWithAuthUser(user);
+
+        await AuditLogService.instance.log(
+          action: 'staff_login',
+          module: 'Authentication',
+          targetRef: email,
+          details: {'role': actualRole},
+        );
 
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/dashboard');

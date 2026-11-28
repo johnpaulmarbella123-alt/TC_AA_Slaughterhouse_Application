@@ -120,6 +120,7 @@ Deno.serve(async (req: Request) => {
           String(xenditData?.payment_method || "")
         );
 
+        let autoVerified = false;
         if (resolvedStatus === "paid") {
           const extMatch = String(xenditData?.external_id || "").match(/tcaa-req-(\d+)/);
           const reqId =
@@ -128,15 +129,49 @@ Deno.serve(async (req: Request) => {
 
           if (reqId) {
             try {
-              await supabase
+              const { data: existingPay } = await supabase
                 .from("payments")
-                .update({
-                  payment_method: detectedMethod,
-                  transaction_ref: linkId,
-                })
-                .eq("request_id", reqId);
+                .select("id, status")
+                .eq("request_id", reqId)
+                .maybeSingle();
+
+              if (existingPay && String(existingPay.status || "").toLowerCase() !== "paid") {
+                await supabase
+                  .from("payments")
+                  .update({
+                    status: "paid",
+                    balance: 0,
+                    payment_method: detectedMethod,
+                    transaction_ref: linkId,
+                  })
+                  .eq("request_id", reqId);
+                autoVerified = true;
+              } else if (existingPay) {
+                // Already paid — only ensure method/ref metadata is populated
+                await supabase
+                  .from("payments")
+                  .update({
+                    payment_method: detectedMethod,
+                    transaction_ref: linkId,
+                  })
+                  .eq("request_id", reqId);
+              }
+
+              const { data: existingReq } = await supabase
+                .from("requests")
+                .select("status")
+                .eq("id", reqId)
+                .maybeSingle();
+              const curReqStatus = String(existingReq?.status || "").toLowerCase();
+              if (!["paid", "out_for_delivery", "released", "completed"].includes(curReqStatus)) {
+                await supabase
+                  .from("requests")
+                  .update({ status: "paid" })
+                  .eq("id", reqId);
+                autoVerified = true;
+              }
             } catch (dbErr) {
-              console.error("Record Xendit transaction ref error:", dbErr);
+              console.error("Auto-verify Xendit payment error:", dbErr);
             }
           }
         }
@@ -145,6 +180,7 @@ Deno.serve(async (req: Request) => {
           JSON.stringify({
             link_id: linkId,
             status: resolvedStatus,
+            auto_verified: autoVerified,
             detected_method: detectedMethod,
             payments: resolvedStatus === "paid" ? [xenditData] : [],
           }),
@@ -338,7 +374,7 @@ Deno.serve(async (req: Request) => {
               );
               if (match) isStaff = true;
             }
-          } catch (_) {}
+          } catch (_) { }
         }
 
         if (

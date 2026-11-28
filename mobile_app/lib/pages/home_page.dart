@@ -10,7 +10,9 @@ import '../screen/profile.dart';
 import '../screen/gallery.dart';
 import '../screen/review.dart';
 import '../screen/how_it_works.dart';
+import '../screen/report_illegal_slaughter_screen.dart';
 import '../services/livestock_fee_service.dart';
+import '../services/push_notification_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -60,8 +62,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadAvatar();
     // Listen for avatar changes from any page
     globalAvatarUrl.addListener(_onAvatarUrlChanged);
-    // Listen for unread count changes (drives bottom-nav rebuild)
+    // Listen for unread count changes (drives bottom-nav rebuild + launcher app icon badge)
     globalUnreadNotifCount.addListener(_onUnreadCountChanged);
+    PushNotificationService.instance.openNotifyTabTrigger.addListener(_handlePushOpenNotify);
+    PushNotificationService.instance.incomingPushTrigger.addListener(_handleIncomingPush);
 
     // Start the app-level realtime listener for notifications and account status.
     _startNotificationListener();
@@ -109,7 +113,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('is_customer_logged_in', true);
       } catch (_) {}
+
+      // Sync FCM device token for background push notifications & check if launched via push tap
+      await PushNotificationService.instance.syncTokenForCurrentUser();
+      await PushNotificationService.instance.updateAppIconBadge(globalUnreadNotifCount.value);
+      if (PushNotificationService.instance.hasPendingOpenNotify && mounted) {
+        PushNotificationService.instance.consumePendingOpenNotify();
+        _onBottomNavTap(2);
+      }
     });
+  }
+
+  void _handlePushOpenNotify() {
+    if (!mounted) return;
+    PushNotificationService.instance.consumePendingOpenNotify();
+    _fetchUnreadCount();
+    _notifyRefreshTrigger.value++;
+    _onBottomNavTap(2);
+  }
+
+  void _handleIncomingPush() {
+    if (!mounted) return;
+    _fetchUnreadCount();
+    _fetchPendingPaymentCount();
+    _notifyRefreshTrigger.value++;
   }
 
   @override
@@ -124,6 +151,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     globalAvatarUrl.removeListener(_onAvatarUrlChanged);
     globalUnreadNotifCount.removeListener(_onUnreadCountChanged);
+    PushNotificationService.instance.openNotifyTabTrigger.removeListener(_handlePushOpenNotify);
+    PushNotificationService.instance.incomingPushTrigger.removeListener(_handleIncomingPush);
     _notifyRefreshTrigger.dispose();
     _paymentRefreshTrigger.dispose();
     _profileRefreshTrigger.dispose();
@@ -139,6 +168,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _fetchPendingPaymentCount();
       _loadAvatar();
       _checkAccountStillActive();
+      PushNotificationService.instance.syncTokenForCurrentUser();
     }
   }
 
@@ -381,6 +411,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onUnreadCountChanged() {
+    PushNotificationService.instance.updateAppIconBadge(globalUnreadNotifCount.value);
     if (mounted) setState(() {});
   }
 
@@ -565,10 +596,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildHomeContent() {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return Stack(
+      children: [
+        SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 76),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           // ── HERO BANNER ────────────────────────────────────
           Stack(
             children: [
@@ -631,6 +665,84 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // ── REPORT ILLEGAL SLAUGHTER (NO DEALER ROLE REQUIRED) ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Material(
+              color: const Color(0xFFFEF2F2),
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ReportIllegalSlaughterScreen(),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFD32F2F).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Icon(
+                          Icons.report_problem_outlined,
+                          color: Color(0xFFD32F2F),
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Report Illegal Slaughter",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF991B1B),
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              "File an anonymous complaint or escalate to authorities — no dealer role required.",
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: Color(0xFF7F1D1D),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Color(0xFFB91C1C),
+                        size: 22,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
 
           const SizedBox(height: 16),
@@ -800,45 +912,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               onTap: _openContactEmail,
             ),
 
-            const SizedBox(height: 16),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: InkWell(
-                onTap: () {
-                  debugPrint("HOW IT WORKS: Opened from About section");
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const HowItWorksScreen(),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(8),
-                child: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "How it works? click ",
-                        style: TextStyle(fontSize: 13, color: Colors.black87),
-                      ),
-                      Text(
-                        "Here!",
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF008000),
-                          fontWeight: FontWeight.bold,
-                          decoration: TextDecoration.underline,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-
             const SizedBox(height: 20),
 
             const Padding(
@@ -958,6 +1031,53 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ], // end About tab
         ],
       ),
+        ),
+
+        // ── FIXED FLOATING "HOW IT WORKS?" PILL BUTTON ──────────────────
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: Material(
+            color: const Color(0xFF1E855A),
+            elevation: 6,
+            shadowColor: Colors.black.withValues(alpha: 0.28),
+            borderRadius: BorderRadius.circular(28),
+            child: InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const HowItWorksScreen(),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(28),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.help_outline_rounded,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      "How it works?",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

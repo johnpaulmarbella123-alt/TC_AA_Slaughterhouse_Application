@@ -122,6 +122,7 @@ class _PaymentContentState extends State<PaymentContent> with WidgetsBindingObse
             methodStr == 'maya' ||
             methodStr == 'card' ||
             methodStr.contains('online') ||
+            methodStr.contains('xendit') ||
             methodStr.contains('paymongo') ||
             reqStatus == 'paid' ||
             reqStatus == 'released';
@@ -307,6 +308,7 @@ class _ReceiptCard extends StatelessWidget {
         methodLower == 'card' ||
         methodLower == 'grabpay' ||
         methodLower.contains('online') ||
+        methodLower.contains('xendit') ||
         methodLower.contains('paymongo');
     final isAwaitingVerification = !isPaid && method.trim().isNotEmpty;
 
@@ -389,7 +391,7 @@ class _ReceiptCard extends StatelessWidget {
             Row(
               children: [
                 Icon(
-                  methodLower.contains('cash') && !methodLower.contains('online') && !methodLower.contains('paymongo')
+                  methodLower.contains('cash') && !methodLower.contains('online') && !methodLower.contains('xendit') && !methodLower.contains('paymongo')
                       ? Icons.payments_outlined
                       : (methodLower.contains('card') || methodLower.contains('visa') || methodLower.contains('mastercard')
                           ? Icons.credit_card

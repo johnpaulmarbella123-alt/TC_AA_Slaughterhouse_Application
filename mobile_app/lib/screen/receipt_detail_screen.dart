@@ -8,19 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dashed_line.dart';
 import 'payment.dart' show kMintHeader;
 import 'select_payment_screen.dart';
+import '../services/livestock_fee_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/phone_number_formatter.dart';
 
 const kAccentGreen = Color(0xFF1BC47D);
-
-// Fee constants (must match admin panel)
-const double _kVetHealthCertFee = 50.0;
-const double _kPermitToSlaughterFee = 60.0;
-const double _kFacilityFee = 60.0;
-const double _kCorralFee = 40.0;
-const double _kAnteMortemFee = 40.0;
-const double _kPostMortemRatePerKg = 5.0;
-const double _kDeliveryVanFee = 60.0;
 
 class ReceiptDetailScreen extends StatefulWidget {
   /// Pass the request ID to load dynamic receipt data.
@@ -42,13 +34,33 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
   Map<String, dynamic>? _request;
   Map<String, dynamic>? _payment;
   Map<String, double> _fees = {};
+  String _additionalFeeLabel = 'Additional Administrative Charge';
+  double _postMortemRatePerKg = 5.0;
   bool _isWarningOnly = false;
   bool _hasPickupReadyNotice = false;
 
   @override
   void initState() {
     super.initState();
+    LivestockFeeService.instance.addListener(_onLiveFeesUpdated);
     _loadReceiptData();
+  }
+
+  @override
+  void dispose() {
+    LivestockFeeService.instance.removeListener(_onLiveFeesUpdated);
+    super.dispose();
+  }
+
+  void _onLiveFeesUpdated() {
+    if (!mounted) return;
+    // Only live-recalculate unpaid receipts; keep already-paid receipts frozen
+    final isPaid = (_payment?['status'] == 'paid') ||
+        (_request?['status'] == 'paid') ||
+        (_request?['status'] == 'released');
+    if (!isPaid) {
+      _loadReceiptData();
+    }
   }
 
   Future<void> _loadReceiptData() async {
@@ -91,11 +103,15 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           final insp = inspList.first as Map<String, dynamic>;
           requestData['carcass_weight'] = insp['carcass_weight'];
           requestData['process_notes'] = insp['process_notes'] ?? requestData['process_notes'];
+          requestData['condemnation_reason'] = insp['condemnation_reason'] ?? requestData['condemnation_reason'];
+          requestData['post_mortem'] = insp['post_mortem'] ?? requestData['post_mortem'];
           requestData['passed_count'] = insp['passed_count'] ?? requestData['passed_count'];
           requestData['condemned_count'] = insp['condemned_count'] ?? requestData['condemned_count'];
         } else if (inspList is Map) {
           requestData['carcass_weight'] = inspList['carcass_weight'];
           requestData['process_notes'] = inspList['process_notes'] ?? requestData['process_notes'];
+          requestData['condemnation_reason'] = inspList['condemnation_reason'] ?? requestData['condemnation_reason'];
+          requestData['post_mortem'] = inspList['post_mortem'] ?? requestData['post_mortem'];
           requestData['passed_count'] = inspList['passed_count'] ?? requestData['passed_count'];
           requestData['condemned_count'] = inspList['condemned_count'] ?? requestData['condemned_count'];
         }
@@ -123,7 +139,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           String methodStr = (paymentData['payment_method'] ?? '').toString().trim().toLowerCase();
 
           // Check if there is a saved PayMongo link_id from an interrupted/reopened checkout
-          if (paymentData['status'] != 'paid' && methodStr != 'gcash' && !methodStr.contains('online') && !methodStr.contains('paymongo') && reqIdStr != null) {
+          if (paymentData['status'] != 'paid' && methodStr != 'gcash' && !methodStr.contains('online') && !methodStr.contains('xendit') && !methodStr.contains('paymongo') && reqIdStr != null) {
             try {
               final prefs = await SharedPreferences.getInstance();
               String? savedLink = prefs.getString('paymongo_link_$reqIdStr');
@@ -191,7 +207,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 'balance': 0,
               }).eq('request_id', requestData['id']);
             } catch (_) {}
-          } else if ((methodStr == 'gcash' || methodStr.contains('online') || methodStr.contains('paymongo')) && paymentData['status'] != 'paid') {
+          } else if ((methodStr == 'gcash' || methodStr.contains('online') || methodStr.contains('xendit') || methodStr.contains('paymongo')) && paymentData['status'] != 'paid') {
             paymentData['status'] = 'paid';
             paymentData['balance'] = 0;
           }
@@ -249,11 +265,22 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
           } catch (_) {}
         }
 
-        // Calculate fees
+        // Calculate fees using live per-species rates from LivestockFeeService
+        final schedule = LivestockFeeService.instance.getFeeSchedule(
+          requestData['livestock_type']?.toString(),
+        );
         final weight = double.tryParse((requestData['carcass_weight'] ?? 0).toString()) ?? 0;
-        final postMortemFee = weight * _kPostMortemRatePerKg;
+        final condReason = (requestData['condemnation_reason'] ?? '').toString();
+        double condemnedWeight = 0.0;
+        if (condReason.contains('[Partial Condemnation')) {
+          final wm = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(condReason);
+          if (wm != null) condemnedWeight = double.tryParse(wm.group(1) ?? '') ?? 0.0;
+        }
+        final billableWeight = (weight - condemnedWeight).clamp(0.0, double.infinity);
+        final postMortemFee = billableWeight * schedule.postMortemRatePerKg;
         final isBarangay = requestData['request_type'] == 'barangay';
-        final deliveryFee = isBarangay ? 0.0 : _kDeliveryVanFee;
+        final deliveryFee = isBarangay ? 0.0 : schedule.deliveryVanFee;
+        final additionalFee = schedule.safeAdditionalFee;
 
         final isWarningOnly = (penaltyTracking?['is_warning_only'] == true) ||
             (requestData['is_warning_only'] == true) ||
@@ -368,11 +395,12 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
             requestData['status'] == 'released';
         final coldStorageUnpaidOnPaidOrder = isPaid && isColdStorageOverdue && !isColdStorageSettled;
 
-        final subtotal = _kVetHealthCertFee +
-            _kPermitToSlaughterFee +
-            _kFacilityFee +
-            _kCorralFee +
-            _kAnteMortemFee +
+        final subtotal = schedule.vetHealthCertFee +
+            schedule.permitToSlaughterFee +
+            schedule.facilityFee +
+            schedule.corralFee +
+            schedule.anteMortemFee +
+            additionalFee +
             postMortemFee +
             penaltyFee +
             overduePenalty +
@@ -385,24 +413,23 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
         setState(() {
           _request = requestData;
           _payment = paymentData;
+          _additionalFeeLabel = schedule.additionalFeeLabel;
+          _postMortemRatePerKg = schedule.postMortemRatePerKg;
           _isWarningOnly = isWarningOnly;
           _hasPickupReadyNotice = hasPickupReadyNotice;
-          if (paymentData != null && totalFromPay != null) {
+          if (isPaid && paymentData != null && totalFromPay != null) {
+            // Preserve historical paid receipt amounts frozen
             final vanFee = double.tryParse((paymentData['delivery_van_fee'] ?? deliveryFee).toString()) ?? deliveryFee;
-            final computedTotal = subtotal + vanFee;
-            final resolvedTotal = (computedTotal > totalFromPay) ? computedTotal : totalFromPay;
-            final balanceDue = isPaid
-                ? (coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0)
-                : resolvedTotal;
-            final amountPaid = isPaid
-                ? (resolvedTotal - (coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0))
-                : 0.0;
+            final resolvedTotal = totalFromPay;
+            final balanceDue = coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0;
+            final amountPaid = resolvedTotal - balanceDue;
             _fees = {
-              'vet_health_cert': double.tryParse((paymentData['vet_health_cert_fee'] ?? _kVetHealthCertFee).toString()) ?? _kVetHealthCertFee,
-              'permit_to_slaughter': double.tryParse((paymentData['permit_fee'] ?? _kPermitToSlaughterFee).toString()) ?? _kPermitToSlaughterFee,
-              'facility': double.tryParse((paymentData['facility_fee'] ?? _kFacilityFee).toString()) ?? _kFacilityFee,
-              'corral': double.tryParse((paymentData['corral_fee'] ?? _kCorralFee).toString()) ?? _kCorralFee,
-              'ante_mortem': double.tryParse((paymentData['ante_mortem_fee'] ?? _kAnteMortemFee).toString()) ?? _kAnteMortemFee,
+              'vet_health_cert': double.tryParse((paymentData['vet_health_cert_fee'] ?? schedule.vetHealthCertFee).toString()) ?? schedule.vetHealthCertFee,
+              'permit_to_slaughter': double.tryParse((paymentData['permit_fee'] ?? schedule.permitToSlaughterFee).toString()) ?? schedule.permitToSlaughterFee,
+              'facility': double.tryParse((paymentData['facility_fee'] ?? schedule.facilityFee).toString()) ?? schedule.facilityFee,
+              'corral': double.tryParse((paymentData['corral_fee'] ?? schedule.corralFee).toString()) ?? schedule.corralFee,
+              'ante_mortem': double.tryParse((paymentData['ante_mortem_fee'] ?? schedule.anteMortemFee).toString()) ?? schedule.anteMortemFee,
+              'additional_fee': double.tryParse((paymentData['additional_fee'] ?? 0.0).toString()) ?? 0.0,
               'post_mortem': double.tryParse((paymentData['post_mortem_fee'] ?? postMortemFee).toString()) ?? postMortemFee,
               'penalty_fee': penaltyFee,
               'overdue_penalty': overduePenalty,
@@ -414,6 +441,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
               'balance_due': balanceDue,
             };
           } else {
+            // Unpaid receipt: always compute dynamically from live LivestockFeeService
             final resolvedTotal = subtotal + deliveryFee;
             final balanceDue = isPaid
                 ? (coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0)
@@ -422,11 +450,12 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 ? (resolvedTotal - (coldStorageUnpaidOnPaidOrder ? 150.0 : 0.0))
                 : 0.0;
             _fees = {
-              'vet_health_cert': _kVetHealthCertFee,
-              'permit_to_slaughter': _kPermitToSlaughterFee,
-              'facility': _kFacilityFee,
-              'corral': _kCorralFee,
-              'ante_mortem': _kAnteMortemFee,
+              'vet_health_cert': schedule.vetHealthCertFee,
+              'permit_to_slaughter': schedule.permitToSlaughterFee,
+              'facility': schedule.facilityFee,
+              'corral': schedule.corralFee,
+              'ante_mortem': schedule.anteMortemFee,
+              'additional_fee': additionalFee,
               'post_mortem': postMortemFee,
               'penalty_fee': penaltyFee,
               'overdue_penalty': overduePenalty,
@@ -517,6 +546,7 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 pMethod == 'card' ||
                 pMethod == 'grabpay' ||
                 pMethod.contains('online') ||
+                pMethod.contains('xendit') ||
                 pMethod.contains('paymongo'))) ||
         req['status'] == 'paid' ||
         req['status'] == 'released';
@@ -749,7 +779,20 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                       : '$totalCount head(s)';
                   return _kv("Count:", countLabel);
                 }),
-                if (weight > 0) _kv("Weight:", '${weight.toStringAsFixed(0)} kg'),
+                if (weight > 0)
+                  Builder(builder: (_) {
+                    final condReason = (req['condemnation_reason'] ?? '').toString();
+                    double condWt = 0.0;
+                    if (condReason.contains('[Partial Condemnation')) {
+                      final wm = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(condReason);
+                      if (wm != null) condWt = double.tryParse(wm.group(1) ?? '') ?? 0.0;
+                    }
+                    final netWt = (weight - condWt).clamp(0.0, double.infinity);
+                    final wtText = condWt > 0
+                        ? '${weight.toStringAsFixed(0)} kg (-${condWt.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg condemned → ${netWt.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg net)'
+                        : '${weight.toStringAsFixed(0)} kg';
+                    return _kv("Weight:", wtText);
+                  }),
                 const SizedBox(height: 14),
                 const DashedLine(),
                 const SizedBox(height: 14),
@@ -761,7 +804,24 @@ class _ReceiptDetailScreenState extends State<ReceiptDetailScreen> {
                 _lineItem("Facility Fee:", "\u20b1${_fees['facility']?.toStringAsFixed(2) ?? '0.00'}"),
                 _lineItem("Corral Fee:", "\u20b1${_fees['corral']?.toStringAsFixed(2) ?? '0.00'}"),
                 _lineItem("Ante-Mortem:", "\u20b1${_fees['ante_mortem']?.toStringAsFixed(2) ?? '0.00'}"),
-                _lineItem("Post-Mortem (${weight.toStringAsFixed(0)} kg \u20b1${_kPostMortemRatePerKg.toStringAsFixed(2)}/kg):", "\u20b1${_fees['post_mortem']?.toStringAsFixed(2) ?? '0.00'}"),
+                if (((_fees['additional_fee'] as num?)?.toDouble() ?? 0.0) > 0)
+                  _lineItem(
+                    "$_additionalFeeLabel:",
+                    "\u20b1${((_fees['additional_fee'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)}",
+                  ),
+                Builder(builder: (_) {
+                  final condReason = (req['condemnation_reason'] ?? '').toString();
+                  double condWt = 0.0;
+                  if (condReason.contains('[Partial Condemnation')) {
+                    final wm = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(condReason);
+                    if (wm != null) condWt = double.tryParse(wm.group(1) ?? '') ?? 0.0;
+                  }
+                  final netWt = (weight - condWt).clamp(0.0, double.infinity);
+                  final label = condWt > 0
+                      ? "Post-Mortem (${netWt.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg net of ${weight.toStringAsFixed(0)} kg \u20b1${_postMortemRatePerKg.toStringAsFixed(2)}/kg):"
+                      : "Post-Mortem (${weight.toStringAsFixed(0)} kg \u20b1${_postMortemRatePerKg.toStringAsFixed(2)}/kg):";
+                  return _lineItem(label, "\u20b1${_fees['post_mortem']?.toStringAsFixed(2) ?? '0.00'}");
+                }),
                 if (((_fees['overdue_penalty'] as num?)?.toDouble() ?? 0.0) > 0)
                   _lineItem(
                     "Overdue Payment Penalty (Past 5:00 PM):",

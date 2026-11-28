@@ -1064,104 +1064,141 @@ class NmicReportPdfGenerator {
         },
         build: (pw.Context ctx) {
           return [
-            // KPI Summary Row
+            // KPI Summary Row (Plain Black & White)
             pw.Container(
               padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
               decoration: pw.BoxDecoration(
-                color: PdfColors.grey100,
-                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-                border: pw.Border.all(color: PdfColors.grey300),
+                color: PdfColors.white,
+                border: pw.Border.all(color: PdfColors.black, width: 0.6),
               ),
               child: pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
                 children: [
                   pw.Text('Total Registered Dealers: ${dealers.length}', style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Market Dealers: $marketCount', style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.blue800)),
-                  pw.Text('Barangay Dealers: $brgyCount', style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.amber800)),
-                  pw.Text('New Dealers (30d): $newCount', style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.green800)),
+                  pw.Text('Barangay Dealers: $brgyCount', style: const pw.TextStyle(fontSize: 8.5)),
+                  pw.Text('Market Dealers: $marketCount', style: const pw.TextStyle(fontSize: 8.5)),
+                  pw.Text('New Dealers (30d): $newCount', style: const pw.TextStyle(fontSize: 8.5)),
                 ],
               ),
             ),
             pw.SizedBox(height: 10),
 
-            // Table of Dealers
-            pw.Table(
-              border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
-              columnWidths: const {
-                0: pw.FixedColumnWidth(30),
-                1: pw.FlexColumnWidth(3.2),
-                2: pw.FixedColumnWidth(65),
-                3: pw.FixedColumnWidth(70),
-                4: pw.FixedColumnWidth(75),
-                5: pw.FixedColumnWidth(55),
-                6: pw.FixedColumnWidth(65),
-              },
-              children: [
-                pw.TableRow(
-                  decoration: const pw.BoxDecoration(color: PdfColors.green50),
-                  children: [
-                    _th('#'),
-                    _th('Meat Dealer Full Name'),
-                    _th('Marking'),
-                    _th('Category'),
-                    _th('Contact'),
-                    _th('Heads'),
-                    _th('Status'),
-                  ],
-                ),
-                ...dealers.asMap().entries.map((entry) {
-                  final idx = entry.key + 1;
-                  final d = entry.value;
-                  final cleanName = d.name.trim().toLowerCase();
-                  final heads = dealerHeadsCount[cleanName] ?? 0;
-                  final isEven = idx % 2 == 0;
+            // Partition cleanly: 1) Barangay Dealers first, 2) Market Dealers second (Plain Black & White)
+            ...() {
+              final brgyDealers = dealers
+                  .where((d) => d.category.trim().toLowerCase() == 'barangay')
+                  .toList();
+              final mktDealers = dealers
+                  .where((d) => d.category.trim().toLowerCase() != 'barangay')
+                  .toList();
 
-                  return pw.TableRow(
-                    decoration: pw.BoxDecoration(color: isEven ? PdfColors.grey50 : PdfColors.white),
-                    children: [
-                      _td(idx.toString(), fontSize: 7.5),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+              pw.Widget buildCategorySection({
+                required String sectionTitle,
+                required List<RegularDealer> list,
+              }) {
+                return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.white,
+                        border: pw.Border(
+                          top: pw.BorderSide(color: PdfColors.black, width: 0.6),
+                          left: pw.BorderSide(color: PdfColors.black, width: 0.6),
+                          right: pw.BorderSide(color: PdfColors.black, width: 0.6),
+                        ),
+                      ),
+                      child: pw.Text(
+                        '$sectionTitle (${list.length})',
+                        style: pw.TextStyle(
+                          fontSize: 8.5,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.black,
+                        ),
+                      ),
+                    ),
+                    if (list.isEmpty)
+                      pw.Container(
+                        padding: const pw.EdgeInsets.all(8),
+                        decoration: pw.BoxDecoration(
+                          border: pw.Border.all(color: PdfColors.black, width: 0.6),
+                        ),
                         child: pw.Text(
-                          d.name,
-                          style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                          'No registered dealers in this category.',
+                          style: pw.TextStyle(fontSize: 7.5, fontStyle: pw.FontStyle.italic),
                         ),
-                      ),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 2),
-                        child: pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(vertical: 1, horizontal: 3),
-                          decoration: pw.BoxDecoration(
-                            border: pw.Border.all(color: PdfColors.green800, width: 0.5),
-                            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(2)),
+                      )
+                    else
+                      pw.Table(
+                        border: pw.TableBorder.all(color: PdfColors.black, width: 0.6),
+                        columnWidths: const {
+                          0: pw.FixedColumnWidth(30),
+                          1: pw.FlexColumnWidth(3.2),
+                          2: pw.FixedColumnWidth(65),
+                          3: pw.FixedColumnWidth(70),
+                          4: pw.FixedColumnWidth(75),
+                          5: pw.FixedColumnWidth(55),
+                          6: pw.FixedColumnWidth(65),
+                        },
+                        children: [
+                          pw.TableRow(
+                            children: [
+                              _th('#'),
+                              _th('Meat Dealer Full Name'),
+                              _th('Marking'),
+                              _th('Category'),
+                              _th('Contact'),
+                              _th('Heads'),
+                              _th('Status'),
+                            ],
                           ),
-                          child: pw.Text(
-                            d.markings,
-                            textAlign: pw.TextAlign.center,
-                            style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.green900),
-                          ),
-                        ),
+                          ...list.asMap().entries.map((entry) {
+                            final idx = entry.key + 1;
+                            final d = entry.value;
+                            final cleanName = d.name.trim().toLowerCase();
+                            final heads = dealerHeadsCount[cleanName] ?? 0;
+
+                            return pw.TableRow(
+                              children: [
+                                _td(idx.toString(), fontSize: 7.5),
+                                pw.Padding(
+                                  padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+                                  child: pw.Text(
+                                    d.name,
+                                    style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+                                  ),
+                                ),
+                                _td(d.markings, fontSize: 7.5, isBold: true),
+                                _td(d.category.toUpperCase(), fontSize: 7.5),
+                                _td(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', fontSize: 7),
+                                _td(heads > 0 ? '$heads' : '0', fontSize: 7.5, isBold: heads > 0),
+                                _td(
+                                  d.isNew ? 'NEW DEALER' : (d.isActive ? 'Active' : 'Inactive'),
+                                  fontSize: 7,
+                                  isBold: d.isNew,
+                                ),
+                              ],
+                            );
+                          }),
+                        ],
                       ),
-                      _td(d.category.toUpperCase(), fontSize: 7.5),
-                      _td(d.phone != null && d.phone!.isNotEmpty ? d.phone! : '—', fontSize: 7),
-                      _td(heads > 0 ? '$heads' : '0', fontSize: 7.5, isBold: heads > 0),
-                      pw.Padding(
-                        padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 2),
-                        child: pw.Text(
-                          d.isNew ? 'NEW DEALER' : (d.isActive ? 'Active' : 'Inactive'),
-                          textAlign: pw.TextAlign.center,
-                          style: pw.TextStyle(
-                            fontSize: 7,
-                            fontWeight: pw.FontWeight.bold,
-                            color: d.isNew ? PdfColors.green800 : (d.isActive ? PdfColors.grey800 : PdfColors.red800),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                }),
-              ],
-            ),
+                  ],
+                );
+              }
+
+              return [
+                buildCategorySection(
+                  sectionTitle: 'BARANGAY SECTION — MEAT DEALERS',
+                  list: brgyDealers,
+                ),
+                pw.SizedBox(height: 14),
+                buildCategorySection(
+                  sectionTitle: 'MARKET SECTION — MEAT DEALERS',
+                  list: mktDealers,
+                ),
+              ];
+            }(),
             pw.SizedBox(height: 20),
 
             // Signatures

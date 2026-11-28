@@ -42,7 +42,12 @@ class DailyQueueFilter {
     if (!isConcluded) return false;
 
     final payment = req['payment'] is Map ? req['payment'] as Map : null;
+    final notesStr = (req['process_notes'] ?? '').toString();
+    final completedTagMatch = RegExp(r'\[COMPLETED_AT:([^\]]+)\]').firstMatch(notesStr);
+    final completedAtTag = completedTagMatch?.group(1)?.trim();
+
     return isBeforeToday([
+      completedAtTag,
       req['released_at'],
       req['updated_at'],
       payment?['paid_at'],

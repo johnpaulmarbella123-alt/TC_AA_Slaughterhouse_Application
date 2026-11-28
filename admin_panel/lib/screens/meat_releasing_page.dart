@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -10,7 +9,8 @@ import '../services/audit_log_service.dart';
 import '../services/regular_dealers_service.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/daily_queue_filter.dart';
-import '../widgets/staff_notification_bell.dart';
+import '../widgets/animated_select_dropdown.dart';
+import '../utils/admin_responsive.dart';
 import '../widgets/walk_in_sms_helper.dart';
 import '../services/walk_in_sms_service.dart';
 
@@ -378,7 +378,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
       bool matchesSearch = q.isEmpty || name.contains(q) || ref.contains(q);
       bool matchesFilter;
       if (_filterStatus == 'All') {
-        matchesFilter = true;
+        // Auto-hide completed/released records from previous days; keep unfinished
+        // records from any day and today's completed releases.
+        matchesFilter = !_isReleasedBeforeToday(r);
       } else if (_filterStatus == 'Awaiting Payment') {
         matchesFilter = status.contains('Awaiting') || status.contains('Unpaid');
       } else {
@@ -387,6 +389,17 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
 
       return matchesSearch && matchesFilter;
     }).toList();
+  }
+
+  bool _isReleasedBeforeToday(Map<String, dynamic> req) {
+    if (_releaseStatus(req) != 'Released') return false;
+    final raw = req['released_at'] ?? req['updated_at'] ?? req['created_at'];
+    final dt = DateTime.tryParse(raw?.toString() ?? '')?.toLocal();
+    if (dt == null) return false;
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final relDay = DateTime(dt.year, dt.month, dt.day);
+    return relDay.isBefore(todayStart);
   }
 
   // ════════════════════════════════════════════
@@ -586,12 +599,10 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   // ════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now());
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: Column(
         children: [
-          _buildHeader(dateStr),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFF2D6A4F)))
@@ -600,7 +611,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                     color: const Color(0xFF2D6A4F),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: AdminResponsive.pagePadding(context),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -625,57 +636,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                       ),
                     ),
                   ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ════════════════════════════════════════════
-  //  HEADER
-  // ════════════════════════════════════════════
-  Widget _buildHeader(String dateStr) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Meat Releasing',
-                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
-                ),
-                SizedBox(height: 3),
-                Text(
-                  'Ready for pickup, collection information',
-                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
-          ),
-          const SizedBox(width: 10),
-          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
-          const SizedBox(width: 6),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => _loadRequests(),
-            icon: const Icon(Icons.refresh, size: 20),
-            color: const Color(0xFF2D3748),
           ),
         ],
       ),
@@ -844,7 +804,10 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
   //  FILTER ROW
   // ════════════════════════════════════════════
   Widget _buildFilterRow() {
-    return Row(
+    return Wrap(
+      spacing: 12,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         // Search (Compact 250px width, 36px height)
         SizedBox(
@@ -869,35 +832,24 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
             ),
           ),
         ),
-        const SizedBox(width: 12),
-        // Dropdown Button (Compact 36px height)
-        Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFEDF2F7),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _filterStatus,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
-              items: ['All', 'Ready', 'Awaiting Payment', 'Out for Delivery', 'Released']
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
-                  .toList(),
-              onChanged: (val) {
-                if (val != null) setState(() => _filterStatus = val);
-              },
-            ),
-          ),
+        AnimatedSelectDropdown<String>(
+          value: _filterStatus,
+          items: const ['All', 'Ready', 'Awaiting Payment', 'Out for Delivery', 'Released'],
+          labelBuilder: (e) => e,
+          minMenuWidth: 180,
+          backgroundColor: const Color(0xFFEDF2F7),
+          borderColor: const Color(0xFFE2E8F0),
+          textColor: const Color(0xFF1E293B),
+          iconColor: const Color(0xFF2D6A4F),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          onChanged: (val) => setState(() => _filterStatus = val),
         ),
       ],
     );
   }
 
   // ════════════════════════════════════════════
-  //  DATA TABLE CARD
+  //  DATA TABLE CARD (RESPONSIVE — ZERO HORIZONTAL SCROLL)
   // ════════════════════════════════════════════
   Widget _buildTableCard({
     required String title,
@@ -905,7 +857,16 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
     required List<Map<String, dynamic>> requests,
     required bool isMarket,
   }) {
-    final scrollController = ScrollController();
+    Widget headerCell(String label, {TextAlign align = TextAlign.left}) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          child: Text(
+            label,
+            textAlign: align,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5, color: Color(0xFF334155)),
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -939,145 +900,6 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
               ],
             ),
           ),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final availableWidth = constraints.maxWidth;
-              final tableWidth = availableWidth > 1120.0 ? availableWidth : 1120.0;
-              final dynamicSpacing = (availableWidth > 1400)
-                  ? 24.0
-                  : (availableWidth > 1100 ? 18.0 : 14.0);
-
-              return Scrollbar(
-                controller: scrollController,
-                thumbVisibility: false,
-                trackVisibility: false,
-                child: ScrollConfiguration(
-                  behavior: ScrollConfiguration.of(context).copyWith(
-                    dragDevices: {
-                      PointerDeviceKind.touch,
-                      PointerDeviceKind.mouse,
-                    },
-                  ),
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: tableWidth),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF7FAFC)),
-                        dataRowMinHeight: 60,
-                        dataRowMaxHeight: 84,
-                        horizontalMargin: 16,
-                        columnSpacing: dynamicSpacing,
-                        columns: const [
-                      DataColumn(label: Text('Reference #', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Customer', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Contact', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Weight', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('MIC Number', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Release Date', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                      DataColumn(label: Text('Actions', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-                    ],
-                    rows: requests.map((req) {
-                      final ref = _refNo(req);
-                      final weight = _carcassWeight(req);
-                      final mic = _micNumber(req);
-                      final status = _releaseStatus(req);
-                      final releasedAt = req['released_at'];
-
-                      String releaseDateStr = 'Not Released';
-                      if (releasedAt != null) {
-                        try {
-                          final dt = DateTime.parse(releasedAt.toString());
-                          releaseDateStr = DateFormat('MM/dd/yyyy\nh:mm a').format(dt);
-                        } catch (_) {}
-                      }
-
-                      final isImmediateSlaughter = _isImmediateSlaughter(req);
-
-                      return DataRow(cells: [
-                        DataCell(Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
-                        DataCell(Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-                            if (isImmediateSlaughter) ...[
-                              const SizedBox(height: 3),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFFFF7ED),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: const Color(0xFFF97316)),
-                                ),
-                                child: const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.bolt, size: 11, color: Color(0xFFC2410C)),
-                                    SizedBox(width: 3),
-                                    Text(
-                                      'Waiting On-Site / Immediate',
-                                      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ],
-                        )),
-                        DataCell(Builder(builder: (_) {
-                          final resolvedPhone = WalkInSmsService.resolveWalkInPhone(req);
-                          final displayContact = resolvedPhone.isNotEmpty
-                              ? resolvedPhone
-                              : ((req['contact_number'] ?? '').toString().trim().isNotEmpty
-                                  ? req['contact_number'].toString().trim()
-                                  : '\u2014');
-                          return Text(displayContact, style: const TextStyle(fontSize: 12));
-                        })),
-                        DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
-                        DataCell(Text(mic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey.shade700))),
-                        DataCell(_buildStatusBadge(status, isOverdue: _isPickupOverdue(req))),
-                        DataCell(
-                          status == 'Released'
-                              ? Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(releaseDateStr, style: const TextStyle(fontSize: 11)),
-                                  ],
-                                )
-                              : Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(Icons.schedule, size: 14, color: Colors.grey),
-                                    const SizedBox(width: 4),
-                                    const Text('Not Released', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                                  ],
-                                ),
-                        ),
-                        DataCell(
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              status == 'Released'
-                                  ? _buildDoneButton(req)
-                                  : isMarket
-                                      ? _buildReleaseForDeliveryButton(req)
-                                      : _buildReleaseForPickupButton(req),
-                            ],
-                          ),
-                        ),
-                      ]);
-                    }).toList(),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
           if (requests.isEmpty)
             Padding(
               padding: const EdgeInsets.all(40),
@@ -1090,6 +912,323 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                   ],
                 ),
               ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final maxW = constraints.maxWidth;
+
+                // Mobile / narrow screens: stacked releasing cards
+                if (maxW < 680) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Column(
+                      children: requests.asMap().entries.map((entry) {
+                        final req = entry.value;
+                        final isLast = entry.key == requests.length - 1;
+                        final ref = _refNo(req);
+                        final weight = _carcassWeight(req);
+                        final mic = _micNumber(req);
+                        final status = _releaseStatus(req);
+                        final releasedAt = req['released_at'];
+                        String releaseDateStr = 'Not Released';
+                        if (releasedAt != null) {
+                          try {
+                            releaseDateStr = DateFormat('MM/dd/yyyy h:mm a').format(DateTime.parse(releasedAt.toString()).toLocal());
+                          } catch (_) {}
+                        }
+                        final resolvedPhone = WalkInSmsService.resolveWalkInPhone(req);
+                        final displayContact = resolvedPhone.isNotEmpty
+                            ? resolvedPhone
+                            : ((req['contact_number'] ?? '').toString().trim().isNotEmpty
+                                ? req['contact_number'].toString().trim()
+                                : '\u2014');
+
+                        return Container(
+                          margin: EdgeInsets.only(bottom: isLast ? 0 : 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '$ref • ${req['customer_name'] ?? '\u2014'}',
+                                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  _buildStatusBadge(status, isOverdue: _isPickupOverdue(req)),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 10,
+                                runSpacing: 4,
+                                children: [
+                                  Text('MIC: $mic', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+                                  Text('Wt: ${weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014'}', style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600)),
+                                  Text('Contact: $displayContact', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700)),
+                                  Text(releaseDateStr, style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600)),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: status == 'Released'
+                                    ? _buildDoneButton(req)
+                                    : isMarket
+                                        ? _buildReleaseForDeliveryButton(req)
+                                        : _buildReleaseForPickupButton(req),
+                              ),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  );
+                }
+
+                // Medium / zoomed-in desktop (680..959px) vs Full desktop (>= 960px)
+                final isMedium = maxW < 960;
+
+                return Table(
+                  border: TableBorder(
+                    top: BorderSide(color: Colors.grey.shade200),
+                    horizontalInside: BorderSide(color: Colors.grey.shade200),
+                  ),
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: isMedium
+                      ? const {
+                          0: FlexColumnWidth(1.5), // Ref + MIC
+                          1: FlexColumnWidth(2.0), // Customer + Contact
+                          2: FlexColumnWidth(1.3), // Weight + Release Date
+                          3: FlexColumnWidth(1.2), // Status
+                          4: FlexColumnWidth(1.5), // Actions
+                        }
+                      : const {
+                          0: FlexColumnWidth(1.15), // Reference #
+                          1: FlexColumnWidth(1.75), // Customer
+                          2: FlexColumnWidth(1.15), // Contact
+                          3: FlexColumnWidth(0.80), // Weight
+                          4: FlexColumnWidth(1.25), // MIC Number
+                          5: FlexColumnWidth(1.10), // Status
+                          6: FlexColumnWidth(1.15), // Release Date
+                          7: FlexColumnWidth(1.45), // Actions
+                        },
+                  children: [
+                    TableRow(
+                      decoration: const BoxDecoration(color: Color(0xFFF7FAFC)),
+                      children: isMedium
+                          ? [
+                              headerCell('Ref # / MIC'),
+                              headerCell('Customer / Contact'),
+                              headerCell('Weight / Date'),
+                              headerCell('Status'),
+                              headerCell('Actions', align: TextAlign.right),
+                            ]
+                          : [
+                              headerCell('Reference #'),
+                              headerCell('Customer'),
+                              headerCell('Contact'),
+                              headerCell('Weight'),
+                              headerCell('MIC Number'),
+                              headerCell('Status'),
+                              headerCell('Release Date'),
+                              headerCell('Actions', align: TextAlign.right),
+                            ],
+                    ),
+                    ...requests.map((req) {
+                      final ref = _refNo(req);
+                      final weight = _carcassWeight(req);
+                      final mic = _micNumber(req);
+                      final status = _releaseStatus(req);
+                      final releasedAt = req['released_at'];
+
+                      String releaseDateStr = 'Not Released';
+                      if (releasedAt != null) {
+                        try {
+                          final dt = DateTime.parse(releasedAt.toString()).toLocal();
+                          releaseDateStr = DateFormat('MM/dd/yyyy\nh:mm a').format(dt);
+                        } catch (_) {}
+                      }
+
+                      final isImmediateSlaughter = _isImmediateSlaughter(req);
+                      final resolvedPhone = WalkInSmsService.resolveWalkInPhone(req);
+                      final displayContact = resolvedPhone.isNotEmpty
+                          ? resolvedPhone
+                          : ((req['contact_number'] ?? '').toString().trim().isNotEmpty
+                              ? req['contact_number'].toString().trim()
+                              : '\u2014');
+                      final weightText = weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014';
+
+                      final actionWidget = Align(
+                        alignment: Alignment.centerRight,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: status == 'Released'
+                              ? _buildDoneButton(req)
+                              : isMarket
+                                  ? _buildReleaseForDeliveryButton(req)
+                                  : _buildReleaseForPickupButton(req),
+                        ),
+                      );
+
+                      if (isMedium) {
+                        return TableRow(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(ref, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12), overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 2),
+                                  Text(mic, style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                                  const SizedBox(height: 2),
+                                  Text(displayContact, style: TextStyle(fontSize: 11, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(weightText, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    releaseDateStr.replaceAll('\n', ' '),
+                                    style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: _buildStatusBadge(status, isOverdue: _isPickupOverdue(req)),
+                                ),
+                              ),
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                              child: actionWidget,
+                            ),
+                          ],
+                        );
+                      }
+
+                      return TableRow(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Text(ref, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12), overflow: TextOverflow.ellipsis),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(req['customer_name']?.toString() ?? '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                                if (isImmediateSlaughter) ...[
+                                  const SizedBox(height: 3),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFFF7ED),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFF97316)),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.bolt, size: 11, color: Color(0xFFC2410C)),
+                                        SizedBox(width: 3),
+                                        Flexible(
+                                          child: Text(
+                                            'Waiting On-Site',
+                                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF9A3412)),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Text(displayContact, style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Text(weightText, style: const TextStyle(fontSize: 12.5), overflow: TextOverflow.ellipsis),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: Text(mic, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey.shade700), overflow: TextOverflow.ellipsis),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: _buildStatusBadge(status, isOverdue: _isPickupOverdue(req)),
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                            child: status == 'Released'
+                                ? Text(releaseDateStr, style: const TextStyle(fontSize: 11))
+                                : const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.schedule, size: 13, color: Colors.grey),
+                                      SizedBox(width: 4),
+                                      Flexible(
+                                        child: Text('Not Released', style: TextStyle(fontSize: 11, color: Colors.grey), overflow: TextOverflow.ellipsis),
+                                      ),
+                                    ],
+                                  ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            child: actionWidget,
+                          ),
+                        ],
+                      );
+                    }),
+                  ],
+                );
+              },
             ),
         ],
       ),
@@ -2429,6 +2568,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                                           if (hasAuthPerson) {
                                             claimantNameCtrl.text = authName;
                                             claimantIdRefCtrl.text = authIdNum.isNotEmpty ? '$authIdType: $authIdNum' : '';
+                                          } else {
+                                            claimantNameCtrl.clear();
+                                            claimantIdRefCtrl.clear();
                                           }
                                         });
                                       },
@@ -2481,6 +2623,30 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                                     ],
                                   ),
                                 ),
+                              ] else if (claimantType == 'Authorized Representative') ...[
+                                const SizedBox(height: 10),
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFFBEB),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFFFCD34D)),
+                                  ),
+                                  child: const Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.info_outline, size: 15, color: Color(0xFFB45309)),
+                                      SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          'No pre-authorized representative on file from the mobile app. Enter the claiming representative\'s full name and valid ID below.',
+                                          style: TextStyle(fontSize: 11.5, color: Color(0xFF92400E)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ],
                           ),
@@ -2488,7 +2654,7 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                         const SizedBox(height: 14),
 
                         Text(
-                          claimantType == 'Customer' ? 'Customer Full Name' : 'Authorized Representative Name',
+                          claimantType == 'Customer' ? 'Customer Full Name' : 'Authorized Representative Name *',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 4),
@@ -2497,7 +2663,9 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                           textCapitalization: TextCapitalization.words,
                           inputFormatters: const [WordsCapitalizationFormatter()],
                           decoration: InputDecoration(
-                            hintText: 'Name of person physically claiming carcass...',
+                            hintText: claimantType == 'Customer'
+                                ? 'Name of customer claiming carcass...'
+                                : 'Enter authorized representative full name...',
                             hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
                             filled: true,
                             fillColor: const Color(0xFFF7FAFC),
@@ -2661,7 +2829,29 @@ class _MeatReleasingPageState extends State<MeatReleasingPage> {
                               }
                               if (!isDelivery && claimantNameCtrl.text.trim().isEmpty) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please enter Claimant Full Name'), backgroundColor: Colors.redAccent),
+                                  SnackBar(
+                                    content: Text(
+                                      claimantType == 'Customer'
+                                          ? 'Please enter Customer Full Name'
+                                          : 'Please enter Authorized Representative Name',
+                                    ),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                                return;
+                              }
+                              if (!isDelivery &&
+                                  claimantType == 'Authorized Representative' &&
+                                  customerName.trim().isNotEmpty &&
+                                  claimantNameCtrl.text.trim().toLowerCase() ==
+                                      customerName.trim().toLowerCase()) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Authorized Representative Name cannot be the direct customer. Enter the representative\'s name or select Customer Direct.',
+                                    ),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
                                 );
                                 return;
                               }

@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../services/csv_export_helper.dart';
+import '../widgets/animated_select_dropdown.dart';
 
 /// Admin-only immutable Staff Activity & Audit Trail Viewer (`public.audit_logs`).
 class AuditLogsTab extends StatefulWidget {
@@ -20,9 +23,11 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
   String _moduleFilter = 'All';
   String _searchQuery = '';
   bool _useActiveDateRange = false;
+  StreamSubscription<String>? _realtimeSub;
 
   static const List<String> _modules = [
     'All',
+    'Authentication',
     'Receiving',
     'Document Verification',
     'Slaughter & Inspection',
@@ -37,6 +42,18 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
   void initState() {
     super.initState();
     _loadLogs();
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      const {'audit_logs', 'requests', 'payments', 'slaughter_inspection', 'regular_dealers'},
+      () {
+        if (mounted) _loadLogs(silent: true);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _realtimeSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -47,11 +64,13 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
     }
   }
 
-  Future<void> _loadLogs() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
+  Future<void> _loadLogs({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       final rows = await AuditLogService.instance.fetchLogs(
         range: _useActiveDateRange ? widget.activeDateRange : null,
@@ -62,10 +81,11 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
         setState(() {
           _logs = rows;
           _isLoading = false;
+          _error = null;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _error = 'Unable to load audit logs. Ensure the 20261120_audit_logs_and_cancellation.sql migration has been applied in Supabase.\nDetails: $e';
           _isLoading = false;
@@ -212,26 +232,22 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
                 runSpacing: 10,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEDF2F7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _moduleFilter,
-                        items: _modules
-                            .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12.5))))
-                            .toList(),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => _moduleFilter = val);
-                            _loadLogs();
-                          }
-                        },
-                      ),
-                    ),
+                  AnimatedSelectDropdown<String>(
+                    value: _moduleFilter,
+                    items: _modules,
+                    labelBuilder: (m) => m == 'All' ? 'All Modules' : m,
+                    minMenuWidth: 210,
+                    backgroundColor: const Color(0xFFEDF2F7),
+                    borderColor: const Color(0xFFCBD5E1),
+                    textColor: const Color(0xFF1E293B),
+                    iconColor: const Color(0xFF2D6A4F),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    onChanged: (val) {
+                      if (val != _moduleFilter) {
+                        setState(() => _moduleFilter = val);
+                        _loadLogs();
+                      }
+                    },
                   ),
                   SizedBox(
                     width: 260,
@@ -261,11 +277,6 @@ class _AuditLogsTabState extends State<AuditLogsTab> {
                       setState(() => _useActiveDateRange = v);
                       _loadLogs();
                     },
-                  ),
-                  IconButton(
-                    onPressed: _loadLogs,
-                    tooltip: 'Refresh audit logs',
-                    icon: const Icon(Icons.refresh, color: Color(0xFF2D6A4F)),
                   ),
                 ],
               ),

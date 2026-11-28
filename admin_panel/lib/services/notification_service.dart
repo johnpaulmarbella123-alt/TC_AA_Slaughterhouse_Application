@@ -35,6 +35,30 @@ class NotificationService {
       }
 
       await supabase.from('notifications').insert(payload);
+
+      // Fire-and-forget real-time push notification to customer's phone (even when app is closed)
+      supabase.functions
+          .invoke(
+            'send-push-notification',
+            body: {
+              'user_id': resolvedUserId.toString(),
+              'title': title,
+              'message': message,
+              'type': type,
+              if (referenceNo != null && referenceNo.isNotEmpty)
+                'reference_no': referenceNo,
+              'data': ?data,
+            },
+          )
+          .then((res) {
+            debugPrint('Push notification dispatch result (${res.status}): ${res.data}');
+            return res;
+          })
+          .catchError((e) {
+            debugPrint('Push notification dispatch notice (non-blocking): $e');
+            return FunctionResponse(status: 200);
+          });
+
       return true;
     } catch (e) {
       debugPrint('Notification skipped or failed (safe fallback): $e');

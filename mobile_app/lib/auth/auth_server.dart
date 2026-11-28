@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/push_notification_service.dart';
 
 class AuthService {
 
@@ -257,6 +258,7 @@ Future<AuthResponse> signUp(
   // SIGN OUT
   // =========================
   Future<void> signOut() async {
+    await PushNotificationService.instance.removeCurrentTokenOnSignOut();
     await _supabase.auth.signOut();
   }
 

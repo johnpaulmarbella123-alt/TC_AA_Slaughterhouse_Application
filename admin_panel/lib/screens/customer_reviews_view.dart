@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/admin_realtime_hub.dart';
 
 /// Standalone Customer Reviews & Feedback view embedded inside Reports & Records.
 class CustomerReviewsView extends StatefulWidget {
@@ -21,21 +23,81 @@ class _CustomerReviewsViewState extends State<CustomerReviewsView> {
   double _reviewBlendedSatisfaction = 0.0;
   int _reviewCompletedOrdersCount = 0;
   int _reviewTotalOrdersCount = 0;
+  StreamSubscription<String>? _realtimeSub;
+  RealtimeChannel? _reviewsChannel;
+  bool _reviewsChannelSubscribed = false;
+  Timer? _autoSyncTimer;
+  Timer? _debounceReloadTimer;
 
   @override
   void initState() {
     super.initState();
     _loadAdminReviews();
+    _realtimeSub = AdminRealtimeHub.instance.listen(
+      const {'requests'},
+      () {
+        if (mounted) _scheduleSilentReload();
+      },
+    );
+    _subscribeReviewsRealtime();
+    // Fast silent fallback sync (5s) in case the Realtime publication migration
+    // hasn't been executed yet; pauses to 30s once live Realtime is subscribed.
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      if (!_reviewsChannelSubscribed) {
+        _loadAdminReviews(silent: true);
+      }
+    });
+  }
+
+  void _scheduleSilentReload() {
+    _debounceReloadTimer?.cancel();
+    _debounceReloadTimer = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _loadAdminReviews(silent: true);
+    });
+  }
+
+  void _subscribeReviewsRealtime() {
+    try {
+      final client = Supabase.instance.client;
+      _reviewsChannel = client
+          .channel('public:reviews_realtime_admin')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'reviews',
+            callback: (payload) {
+              if (mounted) _scheduleSilentReload();
+            },
+          )
+          .subscribe((status, [error]) {
+            if (!mounted) return;
+            _reviewsChannelSubscribed =
+                status == RealtimeSubscribeStatus.subscribed;
+          });
+    } catch (e) {
+      _reviewsChannelSubscribed = false;
+      debugPrint('CustomerReviewsView realtime subscribe notice: $e');
+    }
   }
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
+    _debounceReloadTimer?.cancel();
+    _autoSyncTimer?.cancel();
+    if (_reviewsChannel != null) {
+      Supabase.instance.client.removeChannel(_reviewsChannel!);
+      _reviewsChannel = null;
+    }
     _reviewSearchCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _loadAdminReviews() async {
-    setState(() => _loadingReviews = true);
+  Future<void> _loadAdminReviews({bool silent = false}) async {
+    if (!silent) {
+      setState(() => _loadingReviews = true);
+    }
     try {
       final client = Supabase.instance.client;
       final data = await client
@@ -136,7 +198,7 @@ class _CustomerReviewsViewState extends State<CustomerReviewsView> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Reviews submitted by registered mobile app customers. Blended dynamically with order completion rates for the official public satisfaction index.',
+                    'Reviews submitted by registered mobile app customers. Blended dynamically with transaction completion rates for the official public satisfaction index.',
                     style: TextStyle(
                       fontSize: 12.5,
                       color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
@@ -145,20 +207,29 @@ class _CustomerReviewsViewState extends State<CustomerReviewsView> {
                 ],
               ),
             ),
+            const SizedBox(width: 12),
             OutlinedButton.icon(
-              onPressed: _loadingReviews ? null : _loadAdminReviews,
+              onPressed: _loadingReviews ? null : () => _loadAdminReviews(),
               icon: _loadingReviews
                   ? const SizedBox(
                       width: 14,
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.refresh, size: 16),
+                  : const Icon(Icons.refresh_rounded, size: 17),
               label: const Text('Refresh'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF2D6A4F),
-                side: const BorderSide(color: Color(0xFF2D6A4F)),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                foregroundColor: const Color(0xFF0F5132),
+                side: BorderSide(
+                  color: isDark
+                      ? const Color(0xFF334155)
+                      : const Color(0xFFCBD5E1),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ],
@@ -667,7 +738,7 @@ class _CustomerReviewsViewState extends State<CustomerReviewsView> {
             ),
             const SizedBox(height: 6),
             Text(
-              '50% Customer Reviews (${reviewPct.toStringAsFixed(0)}%) + 50% Completed Orders (${compRate.toStringAsFixed(0)}%)',
+              '50% Customer Reviews (${reviewPct.toStringAsFixed(0)}%) + 50% Completed Transactions (${compRate.toStringAsFixed(0)}%)',
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w500,

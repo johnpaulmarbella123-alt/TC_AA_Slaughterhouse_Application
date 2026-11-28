@@ -16,7 +16,7 @@ import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/phone_number_formatter.dart';
-import '../widgets/staff_notification_bell.dart';
+import '../utils/admin_responsive.dart';
 
 class ReceivingRequestsPage extends StatefulWidget {
   final void Function(int moduleIndex, [String? tab])? onNavigate;
@@ -700,15 +700,10 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   // ════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(now);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: Column(
         children: [
-          // ─── TOP HEADER ───
-          _buildHeader(dateStr),
           // ─── CONTENT ───
           Expanded(
             child: _isLoading
@@ -722,7 +717,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
                     color: const Color(0xFF2D6A4F),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: AdminResponsive.pagePadding(context),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -742,99 +737,11 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
   }
 
   // ════════════════════════════════════════════
-  //  HEADER
-  // ════════════════════════════════════════════
-  Widget _buildHeader(String dateStr) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Colors.grey.shade200, width: 1),
-        ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isCompact = constraints.maxWidth < 720;
-          final titleBlock = const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Receiving & Inspection',
-                style: TextStyle(
-                  fontSize: 24,
-                  height: 32 / 24,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
-                ),
-              ),
-              SizedBox(height: 3),
-              Text(
-                'Livestock intake, walk-in registration, and request approval',
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 20 / 14,
-                  fontWeight: FontWeight.w400,
-                  color: Color(0xFF475569),
-                ),
-              ),
-            ],
-          );
-          final actionsBlock = Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  dateStr,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Color(0xFF475569),
-                  ),
-                ),
-              ),
-            ],
-          );
-          if (isCompact) {
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                titleBlock,
-                const SizedBox(height: 10),
-                actionsBlock,
-              ],
-            );
-          }
-          return Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(child: titleBlock),
-              const SizedBox(width: 12),
-              actionsBlock,
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ════════════════════════════════════════════
   //  SEARCH + NEW ENTRY BUTTON
   // ════════════════════════════════════════════
   Widget _buildSearchAndActions() {
-    return Row(
-      children: [
-        // Search (Compact 250px width, 36px height)
-        SizedBox(
-          width: 250,
-          height: 36,
+    Widget buildSearchField() => SizedBox(
+          height: 38,
           child: TextField(
             controller: _searchController,
             onChanged: (_) => setState(() {}),
@@ -845,7 +752,7 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
               hintText: 'Search by reference or customer...',
               hintStyle: const TextStyle(color: Color(0xFFA0AEC0), fontSize: 13),
               prefixIcon: const Icon(Icons.search, color: Color(0xFFA0AEC0), size: 18),
-              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+              prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 38),
               filled: true,
               fillColor: Colors.white,
               contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
@@ -863,23 +770,43 @@ class _ReceivingRequestsPageState extends State<ReceivingRequestsPage> {
               ),
             ),
           ),
+        );
+
+    final newEntryBtn = ElevatedButton.icon(
+      onPressed: () => _showNewReceivingEntryDialog(),
+      icon: const Icon(Icons.add, size: 18),
+      label: const Text('New Receiving Entry'),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF1A202C),
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
         ),
-        const Spacer(),
-        ElevatedButton.icon(
-          onPressed: () => _showNewReceivingEntryDialog(),
-          icon: const Icon(Icons.add, size: 20),
-          label: const Text('New Receiving Entry'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1A202C),
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-            elevation: 0,
-          ),
-        ),
-      ],
+        elevation: 0,
+      ),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 560) {
+          return Row(
+            children: [
+              SizedBox(width: 260, child: buildSearchField()),
+              const Spacer(),
+              newEntryBtn,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            buildSearchField(),
+            const SizedBox(height: 10),
+            newEntryBtn,
+          ],
+        );
+      },
     );
   }
 

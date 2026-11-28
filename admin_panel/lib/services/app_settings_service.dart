@@ -102,7 +102,7 @@ class StaffAccount {
   String? avatarUrl;
   String? password;
 
-  static const List<String> availableRoles = ['Admin', 'Clerk', 'Inspector'];
+  static const List<String> availableRoles = ['Super Admin', 'Admin', 'Clerk', 'Inspector'];
 
   StaffAccount({
     required this.id,
@@ -117,7 +117,8 @@ class StaffAccount {
 
   static String normalizeRole(String rawRole) {
     final r = rawRole.trim().toLowerCase();
-    if (r == 'super admin' || r == 'superadmin' || r == 'admin') return 'Admin';
+    if (r == 'super admin' || r == 'superadmin' || r == 'super_admin') return 'Super Admin';
+    if (r == 'admin') return 'Admin';
     if (r.contains('inspector')) return 'Inspector';
     if (r == 'clerk' ||
         r == 'receiving clerk' ||
@@ -536,16 +537,33 @@ class AppSettingsService extends ChangeNotifier {
               ? jsonDecode(rawVal) as List
               : (rawVal as List);
           _staffAccounts.clear();
+          bool upgradedPrimary = false;
           for (var item in decoded) {
+            StaffAccount? acct;
             if (item is Map<String, dynamic>) {
-              _staffAccounts.add(StaffAccount.fromJson(item));
+              acct = StaffAccount.fromJson(item);
             } else if (item is Map) {
-              _staffAccounts.add(StaffAccount.fromJson(Map<String, dynamic>.from(item)));
+              acct = StaffAccount.fromJson(Map<String, dynamic>.from(item));
             }
+            if (acct != null) {
+              if (acct.email.trim().toLowerCase() == 'tcaaslaughterhouse@gmail.com' &&
+                  StaffAccount.normalizeRole(acct.role) != 'Super Admin') {
+                acct.role = 'Super Admin';
+                upgradedPrimary = true;
+              }
+              _staffAccounts.add(acct);
+            }
+          }
+          if (_profileEmail.trim().toLowerCase() == 'tcaaslaughterhouse@gmail.com' &&
+              StaffAccount.normalizeRole(_currentRole) == 'Admin') {
+            _currentRole = 'Super Admin';
           }
           final prefs = await SharedPreferences.getInstance();
           final list = _staffAccounts.map((s) => s.toJson()).toList();
           await prefs.setString('app_staff_json', jsonEncode(list));
+          if (upgradedPrimary) {
+            await _saveStaffToPrefs();
+          }
           debugPrint('reloadFromSupabase: Loaded ${_staffAccounts.length} staff accounts.');
           await _ensureAdminAuth();
         }
@@ -574,6 +592,33 @@ class AppSettingsService extends ChangeNotifier {
         debugPrint('reloadFromSupabase schedule error: $e');
       }
 
+      // 4. Reload Appearance & Branding
+      try {
+        final appRow = await client
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'appearance')
+            .maybeSingle();
+        if (appRow != null && appRow['value'] != null) {
+          final rawVal = appRow['value'];
+          final Map<String, dynamic> decoded = rawVal is String
+              ? jsonDecode(rawVal) as Map<String, dynamic>
+              : Map<String, dynamic>.from(rawVal as Map);
+          final logo = decoded['cityLogoPath']?.toString().trim();
+          final title = decoded['headerTitle']?.toString().trim();
+          final subtitle = decoded['headerSubtitle']?.toString().trim();
+          if (logo != null && logo.isNotEmpty) _cityLogoPath = logo;
+          if (title != null && title.isNotEmpty) _headerTitle = title;
+          if (subtitle != null && subtitle.isNotEmpty) _headerSubtitle = subtitle;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('app_city_logo', _cityLogoPath);
+          await prefs.setString('app_header_title', _headerTitle);
+          await prefs.setString('app_header_subtitle', _headerSubtitle);
+        }
+      } catch (e) {
+        debugPrint('reloadFromSupabase appearance error: $e');
+      }
+
       notifyListeners();
     } catch (e) {
       debugPrint('reloadFromSupabase general error: $e');
@@ -586,7 +631,7 @@ class AppSettingsService extends ChangeNotifier {
       id: '8361ee85-bbb1-43fa-bf73-4b9daa9dcfe6',
       fullName: 'TCAASLAUGHTERHOUSE',
       email: 'tcaaslaughterhouse@gmail.com',
-      role: 'Admin',
+      role: 'Super Admin',
       isActive: true,
       createdAt: DateTime(2026, 11, 8),
       password: 'admin123',
@@ -642,11 +687,13 @@ class AppSettingsService extends ChangeNotifier {
     return ['Dr. Maria Clara Reyes'];
   }
 
-  String _currentRole = 'Admin';
+  String _currentRole = 'Super Admin';
   String get currentRole => _currentRole;
-  bool get isSuperAdmin => false;
-  bool get isAdmin => _currentRole == 'Admin';
-  bool get isAdminOrSuperAdmin => _currentRole == 'Admin';
+  bool get isSuperAdmin =>
+      StaffAccount.normalizeRole(_currentRole) == 'Super Admin';
+  bool get isAdmin =>
+      isSuperAdmin || StaffAccount.normalizeRole(_currentRole) == 'Admin';
+  bool get isAdminOrSuperAdmin => isAdmin;
 
   void setCurrentRole(String role) {
     _currentRole = StaffAccount.normalizeRole(role);
@@ -663,7 +710,9 @@ class AppSettingsService extends ChangeNotifier {
       _activeStaffOverrideEmail = staff.email;
       _profileName = staff.fullName;
       _profileEmail = staff.email;
-      _currentRole = StaffAccount.normalizeRole(staff.role);
+      _currentRole = staff.email.trim().toLowerCase() == 'tcaaslaughterhouse@gmail.com'
+          ? 'Super Admin'
+          : StaffAccount.normalizeRole(staff.role);
       await prefs.setString('active_staff_override_email', staff.email);
       await _saveProfileToPrefs();
       notifyListeners();
@@ -708,6 +757,16 @@ class AppSettingsService extends ChangeNotifier {
       notifyListeners();
       await _saveStaffToPrefs();
       final s = _staffAccounts[idx];
+      try {
+        await Supabase.instance.client.rpc('super_admin_sync_staff_profile', params: {
+          'p_target_email': s.email,
+          'p_full_name': s.fullName,
+          'p_role': s.role,
+          'p_is_active': s.isActive,
+        });
+      } catch (e) {
+        debugPrint('super_admin_sync_staff_profile notice: $e');
+      }
       AuditLogService.instance.log(
         action: 'staff_role_updated',
         module: 'Staff & Roles',
@@ -725,6 +784,14 @@ class AppSettingsService extends ChangeNotifier {
       notifyListeners();
       await _saveStaffToPrefs();
       final s = _staffAccounts[idx];
+      try {
+        await Supabase.instance.client.rpc('super_admin_set_staff_password', params: {
+          'p_target_email': s.email,
+          'p_new_password': newPassword,
+        });
+      } catch (e) {
+        debugPrint('super_admin_set_staff_password notice: $e');
+      }
       AuditLogService.instance.log(
         action: 'staff_password_reset',
         module: 'Staff & Roles',
@@ -771,7 +838,7 @@ class AppSettingsService extends ChangeNotifier {
   /// 8: Illegal Slaughter Reports (Admin only)
   bool isModuleAllowed(int moduleIndex) {
     final normalized = StaffAccount.normalizeRole(_currentRole);
-    if (normalized == 'Admin') return true;
+    if (normalized == 'Super Admin' || normalized == 'Admin') return true;
 
     // All roles can access Dashboard (0) and Settings / My Profile (7)
     if (moduleIndex == 0 || moduleIndex == 7) return true;
@@ -825,7 +892,10 @@ class AppSettingsService extends ChangeNotifier {
 
   String _profileEmail = '';
   String get profileEmail {
-    if (_profileEmail.isNotEmpty && _profileEmail.toLowerCase() != 'admin@tabaco.gov.ph') {
+    if (_activeStaffOverrideEmail != null && _activeStaffOverrideEmail!.isNotEmpty) {
+      return _activeStaffOverrideEmail!;
+    }
+    if (_profileEmail.isNotEmpty) {
       return _profileEmail;
     }
     return Supabase.instance.client.auth.currentUser?.email ?? '';
@@ -921,7 +991,9 @@ class AppSettingsService extends ChangeNotifier {
         if (meta['avatar_url'] != null && meta['avatar_url'].toString().trim().isNotEmpty) {
           _profilePhotoUrl = meta['avatar_url'].toString().trim();
         }
-        if (meta['role'] != null) {
+        if (_profileEmail.trim().toLowerCase() == 'tcaaslaughterhouse@gmail.com') {
+          _currentRole = 'Super Admin';
+        } else if (meta['role'] != null) {
           _currentRole = StaffAccount.normalizeRole(meta['role'].toString());
         }
       }
@@ -1033,10 +1105,10 @@ class AppSettingsService extends ChangeNotifier {
   String _cityLogoPath = 'assets/images/logo1.png';
   String get cityLogoPath => _cityLogoPath;
 
-  String _headerTitle = 'Tabaco City Slaughterhouse';
+  String _headerTitle = 'City Abattoir System';
   String get headerTitle => _headerTitle;
 
-  String _headerSubtitle = 'Management System';
+  String _headerSubtitle = 'CITY OF TABACO, ALBAY';
   String get headerSubtitle => _headerSubtitle;
 
   Future<void> setThemeMode(ThemeMode mode) async {
@@ -1051,17 +1123,23 @@ class AppSettingsService extends ChangeNotifier {
     String? headerTitle,
     String? headerSubtitle,
   }) async {
-    if (cityLogoPath != null) _cityLogoPath = cityLogoPath;
-    if (headerTitle != null) _headerTitle = headerTitle;
-    if (headerSubtitle != null) _headerSubtitle = headerSubtitle;
+    if (cityLogoPath != null && cityLogoPath.trim().isNotEmpty) {
+      _cityLogoPath = cityLogoPath.trim();
+    }
+    if (headerTitle != null && headerTitle.trim().isNotEmpty) {
+      _headerTitle = headerTitle.trim();
+    }
+    if (headerSubtitle != null && headerSubtitle.trim().isNotEmpty) {
+      _headerSubtitle = headerSubtitle.trim();
+    }
     notifyListeners();
     await _saveAppearanceToPrefs();
   }
 
   Future<void> resetAppearance() async {
     _cityLogoPath = 'assets/images/logo1.png';
-    _headerTitle = 'Tabaco City Slaughterhouse';
-    _headerSubtitle = 'Management System';
+    _headerTitle = 'City Abattoir System';
+    _headerSubtitle = 'CITY OF TABACO, ALBAY';
     _themeMode = ThemeMode.light;
     notifyListeners();
     await _saveAppearanceToPrefs();

@@ -14,7 +14,7 @@ import '../services/receipt_pdf_generator.dart';
 import '../services/regular_dealers_service.dart';
 import '../services/staff_notification_service.dart';
 import '../utils/daily_queue_filter.dart';
-import '../widgets/staff_notification_bell.dart';
+import '../utils/admin_responsive.dart';
 import '../widgets/walk_in_sms_helper.dart';
 import '../services/walk_in_sms_service.dart';
 
@@ -171,6 +171,8 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       target['carcass_weight'] = insp['carcass_weight'];
       target['inspector_name'] = insp['inspector_name'];
       target['process_notes'] = insp['process_notes'];
+      target['condemnation_reason'] = insp['condemnation_reason'];
+      target['post_mortem'] = insp['post_mortem'];
       target['passed_count'] = insp['passed_count'] ?? target['passed_count'];
       target['condemned_count'] = insp['condemned_count'] ?? target['condemned_count'];
     }
@@ -213,6 +215,23 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final w = req['carcass_weight'];
     if (w == null) return 0;
     return double.tryParse(w.toString()) ?? 0;
+  }
+
+  /// Parses the condemned part weight (kg) from a Partial Condemnation Slip summary
+  /// stored in `condemnation_reason` (e.g. `[Partial Condemnation | Slip: ... | Part: Liver | Weight: 10 kg]`).
+  static double _condemnedPartWeight(Map<String, dynamic> req) {
+    final reason = (req['condemnation_reason'] ?? '').toString();
+    if (!reason.contains('[Partial Condemnation')) return 0.0;
+    final m = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(reason);
+    if (m == null) return 0.0;
+    return double.tryParse(m.group(1) ?? '') ?? 0.0;
+  }
+
+  /// Non-condemned (net billable) carcass weight = total carcass weight minus condemned part weight.
+  static double _billableWeight(Map<String, dynamic> req) {
+    final gross = _carcassWeight(req);
+    final condemned = _condemnedPartWeight(req);
+    return (gross - condemned).clamp(0.0, double.infinity);
   }
 
   static bool hasTechnicalDelay(Map<String, dynamic> req) {
@@ -348,7 +367,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   static Map<String, dynamic> _calcFees(Map<String, dynamic> req) {
     final animalType = (req['livestock_type'] ?? 'hog').toString();
     final rates = AppSettingsService.instance.getFeeRatesForAnimal(animalType);
-    final weight = _carcassWeight(req);
+    final grossWeight = _carcassWeight(req);
+    final condemnedWeight = _condemnedPartWeight(req);
+    final weight = _billableWeight(req);
     final postMortemFee = weight * rates.postMortemRatePerKg;
     final reqIdStr = req['id'].toString();
     final tracking = (req['penalty_tracking'] ?? _penaltyTrackingMap[reqIdStr]) as Map<String, dynamic>?;
@@ -421,6 +442,9 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       'delivery_van': deliveryFee,
       'total': total,
       'rate_per_kg': rates.postMortemRatePerKg,
+      'gross_weight': grossWeight,
+      'condemned_weight': condemnedWeight,
+      'billable_weight': weight,
     };
   }
 
@@ -578,7 +602,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     // 2. Has payment method assigned but not yet confirmed as paid
     if (payment != null && payment['payment_method'] != null && payment['payment_method'].toString().trim().isNotEmpty) {
       final m = payment['payment_method'].toString().trim().toLowerCase();
-      if (!m.contains('gcash') && !m.contains('maya') && !m.contains('card') && !m.contains('grabpay') && !m.contains('online') && !m.contains('paymongo') && m.contains('cash')) {
+      if (!m.contains('gcash') && !m.contains('maya') && !m.contains('card') && !m.contains('grabpay') && !m.contains('online') && !m.contains('xendit') && !m.contains('paymongo') && m.contains('cash')) {
         final isMarket = req['dealer_category']?.toString().trim().toLowerCase() == 'market' ||
             (req['market_name']?.toString().trim().isNotEmpty ?? false) ||
             (req['market_stall_number']?.toString().trim().isNotEmpty ?? false) ||
@@ -603,7 +627,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
       if (lower == 'gcash') return 'GCash';
       if (lower == 'maya') return 'Maya';
       if (lower == 'card') return 'Debit/Credit Card';
-      if (lower.contains('online') || lower.contains('paymongo')) {
+      if (lower.contains('online') || lower.contains('xendit') || lower.contains('paymongo')) {
         return 'Online Payment';
       }
       return m;
@@ -966,10 +990,37 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     final reqId = req['id'];
     final reqIdStr = reqId.toString();
     try {
+      final refNo = _refNo(req);
+
+      // Strict DB Idempotency Guard: prevent re-processing an already paid/verified request
+      final livePay = await supabase
+          .from('payments')
+          .select('status')
+          .eq('request_id', reqId)
+          .maybeSingle();
+      final liveReq = await supabase
+          .from('requests')
+          .select('status')
+          .eq('id', reqId)
+          .maybeSingle();
+      final livePaySt = (livePay?['status'] ?? '').toString().trim().toLowerCase();
+      final liveReqSt = (liveReq?['status'] ?? '').toString().trim().toLowerCase();
+      if (livePaySt == 'paid' || ['paid', 'out_for_delivery', 'released', 'completed'].contains(liveReqSt)) {
+        await _loadRequests();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Payment for $refNo is already verified & paid.'),
+              backgroundColor: const Color(0xFF2D6A4F),
+            ),
+          );
+        }
+        return;
+      }
+
       final userId = req['user_id'];
       final fees = _calcFees(req);
       final receiptNo = _receiptNo(req);
-      final refNo = _refNo(req);
       final method = _paymentMethod(req);
       final resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'GCash';
       final totalDue = (fees['total'] as num?)?.toDouble() ?? 0.0;
@@ -1154,12 +1205,10 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
   // ════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now());
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: Column(
         children: [
-          _buildHeader(dateStr),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFF2D6A4F)))
@@ -1168,7 +1217,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                     color: const Color(0xFF2D6A4F),
                     child: SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(24),
+                      padding: AdminResponsive.pagePadding(context),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1191,57 +1240,6 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                       ),
                     ),
                   ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ════════════════════════════════════════════
-  //  HEADER
-  // ════════════════════════════════════════════
-  Widget _buildHeader(String dateStr) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Payment & Cashiering',
-                  style: TextStyle(fontSize: 24, height: 32 / 24, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
-                ),
-                SizedBox(height: 3),
-                Text(
-                  'Fee calculation, payment recording, receipts',
-                  style: TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w400, color: Color(0xFF475569)),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade300),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(dateStr, style: const TextStyle(fontSize: 12, color: Color(0xFF4A5568))),
-          ),
-          const SizedBox(width: 10),
-          StaffNotificationBell(onNavigate: widget.onNavigate ?? (_, [_]) {}),
-          const SizedBox(width: 6),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: () => _loadRequests(),
-            icon: const Icon(Icons.refresh, size: 20),
-            color: const Color(0xFF2D3748),
           ),
         ],
       ),
@@ -1531,7 +1529,28 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                 Text('${req['livestock_type'] ?? ''}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
                               ],
                             )),
-                            DataCell(Text(weight > 0 ? '${weight.toStringAsFixed(0)} kg' : '\u2014', style: const TextStyle(fontSize: 13))),
+                            DataCell(
+                              weight > 0
+                                  ? Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text('${weight.toStringAsFixed(0)} kg', style: const TextStyle(fontSize: 13)),
+                                        if (((fees['condemned_weight'] as num?)?.toDouble() ?? 0.0) > 0) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '-${((fees['condemned_weight'] as num).toDouble()).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg condemned → ${((fees['billable_weight'] as num).toDouble()).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg net',
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w600,
+                                              color: Color(0xFFB45309),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    )
+                                  : const Text('\u2014', style: TextStyle(fontSize: 13)),
+                            ),
                             DataCell(Text(weight > 0 ? '\u20b1${postMortemFee.toStringAsFixed(2)}' : '\u2014', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
                             DataCell(Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1540,7 +1559,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                   Icon(
                                     method == 'Cash'
                                         ? Icons.payments_outlined
-                                        : (method.toLowerCase().contains('online') || method.toLowerCase().contains('paymongo')
+                                        : (method.toLowerCase().contains('online') || method.toLowerCase().contains('xendit') || method.toLowerCase().contains('paymongo')
                                             ? Icons.public
                                             : (method == 'GCash'
                                                 ? Icons.phone_android
@@ -1753,6 +1772,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
     String? payMongoResultMsg;
     String resolvedMethod = (method != '—' && method.isNotEmpty) ? method : 'Online Payment';
     final isOnlinePayment = resolvedMethod.toLowerCase().contains('online') ||
+        resolvedMethod.toLowerCase().contains('xendit') ||
         resolvedMethod.toLowerCase().contains('paymongo') ||
         resolvedMethod.toLowerCase() == 'gcash' ||
         resolvedMethod.toLowerCase() == 'maya' ||
@@ -1942,7 +1962,12 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                         _orFeeLine('Facility Fee ($billableHeads)', fmtPhp(fees['facility'] as num?)),
                         _orFeeLine('Corral Fee ($billableHeads)', fmtPhp(fees['corral'] as num?)),
                         _orFeeLine('Ante-Mortem Fee ($billableHeads)', fmtPhp(fees['ante_mortem'] as num?)),
-                        _orFeeLine('Post-Mortem Fee (${weight.toStringAsFixed(0)})', fmtPhp(fees['post_mortem'] as num?)),
+                        _orFeeLine(
+                          (((fees['condemned_weight'] as num?)?.toDouble() ?? 0.0) > 0)
+                              ? 'Post-Mortem Fee (${((fees['billable_weight'] as num).toDouble()).toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')} kg net of ${weight.toStringAsFixed(0)} kg)'
+                              : 'Post-Mortem Fee (${weight.toStringAsFixed(0)} kg)',
+                          fmtPhp(fees['post_mortem'] as num?),
+                        ),
                         if (!isBarangay)
                           _orFeeLine('Delivery Van Fee ($billableHeads)', fmtPhp(fees['delivery_van'] as num?)),
                         if (((fees['additional_fee'] as num?)?.toDouble() ?? 0.0) > 0)
@@ -2219,7 +2244,7 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                               isCheckingPayMongo = false;
                                               payMongoStatusResult = 'info';
                                               payMongoResultMsg =
-                                                  'No PayMongo checkout session found for Ref $refNo. If payment was made via direct transfer/QR, verify funds in your account and click "Verify & Confirm $resolvedMethod Payment" below.';
+                                                  'No Xendit checkout session found for Ref $refNo. If payment was made via direct transfer/QR, verify funds in your account and click "Verify & Confirm $resolvedMethod Payment" below.';
                                             });
                                             return;
                                           }
@@ -2243,21 +2268,21 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                               isCheckingPayMongo = false;
                                               payMongoStatusResult = 'paid';
                                               payMongoResultMsg =
-                                                  'PayMongo Confirmed: \u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)} received via $resolvedMethod! Ready for Clerk Verification.';
+                                                  'Xendit Confirmed: \u20b1${((fees['total'] as num?)?.toDouble() ?? 0.0).toStringAsFixed(2)} received via $resolvedMethod! Ready for Clerk Verification.';
                                             });
                                           } else if (pmStatus == 'not_found') {
                                             setDialogState(() {
                                               isCheckingPayMongo = false;
                                               payMongoStatusResult = 'info';
                                               payMongoResultMsg = resData?['message'] ??
-                                                  'No active PayMongo checkout link recorded for this request. Please confirm payment directly in your merchant portal, then click Verify & Confirm below.';
+                                                  'No active Xendit checkout link recorded for this request. Please confirm payment directly in your Xendit merchant portal, then click Verify & Confirm below.';
                                             });
                                           } else {
                                             setDialogState(() {
                                               isCheckingPayMongo = false;
                                               payMongoStatusResult = 'unpaid';
                                               payMongoResultMsg =
-                                                  'PayMongo Status: ${resData?['status'] ?? "Pending / Unpaid"}. Payment has not been confirmed by PayMongo yet.';
+                                                  'Xendit Status: ${resData?['status'] ?? "Pending / Unpaid"}. Payment has not been confirmed by Xendit yet.';
                                             });
                                           }
                                         } catch (err) {
@@ -2265,14 +2290,14 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
                                             isCheckingPayMongo = false;
                                             payMongoStatusResult = 'info';
                                             payMongoResultMsg =
-                                                'No PayMongo session found for Ref $refNo. You can verify the customer\'s payment directly and click "Verify & Confirm $resolvedMethod Payment" below.';
+                                                'No Xendit session found for Ref $refNo. You can verify the customer\'s payment directly and click "Verify & Confirm $resolvedMethod Payment" below.';
                                           });
                                         }
                                       },
                                 icon: isCheckingPayMongo
                                     ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
                                     : const Icon(Icons.sync, size: 14),
-                                label: Text(isCheckingPayMongo ? 'Checking...' : 'Check PayMongo Status', style: const TextStyle(fontSize: 11)),
+                                label: Text(isCheckingPayMongo ? 'Checking...' : 'Check Xendit Status', style: const TextStyle(fontSize: 11)),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: const Color(0xFF2B6CB0),
                                   side: const BorderSide(color: Color(0xFF90CDF4)),

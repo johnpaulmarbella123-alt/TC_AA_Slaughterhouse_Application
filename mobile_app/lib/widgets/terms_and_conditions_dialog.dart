@@ -1,14 +1,53 @@
 import 'package:flutter/material.dart';
 
-class TermsAndConditionsDialog extends StatelessWidget {
+class TermsAndConditionsDialog extends StatefulWidget {
   final bool isMandatory;
+  final bool requireScrollToBottom;
   final VoidCallback? onAccepted;
 
   const TermsAndConditionsDialog({
     super.key,
     this.isMandatory = false,
+    this.requireScrollToBottom = true,
     this.onAccepted,
   });
+
+  @override
+  State<TermsAndConditionsDialog> createState() => _TermsAndConditionsDialogState();
+}
+
+class _TermsAndConditionsDialogState extends State<TermsAndConditionsDialog> {
+  final ScrollController _scrollController = ScrollController();
+  bool _hasReachedBottom = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasReachedBottom = !widget.requireScrollToBottom;
+    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_scrollController.hasClients &&
+          _scrollController.position.maxScrollExtent <= 24) {
+        setState(() => _hasReachedBottom = true);
+      }
+    });
+  }
+
+  void _onScroll() {
+    if (_hasReachedBottom || !_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    if (pos.pixels >= pos.maxScrollExtent - 24) {
+      setState(() => _hasReachedBottom = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,8 +143,12 @@ class TermsAndConditionsDialog extends StatelessWidget {
 
             // ── SCROLLABLE BODY ──
             Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -172,7 +215,7 @@ class TermsAndConditionsDialog extends StatelessWidget {
                     // Section 5
                     _buildSectionHeader('5. MUNICIPAL FEES, GCASH DIGITAL CHECKOUT, AND REFUNDS'),
                     _buildParagraph('5.1. Fee Schedule: All slaughter fees (including slaughterhouse service dues, ante-mortem and post-mortem inspection fees, corral holding charges, and per-kilogram carcass processing rates) are computed strictly pursuant to the validated Municipal Revenue Code and Slaughterhouse Ordinances of Tabaco City.'),
-                    _buildParagraph('5.2. Payment Channels: Payments may be tendered over-the-counter in cash or digitally through the integrated PayMongo GCash checkout gateway.'),
+                    _buildParagraph('5.2. Payment Channels: Payments may be tendered over-the-counter in cash or digitally through the integrated Xendit online payment gateway (GCash, Maya, GrabPay, QR Ph, and Cards).'),
                     _buildParagraph('5.3. Finality of Collections: Once animals undergo slaughter floor operations and official municipal receipts (OR / RCP-YYYY-XXX) are issued, payment collections are final, non-refundable, and remitted to the City Treasury of Tabaco.'),
                     const SizedBox(height: 14),
 
@@ -197,6 +240,7 @@ class TermsAndConditionsDialog extends StatelessWidget {
                   ],
                 ),
               ),
+              ),
             ),
 
             // ── FOOTER ACTIONS ──
@@ -204,17 +248,56 @@ class TermsAndConditionsDialog extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
+                  Expanded(
+                    child: !_hasReachedBottom
+                        ? const Row(
+                            children: [
+                              Icon(Icons.arrow_downward_rounded, size: 15, color: Color(0xFFD97706)),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Scroll to the bottom to agree',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFFB45309),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : const Row(
+                            children: [
+                              Icon(Icons.check_circle_outline, size: 15, color: Color(0xFF1E855A)),
+                              SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Terms reviewed',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF1E855A),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                  const SizedBox(width: 10),
                   ElevatedButton(
-                    onPressed: () {
-                      onAccepted?.call();
-                      Navigator.pop(context, true);
-                    },
+                    onPressed: _hasReachedBottom
+                        ? () {
+                            widget.onAccepted?.call();
+                            Navigator.pop(context, true);
+                          }
+                        : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1E855A),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      disabledBackgroundColor: Colors.grey.shade300,
+                      disabledForegroundColor: Colors.grey.shade600,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
                     ),

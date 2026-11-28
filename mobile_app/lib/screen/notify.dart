@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../pages/home_page.dart' show globalUnreadNotifCount;
+import '../services/push_notification_service.dart';
 import 'condemnation_slip_screen.dart';
 import 'notification_options_dialog.dart';
 import 'receipt_detail_screen.dart';
@@ -31,6 +32,7 @@ class _NotifyPageState extends State<NotifyPage> {
   bool isLoading = true;
   bool showUnreadOnly = false;
   bool _userSwitchedTab = false;
+  bool _isTestingPush = false;
 
   RealtimeChannel? _notifChannel;
   Timer? _pollingTimer;
@@ -1452,6 +1454,22 @@ class _NotifyPageState extends State<NotifyPage> {
         imagePath: 'assets/images/icon-meat-box.png',
       );
     }
+    if (type == 'confinement_cleared' ||
+        t.contains('cleared & ready for slaughter') ||
+        t.contains('cleared and ready for slaughter') ||
+        (t.contains('cleared') && t.contains('slaughter'))) {
+      return const _NotifStyle(
+        icon: Icons.verified_outlined,
+        iconColor: Color(0xFF1A8C62),
+        iconBg: Color(0xFFE4F8F0),
+        imagePath: 'assets/images/cleared_ready_slaughter.png',
+        badge: 'Cleared for Slaughter',
+        badgeBg: Color(0xFFE4F8F0),
+        badgeText: Color(0xFF0A3D2E),
+        actionLabel: 'View Status',
+        actionColor: Color(0xFF0F6E56),
+      );
+    }
     if (type == 'slaughter_completed' ||
         type == 'operation_completed' ||
         t.contains('operation complete') ||
@@ -1975,6 +1993,25 @@ class _NotifyPageState extends State<NotifyPage> {
     );
   }
 
+  Future<void> _runTestPush() async {
+    if (_isTestingPush) return;
+    setState(() => _isTestingPush = true);
+    final result = await PushNotificationService.instance.sendTestPushNotification();
+    if (!mounted) return;
+    setState(() => _isTestingPush = false);
+    final isSuccess = result.toLowerCase().contains('sent to');
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result, style: const TextStyle(fontSize: 12.5)),
+        backgroundColor: isSuccess ? const Color(0xFF1E855A) : Colors.orange.shade800,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Widget _buildHeader() {
     return Container(
       color: const Color(0xFFC8E6C9),
@@ -1995,6 +2032,27 @@ class _NotifyPageState extends State<NotifyPage> {
                 ),
               ],
             ),
+          ),
+          // Test Push diagnostic button
+          IconButton(
+            tooltip: 'Test Push Notification',
+            onPressed: _isTestingPush ? null : _runTestPush,
+            padding: const EdgeInsets.all(6),
+            constraints: const BoxConstraints(),
+            icon: _isTestingPush
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF0A3D2E),
+                    ),
+                  )
+                : const Icon(
+                    Icons.notifications_active_outlined,
+                    size: 20,
+                    color: Color(0xFF0A3D2E),
+                  ),
           ),
           // Mark all read button
           if (_unreadCount > 0)

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -145,6 +146,8 @@ class LivestockFeeService extends ChangeNotifier {
   };
 
   RealtimeChannel? _realtimeChannel;
+  Timer? _fallbackSyncTimer;
+  bool _realtimeSubscribed = false;
   bool _isInitialized = false;
 
   Map<String, LivestockFeeSchedule> get schedules => Map.unmodifiable(_schedules);
@@ -307,18 +310,35 @@ class LivestockFeeService extends ChangeNotifier {
             event: PostgresChangeEvent.all,
             schema: 'public',
             table: 'system_settings',
+            filter: PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: 'key',
+              value: 'fee_schedules',
+            ),
             callback: (payload) {
               fetchFeesFromSupabase();
             },
           )
-          .subscribe();
+          .subscribe((status, [error]) {
+            _realtimeSubscribed = status == RealtimeSubscribeStatus.subscribed;
+          });
     } catch (e) {
+      _realtimeSubscribed = false;
       debugPrint('LivestockFeeService realtime subscribe error: $e');
     }
+
+    // Lightweight fallback sync (10s) only while Realtime is not yet subscribed
+    _fallbackSyncTimer?.cancel();
+    _fallbackSyncTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!_realtimeSubscribed) {
+        fetchFeesFromSupabase();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _fallbackSyncTimer?.cancel();
     if (_realtimeChannel != null) {
       Supabase.instance.client.removeChannel(_realtimeChannel!);
     }

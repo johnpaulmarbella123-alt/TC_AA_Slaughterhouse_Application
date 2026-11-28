@@ -20,6 +20,7 @@ class _SignupScreenState
     extends State<SignupPages> {
 
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   bool _isLoading = false;
   bool _hasAgreedToTerms = false;
 
@@ -35,58 +36,41 @@ class _SignupScreenState
   final _passwordController =
       TextEditingController();
 
+  final _confirmPasswordController =
+      TextEditingController();
+
   final _authService = AuthService();
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _promptMandatoryTerms();
-    });
-  }
-
-  Future<void> _promptMandatoryTerms() async {
-    if (_hasAgreedToTerms) return;
+  Future<void> _openTermsDialog() async {
     final agreed = await showDialog<bool>(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: true,
       builder: (ctx) => TermsAndConditionsDialog(
-        isMandatory: true,
+        requireScrollToBottom: true,
         onAccepted: () {
-          setState(() => _hasAgreedToTerms = true);
+          if (mounted) {
+            setState(() => _hasAgreedToTerms = true);
+          }
         },
       ),
     );
-
-    if (agreed != true && !_hasAgreedToTerms && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You must read and agree to the Terms & Conditions before creating an account.'),
-          backgroundColor: Colors.black87,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      Navigator.pop(context);
+    if (agreed == true && mounted && !_hasAgreedToTerms) {
+      setState(() => _hasAgreedToTerms = true);
     }
   }
 
   @override
   void dispose() {
-
     _nameController.dispose();
     _emailController.dispose();
     _addressController.dispose();
     _passwordController.dispose();
-
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
   Future<void> _signUp() async {
-
-    if (!_hasAgreedToTerms) {
-      await _promptMandatoryTerms();
-      if (!_hasAgreedToTerms) return;
-    }
+    if (!_hasAgreedToTerms) return;
 
     setState(() => _isLoading = true);
 
@@ -95,12 +79,16 @@ class _SignupScreenState
       final name = _nameController.text.trim();
       final address = _addressController.text.trim();
       final password = _passwordController.text.trim();
+      final confirmPassword = _confirmPasswordController.text.trim();
 
-      if (input.isEmpty || name.isEmpty || address.isEmpty || password.isEmpty) {
+      if (input.isEmpty || name.isEmpty || address.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
         throw 'Please complete all required fields.';
       }
       if (password.length < 6) {
         throw 'Password must be at least 6 characters.';
+      }
+      if (password != confirmPassword) {
+        throw 'Passwords do not match. Please re-enter your password.';
       }
 
       bool isPhone = input.startsWith('09') ||
@@ -240,68 +228,60 @@ class _SignupScreenState
 
           // MAIN CONTENT
           SafeArea(
-            child: SingleChildScrollView(
-
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(
-                  horizontal: 24,
-                ),
-
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-
-                  children: [
-
-                    const SizedBox(height: 10),
-
-                    InkWell(
-                      onTap: () =>
-                          Navigator.pop(context),
-
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // FIXED TOP BACK BUTTON (stays pinned while scrolling)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 10, 24, 8),
+                  child: InkWell(
+                    onTap: () => Navigator.pop(context),
+                    borderRadius: BorderRadius.circular(8),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 4, horizontal: 2),
                       child: Row(
-                        mainAxisSize:
-                            MainAxisSize.min,
-
-                        children: const [
-
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                           Icon(
                             Icons.arrow_back_ios,
                             size: 18,
                           ),
-
                           SizedBox(width: 4),
-
                           Text(
                             "Sign up",
-
                             style: TextStyle(
                               fontSize: 16,
-                              fontWeight:
-                                  FontWeight.w500,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ),
+                ),
 
-                    const SizedBox(height: 100),
-
-                    const Center(
-                      child: Text(
-                        "Sign Up",
-
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight:
-                              FontWeight.bold,
-
-                          decoration:
-                              TextDecoration.underline,
-                        ),
+                // SCROLLABLE FORM CONTENT
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24,
                       ),
-                    ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 84),
+
+                          const Center(
+                            child: Text(
+                              "Sign Up",
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
 
                     const SizedBox(height: 40),
 
@@ -350,130 +330,129 @@ class _SignupScreenState
                     _buildInputField(
                       hint: "Create password",
                       icon: Icons.lock_outline,
-
                       isPassword: true,
-
-                      obscureText:
-                          _obscurePassword,
-
-                      controller:
-                          _passwordController,
-
+                      obscureText: _obscurePassword,
+                      controller: _passwordController,
                       onToggleVisibility: () {
-
                         setState(() {
-
-                          _obscurePassword =
-                              !_obscurePassword;
+                          _obscurePassword = !_obscurePassword;
                         });
                       },
                     ),
 
-                    const SizedBox(height: 40),
-
-                    // SIGNUP BUTTON
-                    SizedBox(
-                      width: double.infinity,
-
-                      child: ElevatedButton(
-
-                        onPressed:
-                            _isLoading
-                                ? null
-                                : _signUp,
-
-                        style:
-                            ElevatedButton.styleFrom(
-
-                          backgroundColor:
-                              const Color(0xFF218358),
-
-                          foregroundColor:
-                              Colors.white,
-
-                          padding:
-                              const EdgeInsets.symmetric(
-                            vertical: 18,
-                          ),
-
-                          shape:
-                              RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(30),
-                          ),
-                        ),
-
-                        child: _isLoading
-
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-
-                                child:
-                                    CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
-
-                            : const Text(
-                                "Sign Up",
-
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight:
-                                      FontWeight.bold,
-                                ),
-                              ),
-                      ),
-                    ),
-
                     const SizedBox(height: 16),
 
-                    // TERMS AGREEMENT NOTICE
-                    Center(
-                      child: GestureDetector(
-                        onTap: () {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => TermsAndConditionsDialog(
-                              onAccepted: () {
-                                setState(() => _hasAgreedToTerms = true);
-                              },
-                            ),
-                          );
-                        },
+                    // CONFIRM PASSWORD
+                    _buildInputField(
+                      hint: "Confirm password",
+                      icon: Icons.lock_reset_outlined,
+                      isPassword: true,
+                      obscureText: _obscureConfirmPassword,
+                      controller: _confirmPasswordController,
+                      onToggleVisibility: () {
+                        setState(() {
+                          _obscureConfirmPassword = !_obscureConfirmPassword;
+                        });
+                      },
+                    ),
+
+                    const SizedBox(height: 18),
+
+                    // TERMS & CONDITIONS CHECKBOX (Must read & check to unlock Sign Up)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () {
+                        if (_hasAgreedToTerms) {
+                          setState(() => _hasAgreedToTerms = false);
+                        } else {
+                          _openTermsDialog();
+                        }
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            if (_hasAgreedToTerms) ...[
-                              const Icon(Icons.check_circle_rounded, color: Color(0xFF218358), size: 16),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: RichText(
-                                textAlign: TextAlign.center,
-                                text: TextSpan(
-                                  style: const TextStyle(color: Colors.black54, fontSize: 12),
-                                  children: [
-                                    TextSpan(
-                                      text: _hasAgreedToTerms ? "You have agreed to our\n" : "By signing up, you agree to our\n",
-                                    ),
-                                    const TextSpan(
-                                      text: "Terms & Conditions and User Agreement",
-                                      style: TextStyle(
-                                        color: Color(0xFF218358),
-                                        fontWeight: FontWeight.bold,
-                                        decoration: TextDecoration.underline,
+                            SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: Checkbox(
+                                value: _hasAgreedToTerms,
+                                activeColor: const Color(0xFF218358),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+                                onChanged: (val) {
+                                  if (val == true) {
+                                    _openTermsDialog();
+                                  } else {
+                                    setState(() => _hasAgreedToTerms = false);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: _openTermsDialog,
+                                child: RichText(
+                                  text: TextSpan(
+                                    style: const TextStyle(color: Colors.black87, fontSize: 12.5, height: 1.35),
+                                    children: [
+                                      TextSpan(
+                                        text: _hasAgreedToTerms
+                                            ? "I have read and agree to the "
+                                            : "Read and agree to the ",
                                       ),
-                                    ),
-                                  ],
+                                      const TextSpan(
+                                        text: "Terms & Conditions and User Agreement",
+                                        style: TextStyle(
+                                          color: Color(0xFF218358),
+                                          fontWeight: FontWeight.bold,
+                                          decoration: TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
                           ],
                         ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    // SIGNUP BUTTON (Disabled until Terms & Conditions are checked)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: (_isLoading || !_hasAgreedToTerms) ? null : _signUp,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF218358),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.grey.shade300,
+                          disabledForegroundColor: Colors.grey.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 18),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                "Sign Up",
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
 
@@ -565,9 +544,12 @@ class _SignupScreenState
                     ),
 
                     const SizedBox(height: 30),
-                  ],
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
         ],

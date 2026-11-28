@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../utils/text_capitalization_formatters.dart';
 import '../utils/phone_number_formatter.dart';
 
@@ -520,7 +521,8 @@ class _AuthorityHotlinesCard extends StatelessWidget {
             iconColor: const Color(0xFF1D4ED8),
             agency: "Philippine National Police (PNP)",
             scope: "Ongoing crimes, animal torture, emergency raids, police blotter",
-            actionText: "SMS: Text PNP <Msg> to 2920 • Dial Emergency",
+            actionText: "SMS: Text PNP <Msg> to 2920",
+            onActionTap: () => _launchPnpSms(context),
           ),
           const Divider(height: 16),
           // 2. NMIS
@@ -545,13 +547,48 @@ class _AuthorityHotlinesCard extends StatelessWidget {
     );
   }
 
+  Future<void> _launchPnpSms(BuildContext context) async {
+    const prefilledBody =
+        'PNP [Illegal Slaughter Report] Location: , Details: ';
+    final uri = Uri(
+      scheme: 'sms',
+      path: '2920',
+      queryParameters: {'body': prefilledBody},
+    );
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open SMS app. Please text "PNP <Message>" to 2920.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open SMS app. Please text "PNP <Message>" to 2920.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _hotlineRow({
     required IconData icon,
     required Color iconColor,
     required String agency,
     required String scope,
     required String actionText,
+    VoidCallback? onActionTap,
   }) {
+    final isClickable = onActionTap != null;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -564,23 +601,41 @@ class _AuthorityHotlinesCard extends StatelessWidget {
               Text(agency, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
               const SizedBox(height: 1),
               Text(scope, style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B))),
-              const SizedBox(height: 3),
+              const SizedBox(height: 4),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Text(
-                    actionText,
-                    style: const TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF000000),
+                child: Material(
+                  color: isClickable ? const Color(0xFFEFF6FF) : const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(6),
+                  child: InkWell(
+                    onTap: onActionTap,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isClickable ? const Color(0xFF93C5FD) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isClickable) ...[
+                            const Icon(Icons.sms_outlined, size: 13, color: Color(0xFF1D4ED8)),
+                            const SizedBox(width: 5),
+                          ],
+                          Text(
+                            isClickable ? '$actionText  •  Tap to Send' : actionText,
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: isClickable ? const Color(0xFF1D4ED8) : const Color(0xFF000000),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

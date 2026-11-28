@@ -1275,26 +1275,22 @@ class RegularDealersService {
     );
   }
 
-  /// Sends an email with PDF attachment via Resend REST API
+  /// Sends an email with PDF attachment directly via the `send-nmic-report` Edge Function
+  /// (uses Gmail SMTP when configured, with Resend API as automatic fallback).
   Future<Map<String, dynamic>> sendReportViaResend({
     required String recipientEmail,
     required String subject,
     required String body,
     required Uint8List pdfBytes,
     required String filename,
+    String? reportType,
+    String? periodLabel,
     String? overrideApiKey,
     String? overrideSender,
   }) async {
     final apiKey = (overrideApiKey != null && overrideApiKey.trim().isNotEmpty)
         ? overrideApiKey.trim()
         : _nmicSettings.resendApiKey.trim();
-
-    if (apiKey.isEmpty) {
-      return {
-        'success': false,
-        'error': 'Resend API Key is missing. Please enter your Resend API Key.'
-      };
-    }
 
     final sender = (overrideSender != null && overrideSender.trim().isNotEmpty)
         ? overrideSender.trim()
@@ -1304,12 +1300,14 @@ class RegularDealersService {
 
     try {
       final base64Pdf = base64Encode(pdfBytes);
-      final payload = {
-        'apiKey': apiKey,
+      final payload = <String, dynamic>{
+        if (apiKey.isNotEmpty) 'apiKey': apiKey,
         'sender': sender,
         'to': recipientEmail.trim(),
         'subject': subject.trim(),
         'text': body.trim(),
+        if (reportType != null && reportType.isNotEmpty) 'reportType': reportType,
+        if (periodLabel != null && periodLabel.isNotEmpty) 'periodLabel': periodLabel,
         'attachments': [
           {
             'filename': filename,

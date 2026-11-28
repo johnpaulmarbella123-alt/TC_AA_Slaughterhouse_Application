@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'condemnation_slip_screen.dart';
+import '../services/livestock_fee_service.dart';
 
 class ViewStatusUpdateScreen extends StatefulWidget {
   final Map<String, dynamic>? initialRequest;
@@ -28,7 +29,18 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
   void initState() {
     super.initState();
     _request = widget.initialRequest;
+    LivestockFeeService.instance.addListener(_onLiveFeesChanged);
     _loadRequestDetails();
+  }
+
+  @override
+  void dispose() {
+    LivestockFeeService.instance.removeListener(_onLiveFeesChanged);
+    super.dispose();
+  }
+
+  void _onLiveFeesChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadRequestDetails() async {
@@ -186,31 +198,39 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
     final preferredDate = req['preferred_date'] ?? req['created_at'];
     final dateStr = _formatDate(preferredDate);
 
-    // Weight determination
+    // Weight determination (deduct partial condemned part weight for billing)
     String weightStr = 'Pending';
     double carcassWeightNum = 0.0;
+    double condemnedWeightNum = 0.0;
+    if (_inspection != null && _inspection!['condemnation_reason'] != null) {
+      final cr = _inspection!['condemnation_reason'].toString();
+      if (cr.contains('[Partial Condemnation')) {
+        final wm = RegExp(r'Weight:\s*([0-9]+(?:\.[0-9]+)?)').firstMatch(cr);
+        if (wm != null) condemnedWeightNum = double.tryParse(wm.group(1) ?? '') ?? 0.0;
+      }
+    }
     if (_inspection != null && _inspection!['carcass_weight'] != null) {
       final cw = _inspection!['carcass_weight'];
       carcassWeightNum = double.tryParse(cw.toString()) ?? 0.0;
-      weightStr = '${carcassWeightNum.toStringAsFixed(0)}kg';
+      final netWt = (carcassWeightNum - condemnedWeightNum).clamp(0.0, double.infinity);
+      weightStr = condemnedWeightNum > 0
+          ? '${carcassWeightNum.toStringAsFixed(0)}kg (-${condemnedWeightNum.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}kg condemned → ${netWt.toStringAsFixed(1).replaceAll(RegExp(r'\.0$'), '')}kg net)'
+          : '${carcassWeightNum.toStringAsFixed(0)}kg';
     } else if (req['live_weight'] != null) {
       final lw = req['live_weight'];
       carcassWeightNum = double.tryParse(lw.toString()) ?? 0.0;
       weightStr = '${carcassWeightNum.toStringAsFixed(0)}kg';
     }
 
-    // Official Fee Schedule Calculation
-    const double vetHealthCertFee = 50.0;
-    const double permitToSlaughterFee = 60.0;
-    const double facilityFee = 60.0;
-    const double corralFee = 40.0;
-    const double anteMortemFee = 40.0;
-    const double postMortemRatePerKg = 5.0;
-    const double baseFixedFees = vetHealthCertFee + permitToSlaughterFee + facilityFee + corralFee + anteMortemFee; // ₱250.00
-
-    final double postMortemFee = carcassWeightNum * postMortemRatePerKg;
+    // Official Fee Schedule Calculation (live from LivestockFeeService)
+    final schedule = LivestockFeeService.instance.getFeeSchedule(
+      req['livestock_type']?.toString(),
+    );
+    final double baseFixedFees = schedule.totalFixedFees;
+    final double billableWeightNum = (carcassWeightNum - condemnedWeightNum).clamp(0.0, double.infinity);
+    final double postMortemFee = billableWeightNum * schedule.postMortemRatePerKg;
     final bool isMarket = req['request_type'] == 'market' || req['release_type'] == 'delivery';
-    final double deliveryFee = isMarket ? 60.0 : 0.0;
+    final double deliveryFee = isMarket ? schedule.deliveryVanFee : 0.0;
     final bool isWarningOnly = (req['process_notes'] ?? '').toString().contains('1ST OFFENSE') ||
         req['is_warning_only'] == true;
     final double penaltyFee = isWarningOnly
@@ -218,13 +238,15 @@ class _ViewStatusUpdateScreenState extends State<ViewStatusUpdateScreen> {
         : (double.tryParse(req['penalty_fee']?.toString() ?? '0') ?? 0.0);
     final double calculatedTotal = baseFixedFees + postMortemFee + deliveryFee + penaltyFee;
 
+    final bool isPaid = req['status'] == 'paid' ||
+        req['status'] == 'released' ||
+        (_payment != null && _payment!['status'] == 'paid');
     double totalAmount = calculatedTotal;
-    if (_payment != null && _payment!['amount'] != null) {
+    if (isPaid && _payment != null && _payment!['amount'] != null) {
       totalAmount = double.tryParse(_payment!['amount'].toString()) ?? calculatedTotal;
     }
 
     final String feeStr = '₱${totalAmount.toStringAsFixed(2)}';
-    final bool isPaid = req['status'] == 'paid' || (_payment != null && _payment!['status'] == 'paid');
 
     final String statusLower = (req['status'] ?? '').toString().toLowerCase();
     final bool canCancel = ['pending', 'pending_intake', 'approved'].contains(statusLower);

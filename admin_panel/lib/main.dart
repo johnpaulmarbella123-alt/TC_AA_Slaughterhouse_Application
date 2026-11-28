@@ -54,8 +54,16 @@ class MyApp extends StatelessWidget {
       builder: (context, _) {
         return MaterialApp(
           title: AppSettingsService.instance.headerTitle,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
+          theme: AppTheme.lightTheme.copyWith(
+            dialogTheme: const DialogThemeData(
+              insetPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+            ),
+          ),
+          darkTheme: AppTheme.darkTheme.copyWith(
+            dialogTheme: const DialogThemeData(
+              insetPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+            ),
+          ),
           themeMode: AppSettingsService.instance.themeMode,
           debugShowCheckedModeBanner: false,
           navigatorObservers: [DialogBlurObserver.instance],

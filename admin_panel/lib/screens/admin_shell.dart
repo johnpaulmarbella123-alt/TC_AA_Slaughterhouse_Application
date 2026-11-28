@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard.dart';
@@ -14,9 +15,12 @@ import 'illegal_slaughter_page.dart';
 import 'settings_page.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
+import '../services/audit_log_service.dart';
 import '../services/staff_notification_service.dart';
 import '../widgets/dialog_blur_observer.dart';
 import '../widgets/lucide_sidebar_icons.dart';
+import '../widgets/staff_notification_bell.dart';
+import '../utils/admin_responsive.dart';
 
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
@@ -26,11 +30,90 @@ class AdminShell extends StatefulWidget {
 }
 
 class _AdminShellState extends State<AdminShell> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   int _selectedIndex = 0;
   String? _reportsInitialTab;
   int _settingsInitialTab = 0;
   int _settingsNavVersion = 0;
   final Set<int> _loadedPages = {0};
+  final List<int> _navHistory = [];
+
+  String _moduleTitle(int index) {
+    switch (index) {
+      case 0:
+        return 'Dashboard';
+      case 1:
+        return 'Receiving & Inspection';
+      case 2:
+        return 'Document Verification';
+      case 3:
+        return 'Slaughter & Inspection';
+      case 4:
+        return 'Payment & Cashiering';
+      case 5:
+        return 'Meat Releasing';
+      case 6:
+        return 'Reports & Records';
+      case 7:
+        return AppSettingsService.instance.isAdmin ? 'System Settings' : 'My Profile';
+      case 8:
+        return 'Illegal Slaughter Reports';
+      default:
+        return 'City Abattoir System';
+    }
+  }
+
+  String _moduleShortName(int index) {
+    switch (index) {
+      case 0:
+        return 'Dashboard';
+      case 1:
+        return 'Receiving';
+      case 2:
+        return 'Verification';
+      case 3:
+        return 'Inspection';
+      case 4:
+        return 'Cashiering';
+      case 5:
+        return 'Releasing';
+      case 6:
+        return 'Reports';
+      case 7:
+        return 'Settings';
+      case 8:
+        return 'Illegal Reports';
+      default:
+        return 'Previous';
+    }
+  }
+
+  String _moduleSubtitle(int index) {
+    switch (index) {
+      case 1:
+        return 'Livestock intake, walk-in registration, and request approval';
+      case 2:
+        return 'Verify uploaded barangay certificates, ownership proofs, and vet permits';
+      case 3:
+        return 'Ante-mortem inspection, slaughter workflow, post-mortem, and MIC issuance';
+      case 4:
+        return 'Fee billing, official receipts, cash drawer & online Xendit reconciliation';
+      case 5:
+        return 'Ready for pickup, delivery handover, and collection verification';
+      case 6:
+        return 'Analytics, abattoir records, dealer logs, customer reviews & audit trails';
+      case 7:
+        return AppSettingsService.instance.isSuperAdmin
+            ? 'Configure fees, staff accounts & roles, schedule, profile, and appearance'
+            : AppSettingsService.instance.isAdmin
+                ? 'Configure fees, schedule, profile, appearance, and customer accounts'
+                : 'Manage your staff profile and account preferences';
+      case 8:
+        return 'Community whistleblower reports, evidence verification, and enforcement tracking';
+      default:
+        return '';
+    }
+  }
 
   @override
   void initState() {
@@ -91,37 +174,156 @@ class _AdminShellState extends State<AdminShell> {
     });
   }
 
-  void _onNavigate(int index, [dynamic tabArg]) {
+  void _onNavigate(int index, [dynamic tabArg, bool recordHistory = true]) {
     setState(() {
+      int targetIndex = index;
+      dynamic resolvedTab = tabArg;
+
       // Redirect legacy routes cleanly:
       // - (6, 'Report Illegal') -> dedicated Admin-only Illegal Reports page (index 8)
       // - (7, 'feedback') -> Reports & Records -> Customer Reviews
       if (index == 6 && tabArg == 'Report Illegal') {
-        _selectedIndex = 8;
-        _loadedPages.add(8);
-        return;
-      }
-      if (index == 7 && tabArg == 'feedback') {
-        _selectedIndex = 6;
-        _loadedPages.add(6);
-        _reportsInitialTab = 'Customer Reviews';
-        return;
+        targetIndex = 8;
+        resolvedTab = null;
+      } else if (index == 7 && tabArg == 'feedback') {
+        targetIndex = 6;
+        resolvedTab = 'Customer Reviews';
       }
 
-      _selectedIndex = index;
-      _loadedPages.add(index);
-      if (index == 6 && tabArg is String) {
-        _reportsInitialTab = tabArg;
-      } else if (index == 7 && tabArg is int) {
-        _settingsInitialTab = tabArg.clamp(0, 5);
+      if (recordHistory && targetIndex != _selectedIndex) {
+        if (_navHistory.isEmpty || _navHistory.last != _selectedIndex) {
+          _navHistory.add(_selectedIndex);
+          if (_navHistory.length > 15) {
+            _navHistory.removeAt(0);
+          }
+        }
+      }
+
+      _selectedIndex = targetIndex;
+      _loadedPages.add(targetIndex);
+      if (targetIndex == 6 && resolvedTab is String) {
+        _reportsInitialTab = resolvedTab;
+      } else if (targetIndex == 7 && resolvedTab == 'profile') {
+        _settingsInitialTab = AppSettingsService.instance.isSuperAdmin ? 3 : 2;
         _settingsNavVersion++;
-      } else if (index == 7 && tabArg == 'customers') {
-        _settingsInitialTab = 5;
+      } else if (targetIndex == 7 && resolvedTab == 'customers') {
+        _settingsInitialTab = AppSettingsService.instance.isSuperAdmin ? 5 : 4;
         _settingsNavVersion++;
-      } else if (index == 7) {
+      } else if (targetIndex == 7 && resolvedTab is int) {
+        final maxTab = AppSettingsService.instance.isSuperAdmin ? 5 : 4;
+        _settingsInitialTab = resolvedTab.clamp(0, maxTab);
+        _settingsNavVersion++;
+      } else if (targetIndex == 7) {
         _settingsNavVersion++;
       }
     });
+  }
+
+  void _goBack() {
+    if (_navHistory.isEmpty) return;
+    final prev = _navHistory.removeLast();
+    _onNavigate(prev, null, false);
+  }
+
+  Widget _buildPersistentDesktopHeader() {
+    final dateStr = DateFormat('EEEE, MMMM d, yyyy').format(DateTime.now());
+    final canGoBack = _navHistory.isNotEmpty;
+    final prevName = canGoBack ? _moduleShortName(_navHistory.last) : '';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Left: 100% fixed Title & Subtitle (never shifts horizontally)
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _moduleTitle(_selectedIndex),
+                  style: const TextStyle(
+                    fontSize: 23,
+                    height: 1.25,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0F172A),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _moduleSubtitle(_selectedIndex),
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    height: 1.35,
+                    fontWeight: FontWeight.w400,
+                    color: Color(0xFF475569),
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          // Middle-Right: Back button (appears without shifting Title or Bell/Date)
+          if (canGoBack) ...[
+            Tooltip(
+              message: 'Return to $prevName',
+              child: InkWell(
+                onTap: _goBack,
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2D6A4F).withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF2D6A4F).withValues(alpha: 0.28)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.arrow_back_rounded, size: 16, color: Color(0xFF1B4332)),
+                      const SizedBox(width: 5),
+                      Text(
+                        'Back to $prevName',
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1B4332),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          // Fixed right-side utilities: Notification Bell FIRST, Date pill SECOND
+          StaffNotificationBell(
+            onNavigate: (m, [tab]) => _onNavigate(m, tab),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.grey.shade300),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              dateStr,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF4A5568)),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -136,57 +338,126 @@ class _AdminShellState extends State<AdminShell> {
           });
         }
 
-        final shellBody = Row(
+        final isCompact = AdminResponsive.isCompact(context);
+
+        final contentStack = IndexedStack(
+          index: _selectedIndex,
           children: [
-            // ─── SIDEBAR ───
-            _AdminSidebar(
-              selectedIndex: _selectedIndex,
-              onItemSelected: (idx, [tab]) => _onNavigate(idx, tab),
-            ),
-            // ─── CONTENT AREA (Preserved in memory for instant zero-lag navigation) ───
-            Expanded(
-              child: IndexedStack(
-                index: _selectedIndex,
-                children: [
-                  _loadedPages.contains(0)
-                      ? DashboardPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(1)
-                      ? ReceivingRequestsPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(2)
-                      ? DocumentVerificationPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(3)
-                      ? SlaughterInspectionPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(4)
-                      ? PaymentCashieringPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(5)
-                      ? MeatReleasingPage(onNavigate: _onNavigate)
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(6)
-                      ? ReportsRecordsPage(
-                          initialTab: _reportsInitialTab,
-                        )
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(7)
-                      ? SettingsPage(
-                          initialTab: _settingsInitialTab,
-                          navVersion: _settingsNavVersion,
-                        )
-                      : const SizedBox.shrink(),
-                  _loadedPages.contains(8)
-                      ? const IllegalSlaughterPage()
-                      : const SizedBox.shrink(),
-                ],
-              ),
-            ),
+            _loadedPages.contains(0)
+                ? DashboardPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(1)
+                ? ReceivingRequestsPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(2)
+                ? DocumentVerificationPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(3)
+                ? SlaughterInspectionPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(4)
+                ? PaymentCashieringPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(5)
+                ? MeatReleasingPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
+            _loadedPages.contains(6)
+                ? ReportsRecordsPage(
+                    initialTab: _reportsInitialTab,
+                  )
+                : const SizedBox.shrink(),
+            _loadedPages.contains(7)
+                ? SettingsPage(
+                    initialTab: _settingsInitialTab,
+                    navVersion: _settingsNavVersion,
+                  )
+                : const SizedBox.shrink(),
+            _loadedPages.contains(8)
+                ? IllegalSlaughterPage(onNavigate: _onNavigate)
+                : const SizedBox.shrink(),
           ],
         );
 
+        final shellBody = isCompact
+            ? contentStack
+            : Row(
+                children: [
+                  // ─── DESKTOP SIDEBAR ───
+                  _AdminSidebar(
+                    selectedIndex: _selectedIndex,
+                    onItemSelected: (idx, [tab]) => _onNavigate(idx, tab),
+                  ),
+                  // ─── CONTENT AREA (Persistent Top Bar + Preserved Pages) ───
+                  Expanded(
+                    child: Column(
+                      children: [
+                        if (_selectedIndex != 0) _buildPersistentDesktopHeader(),
+                        Expanded(child: contentStack),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+
         return Scaffold(
+          key: _scaffoldKey,
+          appBar: isCompact
+              ? AppBar(
+                  backgroundColor: const Color(0xFF0F5132),
+                  foregroundColor: Colors.white,
+                  elevation: 1,
+                  titleSpacing: 4,
+                  leading: IconButton(
+                    icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                    tooltip: 'Open Menu',
+                    onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                  ),
+                  title: Text(
+                    _moduleTitle(_selectedIndex),
+                    style: const TextStyle(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  actions: [
+                    if (_navHistory.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                        tooltip: 'Back to ${_moduleShortName(_navHistory.last)}',
+                        onPressed: _goBack,
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          iconTheme: const IconThemeData(color: Colors.white),
+                        ),
+                        child: StaffNotificationBell(
+                          onNavigate: (m, [tab]) => _onNavigate(m, tab),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : null,
+          drawer: isCompact
+              ? Drawer(
+                  width: 288,
+                  backgroundColor: const Color(0xFF0F5132),
+                  child: SafeArea(
+                    child: _AdminSidebar(
+                      selectedIndex: _selectedIndex,
+                      isDrawerMode: true,
+                      onItemSelected: (idx, [tab]) {
+                        Navigator.of(context).pop();
+                        _onNavigate(idx, tab);
+                      },
+                    ),
+                  ),
+                )
+              : null,
           body: ValueListenableBuilder<bool>(
             valueListenable: DialogBlurObserver.instance.hasActiveDialog,
             child: shellBody,
@@ -221,11 +492,13 @@ class _AdminShellState extends State<AdminShell> {
 // ═══════════════════════════════════════════════════════════
 class _AdminSidebar extends StatefulWidget {
   final int selectedIndex;
+  final bool isDrawerMode;
   final void Function(int index, [dynamic tab]) onItemSelected;
 
   const _AdminSidebar({
     required this.selectedIndex,
     required this.onItemSelected,
+    this.isDrawerMode = false,
   });
 
   @override
@@ -555,8 +828,52 @@ class _AdminSidebarState extends State<_AdminSidebar>
     );
   }
 
+  Widget _buildFormalSidebarLogo(String logoPath, {required double size}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.78),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 5,
+            offset: const Offset(0, 1.5),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          logoPath,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.high,
+          isAntiAlias: true,
+          errorBuilder: (_, _, _) => Image.asset(
+            'assets/images/logo1.png',
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.high,
+            isAntiAlias: true,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildLogoHeader(bool isDark, AppSettingsService settings, double currentWidth) {
-    final showCollapsed = _isCollapsed || currentWidth < 180;
+    final showCollapsed = currentWidth < 115;
+    final logoPath = settings.cityLogoPath.trim().isNotEmpty
+        ? settings.cityLogoPath.trim()
+        : 'assets/images/logo1.png';
+    final headerTitle = settings.headerTitle.trim().isNotEmpty
+        ? settings.headerTitle.trim()
+        : 'City Abattoir System';
+    final headerSubtitle = settings.headerSubtitle.trim().isNotEmpty
+        ? settings.headerSubtitle.trim().toUpperCase()
+        : 'CITY OF TABACO, ALBAY';
     return Container(
       height: 78,
       decoration: BoxDecoration(
@@ -575,25 +892,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                   mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.18),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
-                      ),
-                    ),
+                    _buildFormalSidebarLogo(logoPath, size: 38),
                     const SizedBox(height: 4),
                     InkWell(
                       onTap: _toggleCollapse,
@@ -615,60 +914,42 @@ class _AdminSidebarState extends State<_AdminSidebar>
               physics: const NeverScrollableScrollPhysics(),
               child: Container(
                 width: 288,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 child: Row(
                   children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.18),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
-                          ),
-                        ],
-                      ),
-                      child: ClipOval(
-                        child: Image.asset('assets/images/logo1.png', fit: BoxFit.cover),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+                    _buildFormalSidebarLogo(logoPath, size: 52),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: ClipRect(
                         child: FadeTransition(
                           opacity: _fadeAnimation,
-                          child: const Column(
+                          child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'CITY OF TABACO, ALBAY',
-                                style: TextStyle(
-                                  color: Color(0xFFCBD5E1),
-                                  fontWeight: FontWeight.w600,
+                                headerSubtitle,
+                                style: const TextStyle(
                                   fontSize: 11,
-                                  letterSpacing: 0.9,
+                                  fontWeight: FontWeight.w400,
+                                  letterSpacing: 0.55,
+                                  color: Color(0xFFCBD5E1),
                                 ),
                                 maxLines: 1,
-                                overflow: TextOverflow.clip,
+                                overflow: TextOverflow.ellipsis,
                                 softWrap: false,
                               ),
-                              SizedBox(height: 2),
+                              const SizedBox(height: 2),
                               Text(
-                                'City Abattoir System',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w700,
+                                headerTitle,
+                                style: const TextStyle(
                                   fontSize: 16,
-                                  height: 1.2,
+                                  height: 1.25,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.white,
                                 ),
                                 maxLines: 1,
-                                overflow: TextOverflow.clip,
+                                overflow: TextOverflow.ellipsis,
                                 softWrap: false,
                               ),
                             ],
@@ -677,12 +958,16 @@ class _AdminSidebarState extends State<_AdminSidebar>
                       ),
                     ),
                     IconButton(
-                      icon: _buildPanelToggleIcon(isCollapsed: false),
-                      tooltip: 'Collapse Sidebar',
+                      icon: widget.isDrawerMode
+                          ? const Icon(Icons.close_rounded, color: Colors.white70, size: 20)
+                          : _buildPanelToggleIcon(isCollapsed: false),
+                      tooltip: widget.isDrawerMode ? 'Close Menu' : 'Collapse Sidebar',
                       splashRadius: 18,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                      onPressed: _toggleCollapse,
+                      onPressed: widget.isDrawerMode
+                          ? () => Navigator.of(context).pop()
+                          : _toggleCollapse,
                     ),
                   ],
                 ),
@@ -709,7 +994,12 @@ class _AdminSidebarState extends State<_AdminSidebar>
     int badgeCount = 0,
   }) {
     final isSelected = widget.selectedIndex == index;
-    final showCollapsed = _isCollapsed || currentWidth < 160;
+    final t = _animController.value;
+    final isFullyCollapsed = currentWidth < 115;
+    // Pill is 60px wide when collapsed (80px - 20px outer padding), so left = 20px
+    // centers the 20px icon without ever switching MainAxisAlignment or jumping right.
+    final leftPad = 16.0 + (4.0 * t);
+    final rightPad = 16.0 * (1.0 - t);
 
     final itemWidget = Material(
       color: Colors.transparent,
@@ -719,9 +1009,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
         borderRadius: BorderRadius.circular(10),
         hoverColor: Colors.white.withValues(alpha: 0.10),
         child: Container(
-          padding: showCollapsed
-              ? const EdgeInsets.symmetric(vertical: 14)
-              : const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: EdgeInsets.fromLTRB(leftPad, 14, rightPad, 14),
           decoration: BoxDecoration(
             color: isSelected ? Colors.white : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
@@ -736,8 +1024,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                 : null,
           ),
           child: Row(
-            mainAxisAlignment:
-                showCollapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Stack(
                 clipBehavior: Clip.none,
@@ -749,7 +1036,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                         : const Color(0xFFE2E8F0),
                     size: 20,
                   ),
-                  if (badgeCount > 0 && showCollapsed)
+                  if (badgeCount > 0 && isFullyCollapsed)
                     Positioned(
                       right: -7,
                       top: -5,
@@ -773,7 +1060,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
                     ),
                 ],
               ),
-              if (!showCollapsed)
+              if (!isFullyCollapsed)
                 Expanded(
                   child: ClipRect(
                     child: FadeTransition(
@@ -787,12 +1074,12 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                 label,
                                 style: TextStyle(
                                   fontFamily: 'Segoe UI',
+                                  fontSize: 15,
+                                  height: 20 / 15,
+                                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                                   color: isSelected
                                       ? const Color(0xFF0F5132)
                                       : const Color(0xFFE2E8F0),
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                  fontSize: 15.5,
-                                  height: 1.3,
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.clip,
@@ -829,7 +1116,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
       ),
     );
 
-    if (showCollapsed) {
+    if (isFullyCollapsed) {
       return Tooltip(
         message: label,
         waitDuration: const Duration(milliseconds: 200),
@@ -843,7 +1130,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
       BuildContext context, bool isDark, AppSettingsService settings, double currentWidth) {
     final photoUrl = settings.profilePhotoUrl?.trim() ?? '';
     final hasPhoto = photoUrl.isNotEmpty;
-    final showCollapsed = _isCollapsed || currentWidth < 180;
+    final showCollapsed = currentWidth < 115;
 
     if (showCollapsed) {
       return Container(
@@ -860,7 +1147,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
             Tooltip(
               message: '${settings.profileName} • My Profile',
               child: InkWell(
-                onTap: () => widget.onItemSelected(7, 3),
+                onTap: () => widget.onItemSelected(7, 'profile'),
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(
                   padding: const EdgeInsets.all(2),
@@ -915,7 +1202,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
               color: Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               child: InkWell(
-                onTap: () => widget.onItemSelected(7, 3),
+                onTap: () => widget.onItemSelected(7, 'profile'),
                 borderRadius: BorderRadius.circular(8),
                 hoverColor: Colors.white.withValues(alpha: 0.10),
                 child: Padding(
@@ -946,8 +1233,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                 Text(
                                   settings.profileName,
                                   style: const TextStyle(
+                                    fontFamily: 'Segoe UI',
                                     color: Colors.white,
                                     fontSize: 14,
+                                    height: 20 / 14,
                                     fontWeight: FontWeight.w600,
                                   ),
                                   maxLines: 1,
@@ -957,8 +1246,10 @@ class _AdminSidebarState extends State<_AdminSidebar>
                                 Text(
                                   settings.currentRole,
                                   style: const TextStyle(
+                                    fontFamily: 'Segoe UI',
                                     color: Color(0xFF6EE7B7),
                                     fontSize: 12,
+                                    height: 16 / 12,
                                     fontWeight: FontWeight.w500,
                                   ),
                                   maxLines: 1,
@@ -1011,10 +1302,11 @@ class _AdminSidebarState extends State<_AdminSidebar>
                       child: const Text(
                         'Sign Out',
                         style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14.5,
-                          height: 20 / 14.5,
+                          fontFamily: 'Segoe UI',
+                          fontSize: 14,
+                          height: 20 / 14,
                           fontWeight: FontWeight.w600,
+                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -1029,6 +1321,15 @@ class _AdminSidebarState extends State<_AdminSidebar>
   }
 
   Future<void> _handleLogout(BuildContext context) async {
+    await AuditLogService.instance.log(
+      action: 'staff_logout',
+      module: 'Authentication',
+      targetRef: AppSettingsService.instance.profileEmail,
+      details: {
+        'role': AppSettingsService.instance.currentRole,
+        'name': AppSettingsService.instance.profileName,
+      },
+    );
     AdminRealtimeHub.instance.stop();
     StaffNotificationService.instance.stop();
     final prefs = await SharedPreferences.getInstance();

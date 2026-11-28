@@ -10,6 +10,7 @@ import 'pages/signup_page.dart';
 import 'screen/how_it_works.dart';
 import 'services/connectivity_service.dart';
 import 'services/livestock_fee_service.dart';
+import 'services/push_notification_service.dart';
 import 'widgets/connectivity_overlay.dart';
 
 void main() async {
@@ -58,6 +59,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _connectivity.checkNow(silent: true);
+      if (_isSupabaseInitialized) {
+        LivestockFeeService.instance.fetchFeesFromSupabase();
+      }
     }
   }
 
@@ -106,6 +110,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         setState(() => _loadingStatus = 'Loading slaughterhouse services...');
       }
       await LivestockFeeService.instance.initialize();
+      await PushNotificationService.instance.init();
     } catch (e) {
       debugPrint('App bootstrap error: $e');
       await _connectivity.checkNow();

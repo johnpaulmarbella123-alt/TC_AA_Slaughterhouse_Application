@@ -5,6 +5,9 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
+import '../services/audit_log_service.dart';
+import '../services/notification_service.dart';
+import '../utils/confinement_schedule_helper.dart';
 import '../widgets/staff_notification_bell.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -62,6 +65,19 @@ class _DashboardPageState extends State<DashboardPage> {
   double _avgProcessingHours = 0.0;
   double _satisfactionRate = 0.0;
   bool _isLoading = true;
+
+  // Live Slaughter Floor Queue & Upcoming Schedule state
+  String _liveQueueTab = 'active'; // 'active' | 'upcoming' | 'completed'
+  bool _liveQueueExpanded = false;
+
+  // Operational strip stats (Collections Today + Inspection Outcomes)
+  double _cashTodayTotal = 0.0;
+  int _cashTodayCount = 0;
+  double _onlineTodayTotal = 0.0;
+  int _onlineTodayCount = 0;
+  int _inspectionPassedToday = 0;
+  int _inspectionConfinedNow = 0;
+  int _inspectionCondemnedToday = 0;
 
   // Recent activity list
   List<Map<String, dynamic>> _recentActivities = [];
@@ -281,6 +297,25 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ],
                     ),
+                    if (!isPenaltyAccepted && isConfine) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.event_available_outlined, size: 14, color: Color(0xFF92400E)),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              '2-Day Confinement Ends: ${ConfinementScheduleHelper.formatEndLabel(ConfinementScheduleHelper.resolveConfinementEnd(req))}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -289,7 +324,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 isPenaltyAccepted
                     ? 'The customer accepted rescheduling to keep livestock in facility for resumed slaughter (₱0 facility delay fee). Go to Slaughter & Inspection to set the schedule.'
                     : (isConfine
-                        ? 'The customer agreed to confine the animal in the corral under observation. Once cleared by the veterinarian, you can resume slaughter.'
+                        ? 'The animal will remain under 2-day observation until ${ConfinementScheduleHelper.formatEndLabel(ConfinementScheduleHelper.resolveConfinementEnd(req))}. Once confinement ends, evaluate whether to continue slaughter or condemn and notify the customer.'
                         : 'The customer chose to retrieve their livestock. Please set the pickup schedule so the customer knows when to collect the animal at the corral.'),
                 style: const TextStyle(fontSize: 13, color: Color(0xFF4A5568)),
               ),
@@ -361,7 +396,7 @@ class _DashboardPageState extends State<DashboardPage> {
     try {
       final data = await supabase
           .from('requests')
-          .select('*, payments(*)')
+          .select('*, payments(*), slaughter_inspection(*)')
           .order('created_at', ascending: false);
 
       int pending = 0;
@@ -456,6 +491,17 @@ class _DashboardPageState extends State<DashboardPage> {
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
   // 2. DASHBOARD KPI STATS
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
+  bool _isOnlinePaymentMethod(dynamic raw) {
+    final m = (raw ?? '').toString().trim().toLowerCase();
+    return m.contains('gcash') ||
+        m.contains('online') ||
+        m.contains('xendit') ||
+        m.contains('paymongo') ||
+        m.contains('maya') ||
+        m.contains('qr') ||
+        m.contains('card');
+  }
+
   Future<void> _loadDashboardStats() async {
     try {
       final today = DateTime.now();
@@ -463,9 +509,16 @@ class _DashboardPageState extends State<DashboardPage> {
       double revenue = 0;
       int animals = 0;
       double avgHours = 0.0;
+      double cashTotal = 0.0;
+      int cashCount = 0;
+      double onlineTotal = 0.0;
+      int onlineCount = 0;
+      int passedToday = 0;
+      int confinedNow = 0;
+      int condemnedToday = 0;
       final countedRequestIds = <String>{};
 
-      // Fetch requests with inspection & payment details so Dashboard matches Reports & Records
+      // Fetch requests with inspection & payment details so Dashboard maintains continuous all-time totals
       try {
         final rawRequests = await supabase
             .from('requests')
@@ -505,17 +558,47 @@ class _DashboardPageState extends State<DashboardPage> {
           final condemnedCount = int.tryParse((insp?['condemned_count'] ?? r['condemned_count'] ?? '').toString()) ?? 0;
           final isPartialPassed = passedCount > 0 && condemnedCount > 0;
 
+          final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
+          final payCreatedAt = DateTime.tryParse(payment?['created_at']?.toString() ?? '');
+          final inspUpdatedAt = DateTime.tryParse(insp?['updated_at']?.toString() ?? '');
+          final inspCreatedAt = DateTime.tryParse(insp?['created_at']?.toString() ?? '');
+          final preferredDate = DateTime.tryParse(r['preferred_date']?.toString() ?? '');
+          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
+
+          final isToday = _isSameLocalDay(inspCreatedAt, today) ||
+              _isSameLocalDay(preferredDate, today) ||
+              _isSameLocalDay(releasedAt, today) ||
+              _isSameLocalDay(payCreatedAt, today) ||
+              _isSameLocalDay(inspUpdatedAt, today) ||
+              _isSameLocalDay(createdAt, today);
+
+          final isCondemned = post == 'failed' ||
+              status == 'post_mortem_failed' ||
+              status == 'condemned' ||
+              (condReason.isNotEmpty && condReason != 'null');
+          final isConfinedNow = !isCondemned &&
+              post != 'passed' &&
+              !['releasable', 'paid', 'released', 'completed', 'cancelled', 'rejected', 'taken_back'].contains(status) &&
+              (status == 'confined' || status == 'anti_mortem_failed' || anti == 'failed');
+
+          if (isConfinedNow) {
+            confinedNow += int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
+            continue;
+          }
+
           final isFullHealthIssue = !isPartialPassed &&
-              (anti == 'failed' ||
-                  status == 'anti_mortem_failed' ||
+              (isCondemned ||
                   status == 'taken_back' ||
-                  post == 'failed' ||
-                  status == 'post_mortem_failed' ||
-                  status == 'condemned' ||
-                  (condReason.isNotEmpty && condReason != 'null') ||
                   (vetFindings.isNotEmpty && vetFindings != 'null' && anti != 'passed'));
 
-          if (isFullHealthIssue) continue;
+          if (isFullHealthIssue) {
+            if (isCondemned && isToday) {
+              condemnedToday += condemnedCount > 0
+                  ? condemnedCount
+                  : (int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1);
+            }
+            continue;
+          }
 
           final isProcessed = post == 'passed' ||
               [
@@ -531,31 +614,22 @@ class _DashboardPageState extends State<DashboardPage> {
 
           if (!isProcessed) continue;
 
-          final releasedAt = DateTime.tryParse(r['released_at']?.toString() ?? '');
-          final payCreatedAt = DateTime.tryParse(payment?['created_at']?.toString() ?? '');
-          final inspUpdatedAt = DateTime.tryParse(insp?['updated_at']?.toString() ?? '');
-          final inspCreatedAt = DateTime.tryParse(insp?['created_at']?.toString() ?? '');
-          final preferredDate = DateTime.tryParse(r['preferred_date']?.toString() ?? '');
-          final createdAt = DateTime.tryParse(r['created_at']?.toString() ?? '');
-
-          final isToday = _isSameLocalDay(inspCreatedAt, today) ||
-              _isSameLocalDay(preferredDate, today) ||
-              _isSameLocalDay(releasedAt, today) ||
-              _isSameLocalDay(payCreatedAt, today) ||
-              _isSameLocalDay(inspUpdatedAt, today) ||
-              _isSameLocalDay(createdAt, today);
-
-          if (!isToday) continue;
-
           countedRequestIds.add(r['id'].toString());
 
-          // 1. Livestock Processed (Today)
+          if (isPartialPassed && condemnedCount > 0 && isToday) {
+            condemnedToday += condemnedCount;
+          }
+
+          // 1. Livestock Processed (All-Time Cumulative) + Passed Today (for Inspection Outcomes)
           final headCount = isPartialPassed
               ? passedCount
               : (int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1);
           animals += headCount;
+          if (isToday) {
+            passedToday += headCount;
+          }
 
-          // 2. Total Revenue (Today — matches Reports & Records _calcRequestFee)
+          // 2. Total Revenue & Collections Breakdown (All-Time Cumulative)
           double fee = 0;
           if (payment != null) {
             fee = double.tryParse((payment['total_amount'] ?? payment['amount'] ?? 0).toString()) ?? 0;
@@ -571,7 +645,20 @@ class _DashboardPageState extends State<DashboardPage> {
           }
           revenue += fee;
 
-          // 3. Avg Processing Time (Today — includes processed/paid/released transactions)
+          final payStatus = (payment?['status'] ?? '').toString().toLowerCase();
+          final isPaidReq = payStatus == 'paid' || ['paid', 'out_for_delivery', 'released', 'completed'].contains(status);
+          if (isPaidReq && fee > 0) {
+            final methodRaw = payment?['payment_method'] ?? r['payment_method'];
+            if (_isOnlinePaymentMethod(methodRaw)) {
+              onlineTotal += fee;
+              onlineCount++;
+            } else {
+              cashTotal += fee;
+              cashCount++;
+            }
+          }
+
+          // 3. Avg Processing Time (All-Time Cumulative)
           final isDoneOrNearDone = post == 'passed' ||
               ['releasable', 'paid', 'out_for_delivery', 'released', 'completed'].contains(status);
           final endTime = releasedAt ?? payCreatedAt ?? inspUpdatedAt ?? inspCreatedAt;
@@ -584,20 +671,27 @@ class _DashboardPageState extends State<DashboardPage> {
 
         if (completedCount > 0) avgHours = totalHours / completedCount;
 
-        // Also include any standalone paid payments today whose request wasn't counted above
+        // Also include any standalone paid payments whose request wasn't counted above (All-Time)
         try {
           final paymentsData = await supabase
               .from('payments')
-              .select('request_id, total_amount, status, created_at')
+              .select('request_id, total_amount, payment_method, status, created_at')
               .eq('status', 'paid');
 
           for (var p in List<Map<String, dynamic>>.from(paymentsData)) {
             final reqIdStr = p['request_id']?.toString() ?? '';
             if (reqIdStr.isNotEmpty && countedRequestIds.contains(reqIdStr)) continue;
-            final pCreated = DateTime.tryParse(p['created_at']?.toString() ?? '');
-            if (!_isSameLocalDay(pCreated, today)) continue;
             final amt = double.tryParse(p['total_amount']?.toString() ?? '0') ?? 0;
             revenue += amt;
+            if (amt > 0) {
+              if (_isOnlinePaymentMethod(p['payment_method'])) {
+                onlineTotal += amt;
+                onlineCount++;
+              } else {
+                cashTotal += amt;
+                cashCount++;
+              }
+            }
           }
         } catch (e) {
           debugPrint('Dashboard standalone payments query error: $e');
@@ -654,6 +748,13 @@ class _DashboardPageState extends State<DashboardPage> {
           _animalsProcessed = animals;
           _avgProcessingHours = avgHours;
           _satisfactionRate = satisfaction;
+          _cashTodayTotal = cashTotal;
+          _cashTodayCount = cashCount;
+          _onlineTodayTotal = onlineTotal;
+          _onlineTodayCount = onlineCount;
+          _inspectionPassedToday = passedToday;
+          _inspectionConfinedNow = confinedNow;
+          _inspectionCondemnedToday = condemnedToday;
         });
       }
     } catch (e) {
@@ -1121,8 +1222,12 @@ class _DashboardPageState extends State<DashboardPage> {
                 _buildMiddleSection(),
                 const SizedBox(height: 24),
 
-                // â”€â”€â”€ 5. BOTTOM 6 MODULE QUICK NAVIGATION CARDS â”€â”€â”€
-                _buildModulesGrid(),
+                // ─── 5. OPERATIONAL STRIP: COLLECTIONS TODAY & INSPECTION OUTCOMES ───
+                _buildOperationalStrip(),
+                const SizedBox(height: 20),
+
+                // ─── 6. BOTTOM LIVE OPERATIONS: SLAUGHTER FLOOR QUEUE & SCHEDULE ───
+                _buildLiveFloorQueueCard(),
                 const SizedBox(height: 20),
               ],
             ),
@@ -1136,22 +1241,20 @@ class _DashboardPageState extends State<DashboardPage> {
   // WIDGET 1: HEADER ROW
   // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
   Widget _buildHeaderRow() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        // Welcome Text
-        Column(
+    Widget buildWelcome() => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Welcome back, Admin',
-              style: TextStyle(
+            Text(
+              AppSettingsService.instance.isSuperAdmin
+                  ? 'Welcome back, Super Admin'
+                  : 'Welcome back, Admin',
+              style: const TextStyle(
                 fontSize: 24,
                 height: 32 / 24,
                 fontWeight: FontWeight.w700,
                 color: Color(0xFF0F172A),
               ),
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 3),
             Text(
@@ -1162,69 +1265,88 @@ class _DashboardPageState extends State<DashboardPage> {
                 color: Color(0xFF475569),
                 fontWeight: FontWeight.w400,
               ),
+              overflow: TextOverflow.ellipsis,
             ),
           ],
-        ),
+        );
 
-        // Right side: Search Box & Admin Avatar
-        Row(
-          children: [
-            // Search reference no.
-            Container(
-              width: 260,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.02),
-                    blurRadius: 4,
-                    offset: const Offset(0, 1),
-                  ),
-                ],
+    Widget buildSearchBox({double? width}) => Container(
+          width: width,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 4,
+                offset: const Offset(0, 1),
               ),
-              child: TextField(
-                controller: _searchCtrl,
-                onSubmitted: _handleSearch,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
-                decoration: InputDecoration(
-                  hintText: 'Search reference no.',
-                  hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
-                  prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF94A3B8)),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() {});
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
+            ],
+          ),
+          child: TextField(
+            controller: _searchCtrl,
+            onSubmitted: _handleSearch,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+            decoration: InputDecoration(
+              hintText: 'Search reference no.',
+              hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+              prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF94A3B8)),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        setState(() {});
+                      },
+                    )
+                  : null,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
-            const SizedBox(width: 8),
+          ),
+        );
 
-            // Staff notification bell
+    Widget buildActions() => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
             StaffNotificationBell(
               onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
             ),
-            const SizedBox(width: 4),
-
-            // Refresh action
-            IconButton(
-              icon: const Icon(Icons.refresh, size: 20, color: Color(0xFF64748B)),
-              tooltip: 'Refresh data',
-              splashRadius: 18,
-              onPressed: () => _loadAllDashboardData(),
-            ),
           ],
-        ),
-      ],
+        );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 760) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: buildWelcome()),
+              const SizedBox(width: 16),
+              buildSearchBox(width: 260),
+              const SizedBox(width: 8),
+              buildActions(),
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: buildWelcome()),
+                const SizedBox(width: 8),
+                buildActions(),
+              ],
+            ),
+            const SizedBox(height: 12),
+            buildSearchBox(),
+          ],
+        );
+      },
     );
   }
 
@@ -1427,71 +1549,73 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           const SizedBox(height: 18),
 
-          // Horizontal 5-stage stepper
+          // Responsive 5-stage stepper (horizontal on desktop, 2-col grid on Android phones)
           LayoutBuilder(
             builder: (context, constraints) {
-              return Row(
-                children: [
-                  Expanded(
-                    child: _buildStageBox(
-                      count: _pendingCount,
-                      label: 'Receiving & new',
-                      isHighlighted: _pendingCount > 0,
-                      onTap: () => widget.onNavigate?.call(1),
-                      highlightBgColor: const Color(0xFFFEF2F2),
-                      highlightBorderColor: const Color(0xFFFECACA),
-                      highlightTextColor: const Color(0xFFDC2626),
-                    ),
-                  ),
-                  _buildChevron(),
-                  Expanded(
-                    child: _buildStageBox(
-                      count: _docVerifCount,
-                      label: 'Document verification',
-                      isHighlighted: _docVerifCount > 0,
-                      onTap: () => widget.onNavigate?.call(2),
-                      highlightBgColor: const Color(0xFFEFF6FF),
-                      highlightBorderColor: const Color(0xFFBFDBFE),
-                      highlightTextColor: const Color(0xFF2563EB),
-                    ),
-                  ),
-                  _buildChevron(),
-                  Expanded(
-                    child: _buildStageBox(
-                      count: _slaughterCount,
-                      label: 'Slaughter & inspection',
-                      isHighlighted: _slaughterCount > 0,
-                      onTap: () => widget.onNavigate?.call(3),
-                      highlightBgColor: const Color(0xFFF0FDF4),
-                      highlightBorderColor: const Color(0xFFBBF7D0),
-                      highlightTextColor: const Color(0xFF16A34A),
-                    ),
-                  ),
-                  _buildChevron(),
-                  Expanded(
-                    child: _buildStageBox(
-                      count: _paymentCount,
-                      label: 'Payment',
-                      isHighlighted: _paymentCount > 0,
-                      onTap: () => widget.onNavigate?.call(4),
-                      highlightBgColor: const Color(0xFFFFFBEB),
-                      highlightBorderColor: const Color(0xFFFDE68A),
-                      highlightTextColor: const Color(0xFFD97706),
-                    ),
-                  ),
-                  _buildChevron(),
-                  Expanded(
-                    child: _buildStageBox(
-                      count: _releasingCount,
-                      label: 'Meat releasing',
-                      isHighlighted: _releasingCount > 0,
-                      onTap: () => widget.onNavigate?.call(5),
-                      highlightBgColor: const Color(0xFFFAF5FF),
-                      highlightBorderColor: const Color(0xFFE9D5FF),
-                      highlightTextColor: const Color(0xFF9333EA),
-                    ),
-                  ),
-                ],
+              final boxes = [
+                _buildStageBox(
+                  count: _pendingCount,
+                  label: 'Receiving & new',
+                  isHighlighted: _pendingCount > 0,
+                  onTap: () => widget.onNavigate?.call(1),
+                  highlightBgColor: const Color(0xFFFEF2F2),
+                  highlightBorderColor: const Color(0xFFFECACA),
+                  highlightTextColor: const Color(0xFFDC2626),
+                ),
+                _buildStageBox(
+                  count: _docVerifCount,
+                  label: 'Document verification',
+                  isHighlighted: _docVerifCount > 0,
+                  onTap: () => widget.onNavigate?.call(2),
+                  highlightBgColor: const Color(0xFFEFF6FF),
+                  highlightBorderColor: const Color(0xFFBFDBFE),
+                  highlightTextColor: const Color(0xFF2563EB),
+                ),
+                _buildStageBox(
+                  count: _slaughterCount,
+                  label: 'Slaughter & inspection',
+                  isHighlighted: _slaughterCount > 0,
+                  onTap: () => widget.onNavigate?.call(3),
+                  highlightBgColor: const Color(0xFFF0FDF4),
+                  highlightBorderColor: const Color(0xFFBBF7D0),
+                  highlightTextColor: const Color(0xFF16A34A),
+                ),
+                _buildStageBox(
+                  count: _paymentCount,
+                  label: 'Payment',
+                  isHighlighted: _paymentCount > 0,
+                  onTap: () => widget.onNavigate?.call(4),
+                  highlightBgColor: const Color(0xFFFFFBEB),
+                  highlightBorderColor: const Color(0xFFFDE68A),
+                  highlightTextColor: const Color(0xFFD97706),
+                ),
+                _buildStageBox(
+                  count: _releasingCount,
+                  label: 'Meat releasing',
+                  isHighlighted: _releasingCount > 0,
+                  onTap: () => widget.onNavigate?.call(5),
+                  highlightBgColor: const Color(0xFFFAF5FF),
+                  highlightBorderColor: const Color(0xFFE9D5FF),
+                  highlightTextColor: const Color(0xFF9333EA),
+                ),
+              ];
+
+              if (constraints.maxWidth >= 680) {
+                return Row(
+                  children: [
+                    for (int i = 0; i < boxes.length; i++) ...[
+                      if (i > 0) _buildChevron(),
+                      Expanded(child: boxes[i]),
+                    ],
+                  ],
+                );
+              }
+
+              final cardW = (constraints.maxWidth - 10) / 2;
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: boxes.map((b) => SizedBox(width: cardW, child: b)).toList(),
               );
             },
           ),
@@ -1888,108 +2012,47 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Widget _buildModulesGrid() {
+  // ═══════════════════════════════════════════════════════════
+  // WIDGET 5A: OPERATIONAL STRIP (COLLECTIONS TODAY & INSPECTION OUTCOMES)
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildOperationalStrip() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth > 950;
-        final cardCount = isWide ? 3 : 2;
-
-        return GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: cardCount,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          childAspectRatio: isWide ? 1.9 : 1.65,
+        if (constraints.maxWidth >= 860) {
+          return IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _buildCollectionsTodayCard()),
+                const SizedBox(width: 16),
+                Expanded(child: _buildInspectionOutcomesCard()),
+              ],
+            ),
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. Receiving & New Requests
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/receiving_new_request.png',
-              badgeCount: _pendingCount,
-              title: 'Receiving & New Requests',
-              subtitle: _pendingCount > 0 ? '$_pendingCount pending requests' : 'No pending requests',
-              buttonLabel: 'View Requests',
-              onTap: () => widget.onNavigate?.call(1),
-            ),
-
-            // 2. Document Verification
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/document_verification.png',
-              badgeCount: _docVerifCount,
-              title: 'Document Verification',
-              subtitle: _docVerifCount > 0 ? '$_docVerifCount pending verification' : 'Verify uploaded documents',
-              buttonLabel: 'Verify Documents',
-              onTap: () => widget.onNavigate?.call(2),
-            ),
-
-            // 3. Slaughter & Inspection
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/slaughter_inspection.png',
-              badgeCount: _slaughterCount,
-              title: 'Slaughter & Inspection',
-              subtitle: _slaughterCount > 0 ? '$_slaughterCount in processing' : 'Processing and inspection',
-              buttonLabel: 'Start Inspection',
-              onTap: () => widget.onNavigate?.call(3),
-            ),
-
-            // 4. Payment & Cashiering
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/payment_cashiering.png',
-              badgeCount: _paymentCount,
-              title: 'Payment & Cashiering',
-              subtitle: _paymentCount > 0 ? '$_paymentCount awaiting payment' : 'Awaiting payment',
-              buttonLabel: 'Collect Payments',
-              onTap: () => widget.onNavigate?.call(4),
-            ),
-
-            // 5. Meat Releasing
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/meat_releasing.png',
-              badgeCount: _releasingCount,
-              title: 'Meat Releasing',
-              subtitle: _releasingCount > 0 ? '$_releasingCount ready for release' : 'Ready for release',
-              buttonLabel: 'Manage Releasing',
-              onTap: () => widget.onNavigate?.call(5),
-            ),
-
-            // 6. Reports & Records
-            _buildModuleNavCard(
-              imageAssetPath: 'assets/images/reports_records.png',
-              badgeCount: 0,
-              title: 'Reports & Records',
-              subtitle: 'Analytics, daily logs & reviews',
-              hasRedBorder: false,
-              isRedBadge: false,
-              buttonLabel: 'View Reports',
-              onTap: () => widget.onNavigate?.call(6, 'Analytics'),
-            ),
+            _buildCollectionsTodayCard(),
+            const SizedBox(height: 16),
+            _buildInspectionOutcomesCard(),
           ],
         );
       },
     );
   }
 
-  Widget _buildModuleNavCard({
-    Widget? iconWidget,
-    String? imageAssetPath,
-    Color iconBgColor = Colors.transparent,
-    required int badgeCount,
-    required String title,
-    required String subtitle,
-    bool hasRedBorder = false,
-    bool isRedBadge = false,
-    String buttonLabel = 'Open module',
-    required VoidCallback onTap,
-  }) {
+  Widget _buildCollectionsTodayCard() {
+    final totalCollected = _cashTodayTotal + _onlineTodayTotal;
+    final cashPct = totalCollected > 0 ? ((_cashTodayTotal / totalCollected) * 100).round() : 0;
+    final onlinePct = totalCollected > 0 ? 100 - cashPct : 0;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: hasRedBorder ? const Color(0xFFFCA5A5) : const Color(0xFFE2E8F0),
-          width: hasRedBorder ? 1.5 : 1,
-        ),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.02),
@@ -2001,111 +2064,983 @@ class _DashboardPageState extends State<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Top Row: Icon & Badge
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              if (imageAssetPath != null)
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    imageAssetPath,
-                    width: 36,
-                    height: 36,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: iconBgColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      alignment: Alignment.center,
-                      child: iconWidget ?? const Icon(Icons.dashboard_outlined, size: 20, color: Colors.grey),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Total Collections',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
                     ),
-                  ),
-                )
-              else
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: iconBgColor,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  alignment: Alignment.center,
-                  child: iconWidget,
+                    SizedBox(height: 2),
+                    Text(
+                      'All-time Cash drawer vs. GCash / Online payment breakdown',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
                 ),
-              if (badgeCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: isRedBadge ? const Color(0xFFDC2626) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '$badgeCount',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: isRedBadge ? Colors.white : const Color(0xFF475569),
+              ),
+              if (_paymentCount > 0)
+                InkWell(
+                  onTap: () => widget.onNavigate?.call(4),
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF3C7),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$_paymentCount unpaid',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFB45309)),
                     ),
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-
-          // Title & Subtitle in Expanded area
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFA7F3D0)),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF64748B),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.payments_outlined, size: 15, color: Color(0xFF047857)),
+                          SizedBox(width: 5),
+                          Text('Cash', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF047857))),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatRevenue(_cashTodayTotal),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF065F46)),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_cashTodayCount ${_cashTodayCount == 1 ? 'payment' : 'payments'} ($cashPct%)',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF047857)),
+                      ),
+                    ],
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.phone_android_outlined, size: 15, color: Color(0xFF1D4ED8)),
+                          SizedBox(width: 5),
+                          Text('GCash / Online', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Color(0xFF1D4ED8))),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatRevenue(_onlineTodayTotal),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF1E3A8A)),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '$_onlineTodayCount ${_onlineTodayCount == 1 ? 'payment' : 'payments'} ($onlinePct%)',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF1D4ED8)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-
-          // Open Module Button
-          SizedBox(
-            width: double.infinity,
-            height: 32,
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Color(0xFFE2E8F0)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                foregroundColor: const Color(0xFF1E293B),
-                padding: EdgeInsets.zero,
-              ),
-              onPressed: onTap,
-              child: Text(
-                buttonLabel,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-              ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: 7,
+              child: totalCollected <= 0
+                  ? Container(color: const Color(0xFFE2E8F0))
+                  : Row(
+                      children: [
+                        if (_cashTodayTotal > 0)
+                          Expanded(
+                            flex: _cashTodayTotal.round().clamp(1, 10000000),
+                            child: Container(color: const Color(0xFF059669)),
+                          ),
+                        if (_onlineTodayTotal > 0)
+                          Expanded(
+                            flex: _onlineTodayTotal.round().clamp(1, 10000000),
+                            child: Container(color: const Color(0xFF2563EB)),
+                          ),
+                      ],
+                    ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildInspectionOutcomesCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Inspection Outcomes',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Food-safety clearance, 2-day confinement & condemnations',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => widget.onNavigate?.call(3),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF2D6A4F),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text('Inspection →', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildOutcomeStatTile(
+                  label: 'Passed Today',
+                  value: '$_inspectionPassedToday',
+                  unit: _inspectionPassedToday == 1 ? 'head' : 'heads',
+                  color: const Color(0xFF15803D),
+                  bgColor: const Color(0xFFECFDF5),
+                  borderColor: const Color(0xFFA7F3D0),
+                  icon: Icons.check_circle_outline,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildOutcomeStatTile(
+                  label: 'Confined (2d)',
+                  value: '$_inspectionConfinedNow',
+                  unit: 'on hold',
+                  color: const Color(0xFFB45309),
+                  bgColor: const Color(0xFFFFFBEB),
+                  borderColor: const Color(0xFFFDE68A),
+                  icon: Icons.medical_services_outlined,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildOutcomeStatTile(
+                  label: 'Condemned',
+                  value: '$_inspectionCondemnedToday',
+                  unit: 'today',
+                  color: const Color(0xFFDC2626),
+                  bgColor: const Color(0xFFFEF2F2),
+                  borderColor: const Color(0xFFFECACA),
+                  icon: Icons.gpp_bad_outlined,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOutcomeStatTile({
+    required String label,
+    required String value,
+    required String unit,
+    required Color color,
+    required Color bgColor,
+    required Color borderColor,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 12),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                value,
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color),
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  unit,
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: color.withValues(alpha: 0.85)),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _isRequestOverdue(Map<String, dynamic> req) {
+    final rawTime = req['updated_at'] ?? req['created_at'];
+    final dt = DateTime.tryParse(rawTime?.toString() ?? '')?.toLocal();
+    if (dt == null) return false;
+    final thresholdHours = _avgProcessingHours > 1.0 ? _avgProcessingHours : 24.0;
+    final elapsedHours = DateTime.now().difference(dt).inMinutes / 60.0;
+    return elapsedHours > thresholdHours;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // WIDGET 5B: LIVE SLAUGHTER FLOOR QUEUE & UPCOMING SCHEDULE
+  // ═══════════════════════════════════════════════════════════
+  ({int moduleIndex, String label, Color color, Color bgColor}) _resolveAdminQueueStage(
+    Map<String, dynamic> req,
+  ) {
+    final st = (req['status'] ?? '').toString().toLowerCase();
+    final releasedAt = req['released_at'];
+
+    if (st == 'released' || st == 'completed' || releasedAt != null) {
+      return (
+        moduleIndex: 5,
+        label: 'Released',
+        color: const Color(0xFF15803D),
+        bgColor: const Color(0xFFDCFCE7),
+      );
+    }
+
+    bool isPaid = st == 'paid' || st == 'out_for_delivery';
+    final payments = req['payments'];
+    if (!isPaid && payments != null) {
+      if (payments is List && payments.isNotEmpty) {
+        isPaid = payments.any((p) => (p as Map)['status'] == 'paid');
+      } else if (payments is Map) {
+        isPaid = payments['status'] == 'paid';
+      }
+    }
+
+    if (st == 'pending' || st == 'pending_approval') {
+      return (
+        moduleIndex: 1,
+        label: 'Receiving',
+        color: const Color(0xFFB45309),
+        bgColor: const Color(0xFFFEF3C7),
+      );
+    }
+    if (st == 'approved' ||
+        st == 'doc_submitted' ||
+        st == 'pending_verification' ||
+        st == 'document_pending') {
+      return (
+        moduleIndex: 2,
+        label: 'Verification',
+        color: const Color(0xFF1D4ED8),
+        bgColor: const Color(0xFFDBEAFE),
+      );
+    }
+    if (st == 'anti_mortem_failed' ||
+        st == 'post_mortem_failed' ||
+        st == 'confined' ||
+        st == 'delay_error' ||
+        st == 'pickup_scheduled') {
+      return (
+        moduleIndex: 3,
+        label: 'Inspection Flagged',
+        color: const Color(0xFFDC2626),
+        bgColor: const Color(0xFFFEE2E2),
+      );
+    }
+    if (st == 'doc_verified' || st == 'slaughter_started') {
+      return (
+        moduleIndex: 3,
+        label: st == 'slaughter_started' ? 'Slaughtering' : 'Inspection',
+        color: const Color(0xFF047857),
+        bgColor: const Color(0xFFD1FAE5),
+      );
+    }
+    if (isPaid) {
+      return (
+        moduleIndex: 5,
+        label: 'Ready for Release',
+        color: const Color(0xFF16A34A),
+        bgColor: const Color(0xFFDCFCE7),
+      );
+    }
+    if (st == 'releasable' || st == 'mic_generated' || st == 'payment_pending') {
+      return (
+        moduleIndex: 4,
+        label: 'Awaiting Payment',
+        color: const Color(0xFF6D28D9),
+        bgColor: const Color(0xFFEDE9FE),
+      );
+    }
+    return (
+      moduleIndex: 1,
+      label: 'In Queue',
+      color: const Color(0xFF475569),
+      bgColor: const Color(0xFFF1F5F9),
+    );
+  }
+
+  DateTime? _parseScheduledDate(Map<String, dynamic> req) {
+    final raw = req['slaughter_schedule'] ?? req['scheduled_date'] ?? req['preferred_date'];
+    if (raw == null) return null;
+    return DateTime.tryParse(raw.toString())?.toLocal();
+  }
+
+  String _formatQueueRelativeTime(Map<String, dynamic> req, String tab) {
+    if (tab == 'upcoming') {
+      final sched = _parseScheduledDate(req);
+      if (sched == null) return 'Scheduled';
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final schedDay = DateTime(sched.year, sched.month, sched.day);
+      final hasTime = sched.hour != 0 || sched.minute != 0;
+      final timePart = hasTime ? ' • ${DateFormat('h:mm a').format(sched)}' : '';
+      if (schedDay == todayStart) return 'Today$timePart';
+      if (schedDay == todayStart.add(const Duration(days: 1))) return 'Tomorrow$timePart';
+      return '${DateFormat('MMM d').format(sched)}$timePart';
+    }
+
+    final rawTime = tab == 'completed'
+        ? (req['released_at'] ?? req['updated_at'] ?? req['created_at'])
+        : (req['updated_at'] ?? req['created_at']);
+    final dt = DateTime.tryParse(rawTime?.toString() ?? '')?.toLocal();
+    if (dt == null) return '—';
+    if (tab == 'completed') {
+      return DateFormat('h:mm a').format(dt);
+    }
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return DateFormat('MMM d').format(dt);
+  }
+
+  Widget _buildLiveFloorQueueCard() {
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+
+    final List<Map<String, dynamic>> activeList = [];
+    final List<Map<String, dynamic>> upcomingList = [];
+    final List<Map<String, dynamic>> completedTodayList = [];
+
+    for (final req in _allRequests) {
+      final st = (req['status'] ?? '').toString().toLowerCase();
+      if (st == 'cancelled' || st == 'rejected' || st == 'condemned' || st == 'taken_back') {
+        continue;
+      }
+
+      final isReleased = st == 'released' || st == 'completed' || req['released_at'] != null;
+      if (isReleased) {
+        final relDt = DateTime.tryParse(
+          (req['released_at'] ?? req['updated_at'] ?? req['created_at'] ?? '').toString(),
+        );
+        if (_isSameLocalDay(relDt, now)) {
+          completedTodayList.add(req);
+        }
+        continue;
+      }
+
+      // Active on the floor (Stages 1–5)
+      activeList.add(req);
+
+      // Upcoming scheduled bookings (today or future scheduled date)
+      final sched = _parseScheduledDate(req);
+      if (sched != null) {
+        final schedDay = DateTime(sched.year, sched.month, sched.day);
+        if (!schedDay.isBefore(todayStart)) {
+          upcomingList.add(req);
+        }
+      }
+    }
+
+    upcomingList.sort((a, b) {
+      final da = _parseScheduledDate(a) ?? DateTime(2100);
+      final db = _parseScheduledDate(b) ?? DateTime(2100);
+      return da.compareTo(db);
+    });
+
+    final List<Map<String, dynamic>> currentItems = _liveQueueTab == 'upcoming'
+        ? upcomingList
+        : (_liveQueueTab == 'completed' ? completedTodayList : activeList);
+    final int overdueCount = activeList.where(_isRequestOverdue).length;
+
+    const int defaultCap = 8;
+    final bool hasMore = currentItems.length > defaultCap;
+    final visibleItems = (!_liveQueueExpanded && hasMore)
+        ? currentItems.take(defaultCap).toList()
+        : currentItems;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header + Tabs
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Text(
+                        'Live Slaughter Floor Queue',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.circle, size: 7, color: Color(0xFF16A34A)),
+                            SizedBox(width: 4),
+                            Text(
+                              'Live',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF15803D),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (overdueCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0xFFFECACA)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 12, color: Color(0xFFDC2626)),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$overdueCount Overdue',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFFDC2626),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Real-time status of active floor transactions, upcoming bookings, and completed releases',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Wrap(
+                  spacing: 2,
+                  children: [
+                    _liveQueueTabPill('active', 'Active Now', activeList.length),
+                    _liveQueueTabPill('upcoming', 'Upcoming Schedule', upcomingList.length),
+                    _liveQueueTabPill('completed', 'Completed Today', completedTodayList.length),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Queue Body
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: visibleItems.isEmpty
+                ? Container(
+                    key: ValueKey('empty_$_liveQueueTab'),
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(
+                          _liveQueueTab == 'completed'
+                              ? Icons.check_circle_outline
+                              : (_liveQueueTab == 'upcoming'
+                                  ? Icons.event_available_outlined
+                                  : Icons.fact_check_outlined),
+                          size: 28,
+                          color: const Color(0xFF94A3B8),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          _liveQueueTab == 'active'
+                              ? 'No active transactions on the slaughter floor right now.'
+                              : (_liveQueueTab == 'upcoming'
+                                  ? 'No upcoming scheduled slaughter bookings found.'
+                                  : 'No completed releases recorded yet today.'),
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Color(0xFF64748B),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  )
+                : LayoutBuilder(
+                    key: ValueKey('list_${_liveQueueTab}_${visibleItems.length}'),
+                    builder: (context, constraints) {
+                      final isCompact = constraints.maxWidth < 820;
+                      return Column(
+                        children: [
+                          if (!isCompact)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF8FAFC),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text('REFERENCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text('DEALER / OWNER', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text('SECTION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text('LIVESTOCK', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text('STAGE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text('TIME / SLOT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                                  ),
+                                  SizedBox(width: 72),
+                                ],
+                              ),
+                            ),
+                          ...visibleItems.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final req = entry.value;
+                            final isLast = idx == visibleItems.length - 1;
+                            return _buildLiveQueueRow(req, isCompact: isCompact, isLast: isLast);
+                          }),
+                          if (hasMore) ...[
+                            const SizedBox(height: 10),
+                            Center(
+                              child: TextButton.icon(
+                                onPressed: () => setState(() => _liveQueueExpanded = !_liveQueueExpanded),
+                                icon: Icon(
+                                  _liveQueueExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  _liveQueueExpanded
+                                      ? 'Show less'
+                                      : 'Show all (${currentItems.length})',
+                                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: const Color(0xFF2D6A4F),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveQueueTabPill(String tabKey, String label, int count) {
+    final active = _liveQueueTab == tabKey;
+    return GestureDetector(
+      onTap: () {
+        if (_liveQueueTab != tabKey) {
+          setState(() {
+            _liveQueueTab = tabKey;
+            _liveQueueExpanded = false;
+          });
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? Colors.white : Colors.transparent,
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: active ? const Color(0xFF2D6A4F).withValues(alpha: 0.12) : const Color(0xFFE2E8F0),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w700,
+                  color: active ? const Color(0xFF1B4332) : const Color(0xFF475569),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLiveQueueRow(
+    Map<String, dynamic> req, {
+    required bool isCompact,
+    required bool isLast,
+  }) {
+    final stage = _resolveAdminQueueStage(req);
+    final isOverdue = _liveQueueTab == 'active' && _isRequestOverdue(req);
+    final refNo = (req['reference_no'] ?? 'REQ-${req['id'] ?? ''}').toString();
+    final customer = (req['customer_name'] ?? req['owner_name'] ?? 'Walk-in Client').toString();
+    final mark = (req['customer_marking'] ?? req['animal_tag'] ?? '').toString().trim();
+    final isMarket = (req['request_type'] ?? req['section'] ?? '').toString().toLowerCase().contains('market');
+    final species = (req['livestock_type'] ?? req['animal_type'] ?? 'Hog').toString();
+    final heads = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    final timeStr = _formatQueueRelativeTime(req, _liveQueueTab);
+
+    final sectionBadge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isMarket ? const Color(0xFFEFF6FF) : const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        isMarket ? 'Market' : 'Barangay',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: isMarket ? const Color(0xFF1D4ED8) : const Color(0xFFB45309),
+        ),
+      ),
+    );
+
+    final stageBadge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: stage.bgColor,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        stage.label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: stage.color,
+        ),
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+
+    if (isCompact) {
+      return InkWell(
+        onTap: () => widget.onNavigate?.call(stage.moduleIndex),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          margin: EdgeInsets.only(bottom: isLast ? 0 : 10),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '$refNo • $customer',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  stageBadge,
+                ],
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  sectionBadge,
+                  if (mark.isNotEmpty)
+                    Text('Mark: $mark', style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569), fontWeight: FontWeight.w600)),
+                  Text('$species ($heads hd)', style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569))),
+                  Text('• $timeStr', style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B))),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return InkWell(
+      onTap: () => widget.onNavigate?.call(stage.moduleIndex),
+      hoverColor: const Color(0xFFF8FAFC),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          border: isLast ? null : const Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: Text(
+                refNo,
+                style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      customer,
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (mark.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        mark,
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Align(alignment: Alignment.centerLeft, child: sectionBadge),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                '$species • $heads hd',
+                style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155), fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    stageBadge,
+                    if (isOverdue)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEE2E2),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: const Text(
+                          'Overdue',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFFDC2626)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Text(
+                timeStr,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            SizedBox(
+              width: 72,
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Open →',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF2D6A4F),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -3236,21 +4171,633 @@ class _DashboardPageState extends State<DashboardPage> {
         StaffNotificationBell(
           onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
         ),
-        const SizedBox(width: 10),
-        Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
-          ),
-          child: IconButton(
-            icon: const Icon(Icons.refresh, size: 20, color: Color(0xFF64748B)),
-            tooltip: 'Refresh data',
-            onPressed: () => _loadAllDashboardData(),
-          ),
-        ),
       ],
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // INSPECTOR: CONFINED LIVESTOCK MONITOR (2-DAY OBSERVATION)
+  // ═══════════════════════════════════════════════════════════
+  Map<String, dynamic>? _extractInspectionMap(Map<String, dynamic> req) {
+    final raw = req['slaughter_inspection'];
+    if (raw is List && raw.isNotEmpty && raw.first is Map) {
+      return Map<String, dynamic>.from(raw.first as Map);
+    }
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    return null;
+  }
+
+  DateTime _confinementStartOf(Map<String, dynamic> req) {
+    final insp = _extractInspectionMap(req);
+    final raw = insp?['updated_at'] ?? insp?['created_at'] ?? req['updated_at'] ?? req['created_at'];
+    return DateTime.tryParse(raw?.toString() ?? '')?.toLocal() ?? DateTime.now();
+  }
+
+  String _formatConfinementDuration(Duration d) {
+    if (d.inHours < 1) return '< 1h held';
+    if (d.inDays < 1) return '${d.inHours}h held';
+    final remH = d.inHours % 24;
+    return remH > 0 ? '${d.inDays}d ${remH}h held' : '${d.inDays}d held';
+  }
+
+  String _cleanDashboardFindings(String raw) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+        .replaceAll(RegExp(r'\[PHONE:[^\]]+\]\s*\|?\s*'), '')
+        .trim();
+    return cleaned.isEmpty || cleaned.toLowerCase() == 'null'
+        ? 'Failed ante-mortem inspection — under mandatory 2-day observation'
+        : cleaned;
+  }
+
+  Widget _buildInspectorConfinedMonitorCard() {
+    final now = DateTime.now();
+    final confinedList = _allRequests.where((req) {
+      final st = (req['status'] ?? '').toString().toLowerCase();
+      final insp = _extractInspectionMap(req);
+      final anti = (insp?['anti_mortem'] ?? '').toString().toLowerCase();
+      final post = (insp?['post_mortem'] ?? '').toString().toLowerCase();
+      if (post == 'failed' || st == 'post_mortem_failed' || st == 'condemned') return false;
+      if (post == 'passed' || ['releasable', 'paid', 'released', 'completed', 'cancelled', 'rejected', 'taken_back'].contains(st)) {
+        return false;
+      }
+      return st == 'confined' || st == 'anti_mortem_failed' || anti == 'failed';
+    }).toList();
+
+    // Sort longest held first so >= 48h warnings always appear at the top
+    confinedList.sort((a, b) => _confinementStartOf(a).compareTo(_confinementStartOf(b)));
+
+    final int readyCount = confinedList.where((r) => now.difference(_confinementStartOf(r)).inHours >= 48).length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: readyCount > 0 ? const Color(0xFFFCA5A5) : const Color(0xFFE2E8F0),
+          width: readyCount > 0 ? 1.4 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F172A).withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      const Icon(Icons.medical_services_outlined, size: 18, color: Color(0xFFB45309)),
+                      Text(
+                        'Confined Livestock Monitor — 2-Day Hold (${confinedList.length})',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      if (readyCount > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDC2626),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 13, color: Colors.white),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$readyCount Ready for Evaluation (2+ Days)',
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  const Text(
+                    'Livestock that failed ante-mortem inspection must be confined for 2 days before clearing for slaughter or condemnation',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+              TextButton(
+                onPressed: () => widget.onNavigate?.call(3),
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF2D6A4F),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+                child: const Text('Open Inspection →', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (confinedList.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle_outline, size: 18, color: Color(0xFF16A34A)),
+                  SizedBox(width: 8),
+                  Text(
+                    'No livestock currently held in 2-day confinement.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 780;
+                return Column(
+                  children: confinedList.asMap().entries.map((entry) {
+                    final idx = entry.key;
+                    final req = entry.value;
+                    final isLast = idx == confinedList.length - 1;
+                    final start = _confinementStartOf(req);
+                    final elapsed = now.difference(start);
+                    final isReady = elapsed.inHours >= 48;
+                    final isDay2 = !isReady && elapsed.inHours >= 24;
+
+                    final refNo = _refOf(req);
+                    final customer = (req['customer_name'] ?? req['owner_name'] ?? 'Walk-in Client').toString();
+                    final mark = (req['customer_marking'] ?? req['marking'] ?? req['animal_tag'] ?? '').toString().trim();
+                    final species = (req['livestock_type'] ?? 'Livestock').toString();
+                    final heads = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+                    final insp = _extractInspectionMap(req);
+                    final findings = _cleanDashboardFindings(
+                      (insp?['veterinary_findings'] ?? insp?['process_notes'] ?? req['notes'] ?? '').toString(),
+                    );
+                    final ageLabel = _formatConfinementDuration(elapsed);
+
+                    final Color badgeBg = isReady
+                        ? const Color(0xFFFEE2E2)
+                        : (isDay2 ? const Color(0xFFFEF3C7) : const Color(0xFFDBEAFE));
+                    final Color badgeFg = isReady
+                        ? const Color(0xFFDC2626)
+                        : (isDay2 ? const Color(0xFFB45309) : const Color(0xFF1D4ED8));
+                    final String badgeText = isReady
+                        ? 'WARNING • $ageLabel (Ready)'
+                        : (isDay2 ? 'Day 2 of 2 • $ageLabel' : 'Day 1 of 2 • $ageLabel');
+
+                    return Container(
+                      margin: EdgeInsets.only(bottom: isLast ? 0 : 10),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: isReady ? const Color(0xFFFEF2F2) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isReady ? const Color(0xFFFECACA) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: isCompact
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '$refNo • $customer',
+                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(999)),
+                                      child: Text(badgeText, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: badgeFg)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '$species ($heads hd)${mark.isNotEmpty ? ' • Mark: $mark' : ''} • Held since ${DateFormat('MMM d, h:mm a').format(start)}',
+                                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF475569), fontWeight: FontWeight.w500),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  findings,
+                                  style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 10),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () => _showInspectorConfinementEvaluationDialog(req, elapsed),
+                                    icon: const Icon(Icons.fact_check_outlined, size: 15),
+                                    label: Text(isReady ? 'Evaluate Now (Due)' : 'Evaluate Confinement'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isReady ? const Color(0xFFDC2626) : const Color(0xFF2D6A4F),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              children: [
+                                Expanded(
+                                  flex: 3,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(
+                                            refNo,
+                                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Flexible(
+                                            child: Text(
+                                              customer,
+                                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (mark.isNotEmpty) ...[
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(color: const Color(0xFFE2E8F0)),
+                                              ),
+                                              child: Text(mark, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Color(0xFF475569))),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        '$species ($heads hd) • Held since ${DateFormat('MMM d, h:mm a').format(start)}',
+                                        style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  flex: 3,
+                                  child: Text(
+                                    findings,
+                                    style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(color: badgeBg, borderRadius: BorderRadius.circular(999)),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isReady) ...[
+                                        Icon(Icons.warning_amber_rounded, size: 13, color: badgeFg),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Text(badgeText, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: badgeFg)),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                ElevatedButton.icon(
+                                  onPressed: () => _showInspectorConfinementEvaluationDialog(req, elapsed),
+                                  icon: const Icon(Icons.fact_check_outlined, size: 15),
+                                  label: Text(isReady ? 'Evaluate Now' : 'Evaluate', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isReady ? const Color(0xFFDC2626) : const Color(0xFF2D6A4F),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  ),
+                                ),
+                              ],
+                            ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showInspectorConfinementEvaluationDialog(Map<String, dynamic> req, Duration elapsed) {
+    final refNo = _refOf(req);
+    final customer = (req['customer_name'] ?? req['owner_name'] ?? 'Walk-in Client').toString();
+    final species = (req['livestock_type'] ?? 'Livestock').toString();
+    final heads = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+    final insp = _extractInspectionMap(req);
+    final findings = _cleanDashboardFindings(
+      (insp?['veterinary_findings'] ?? insp?['process_notes'] ?? req['notes'] ?? '').toString(),
+    );
+    final notesCtrl = TextEditingController();
+    final bool isEarly = elapsed.inHours < 48;
+    final int remainingHours = (48 - elapsed.inHours).clamp(0, 48);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.fact_check_outlined, color: Color(0xFF1B4332), size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Evaluate Confined Livestock — $refNo',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$customer • $species ($heads hd)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      Text('Duration Held: ${_formatConfinementDuration(elapsed)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                      const SizedBox(height: 4),
+                      Text('Ante-Mortem Findings: $findings', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    ],
+                  ),
+                ),
+                if (isEarly) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFFDE68A)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, size: 16, color: Color(0xFFB45309)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Early Evaluation Notice: ~$remainingHours hr(s) remaining in the mandatory 2-day (48h) observation hold.',
+                            style: const TextStyle(fontSize: 11.5, color: Color(0xFF92400E), fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 14),
+                TextField(
+                  controller: notesCtrl,
+                  maxLines: 3,
+                  decoration: InputDecoration(
+                    labelText: 'Veterinary Evaluation Notes / Condemnation Reason',
+                    hintText: 'Required if condemning; optional notes if clearing for slaughter...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final reason = notesCtrl.text.trim();
+              if (reason.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a condemnation reason before condemning.'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(ctx);
+              await _inspectorCondemnFromConfinement(req, reason: reason);
+            },
+            icon: const Icon(Icons.gpp_bad_outlined, size: 16),
+            label: const Text('Condemn Livestock'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFC0392B),
+              foregroundColor: Colors.white,
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final notes = notesCtrl.text.trim();
+              Navigator.pop(ctx);
+              await _inspectorClearConfinement(req, notes: notes);
+            },
+            icon: const Icon(Icons.check_circle_outline, size: 16),
+            label: const Text('Clear & Send to Slaughter'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E855A),
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _inspectorClearConfinement(Map<String, dynamic> req, {String notes = ''}) async {
+    try {
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final livestockType = req['livestock_type'] ?? 'Livestock';
+      final animalCount = req['animal_count'] ?? 1;
+      final refNo = _refOf(req);
+      final inspectorName = AppSettingsService.instance.profileName.isNotEmpty
+          ? AppSettingsService.instance.profileName
+          : 'Meat Inspector';
+
+      await supabase.from('requests').update({'status': 'slaughter_started'}).eq('id', reqId);
+
+      final existingInsp = await supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      final nowUtcIso = DateTime.now().toUtc().toIso8601String();
+      final resolvedNotesBase = notes.isNotEmpty
+          ? 'Cleared after 2-day confinement observation: $notes'
+          : 'Cleared after 2-day confinement observation. Resumed active slaughter at Stunning stage.';
+      final inspData = <String, dynamic>{
+        'request_id': reqId,
+        'anti_mortem': 'Passed',
+        'process_stage': 'Stunning',
+        'ante_mortem_passed_at': nowUtcIso,
+        'inspector_name': inspectorName,
+        'process_notes': '[AM_PASSED_AT:$nowUtcIso] $resolvedNotesBase',
+      };
+      try {
+        if (existingInsp != null) {
+          await supabase.from('slaughter_inspection').update(inspData).eq('request_id', reqId);
+        } else {
+          await supabase.from('slaughter_inspection').insert(inspData);
+        }
+      } catch (_) {
+        inspData.remove('ante_mortem_passed_at');
+        if (existingInsp != null) {
+          await supabase.from('slaughter_inspection').update(inspData).eq('request_id', reqId);
+        } else {
+          await supabase.from('slaughter_inspection').insert(inspData);
+        }
+      }
+
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: '$livestockType — Cleared & Ready for Slaughter',
+        message: 'Your $animalCount head(s) of $livestockType ($refNo) has been cleared after confinement and sent to active slaughter.',
+        type: 'slaughter_started',
+        referenceNo: refNo,
+        data: {'request_id': reqId, 'reference_no': refNo, 'livestock_type': livestockType, 'process_stage': 'Stunning'},
+      );
+
+      await AuditLogService.instance.log(
+        action: 'confinement_cleared_for_slaughter',
+        module: 'Slaughter & Inspection',
+        targetId: reqId?.toString(),
+        targetRef: refNo,
+        details: {'livestock': livestockType, 'heads': animalCount, 'notes': notes},
+      );
+
+      await _loadAllDashboardData(silent: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$refNo cleared for slaughter and moved to Stunning stage.'),
+            backgroundColor: const Color(0xFF1E855A),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to clear confinement: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _inspectorCondemnFromConfinement(Map<String, dynamic> req, {required String reason}) async {
+    try {
+      final reqId = req['id'];
+      final userId = req['user_id'];
+      final livestockType = req['livestock_type'] ?? 'Livestock';
+      final animalCount = req['animal_count'] ?? 1;
+      final refNo = _refOf(req);
+      final inspectorName = AppSettingsService.instance.profileName.isNotEmpty
+          ? AppSettingsService.instance.profileName
+          : 'Meat Inspector';
+
+      await supabase.from('requests').update({'status': 'post_mortem_failed'}).eq('id', reqId);
+
+      final existingInsp = await supabase.from('slaughter_inspection').select('id').eq('request_id', reqId).maybeSingle();
+      final inspData = <String, dynamic>{
+        'request_id': reqId,
+        'anti_mortem': 'Failed',
+        'post_mortem': 'Failed',
+        'process_stage': 'Condemned',
+        'inspector_name': inspectorName,
+        'condemnation_reason': reason,
+        'process_notes': 'Condemned after 2-day confinement evaluation: $reason',
+      };
+      if (existingInsp != null) {
+        await supabase.from('slaughter_inspection').update(inspData).eq('request_id', reqId);
+      } else {
+        await supabase.from('slaughter_inspection').insert(inspData);
+      }
+
+      await NotificationService.sendNotificationSafely(
+        supabase,
+        userId: userId,
+        title: '$livestockType — Condemned Following Confinement',
+        message: 'Following 2-day veterinary confinement and re-evaluation, your $animalCount head(s) of $livestockType ($refNo) was deemed unfit for slaughter and condemned ($reason).',
+        type: 'post_mortem_failed',
+        referenceNo: refNo,
+        data: {'request_id': reqId, 'reference_no': refNo, 'livestock_type': livestockType, 'condemnation_reason': reason},
+      );
+
+      await AuditLogService.instance.log(
+        action: 'confinement_condemned',
+        module: 'Slaughter & Inspection',
+        targetId: reqId?.toString(),
+        targetRef: refNo,
+        details: {'livestock': livestockType, 'heads': animalCount, 'reason': reason},
+      );
+
+      await _loadAllDashboardData(silent: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$refNo marked as Condemned. Customer notified.'),
+            backgroundColor: const Color(0xFFC0392B),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to condemn livestock: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   // =========================================================
@@ -3459,19 +5006,6 @@ class _DashboardPageState extends State<DashboardPage> {
                     StaffNotificationBell(
                       onNavigate: (m, [tab]) => widget.onNavigate?.call(m, tab),
                     ),
-                    const SizedBox(width: 10),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
-                      ),
-                      child: IconButton(
-                        icon: const Icon(Icons.refresh, size: 20, color: Color(0xFF64748B)),
-                        tooltip: 'Refresh floor data',
-                        onPressed: () => _loadAllDashboardData(),
-                      ),
-                    ),
                   ],
                 ),
               ],
@@ -3533,6 +5067,10 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 24),
+
+            // ── Confined Livestock Monitor (2-Day Observation Hold) ──
+            _buildInspectorConfinedMonitorCard(),
             const SizedBox(height: 24),
 
             // ── Today's slaughterhouse floor workflow ──

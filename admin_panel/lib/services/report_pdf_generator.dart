@@ -6,17 +6,23 @@ import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 
 /// Generates official Daily, Weekly, and Monthly Slaughterhouse Production & Revenue Reports
-/// for Tabaco City Slaughterhouse in a single comprehensive PDF containing:
-/// - Top KPI Summary: Total Revenue, Livestock Processed, Carcass Weight, Health Issues, Uninspected
-/// - Section 1: Processed Livestock & Carcass Production (Passed Inspection) with HOG, COW, CARA, GOAT, POULTRY columns & Fees
-/// - Section 2: Cases Involving Livestock with Health Issues & Condemnations (listed separately)
-/// - Section 3: Cases Involving Livestock That Did Not Undergo Inspection (listed separately)
-/// - Animal Commodities & Revenue Summary Table
-/// - Official Signatures
+/// and official Condemnation Slips for Tabaco City Slaughterhouse in crisp black-and-white
+/// government form formatting matching the official Tabaco City Abattoir templates.
 class ReportPdfGenerator {
-  static pw.MemoryImage? _cachedLogo;
+  static pw.MemoryImage? _cachedLogo1;
+  static pw.MemoryImage? _cachedLogo2;
   static pw.ThemeData? _cachedFontTheme;
   static bool _fontThemeLoaded = false;
+
+  static const double _borderW = 0.6;
+  static const PdfColor _borderColor = PdfColors.black;
+
+  // Shared fixed widths for exact pixel-aligned multi-row colspan headers & data rows
+  static const double _wNo = 20;
+  static const double _wMark = 46;
+  static const double _wHead = 25; // x4 = 100
+  static const double _wWt = 29; // x4 = 116
+  static const double _wFee = 46;
 
   static Future<pw.ThemeData?> _loadFontTheme() async {
     if (_fontThemeLoaded) return _cachedFontTheme;
@@ -38,11 +44,28 @@ class ReportPdfGenerator {
     return _cachedFontTheme;
   }
 
+  static Future<void> _loadLogos() async {
+    if (_cachedLogo1 == null) {
+      try {
+        final bytes = await rootBundle.load('assets/images/logo1.png');
+        _cachedLogo1 = pw.MemoryImage(bytes.buffer.asUint8List());
+      } catch (_) {}
+    }
+    if (_cachedLogo2 == null) {
+      try {
+        final bytes = await rootBundle.load('assets/images/logo2.png');
+        _cachedLogo2 = pw.MemoryImage(bytes.buffer.asUint8List());
+      } catch (_) {}
+    }
+  }
+
   static String get _currency => _cachedFontTheme != null ? '\u20b1 ' : 'PHP ';
 
   /// Main generator method.
-  /// [reportSection]: 'all' (default, single PDF with Sections 1, 2, & 3 + Revenue),
-  ///                  'production', 'health_issues', or 'uninspected'.
+  /// [reportSection]: 'all' (Complete Report: Sections 1, 2, & 3 + Summary),
+  ///                  'production' (Official Daily/Period Production Report),
+  ///                  'health_issues' (Official Condemnation Slip),
+  ///                  'uninspected' (Uninspected Registrations Report).
   static Future<Uint8List> generate({
     DateTime? date,
     required List<Map<String, dynamic>> requests,
@@ -54,14 +77,9 @@ class ReportPdfGenerator {
     int? totalLivestockProcessed,
     String reportSection = 'all',
   }) async {
-    // Load logo if available
-    if (_cachedLogo == null) {
-      try {
-        final logoBytes = await rootBundle.load('assets/images/logo1.png');
-        _cachedLogo = pw.MemoryImage(logoBytes.buffer.asUint8List());
-      } catch (_) {}
-    }
-    final logoImage = _cachedLogo;
+    await _loadLogos();
+    final logoCity = _cachedLogo1;
+    final logoDa = _cachedLogo2 ?? _cachedLogo1;
 
     final targetDate = date ?? DateTime.now();
     final effectivePeriodLabel = periodLabel ??
@@ -84,12 +102,12 @@ class ReportPdfGenerator {
             (r['request_type']?.toString() ?? '').toLowerCase() == 'barangay')
         .toList();
 
-    // Accurately compute commodity heads and carcass weights across livestock types
+    // Compute commodity heads, carcass weights, and revenue
     int totalHogs = 0, totalCow = 0, totalCara = 0, totalGoat = 0;
     double totalWeight = 0;
     double computedRevenue = 0;
 
-    for (var r in requests) {
+    for (final r in requests) {
       final type = (r['livestock_type']?.toString() ?? '').toLowerCase();
       final count = int.tryParse((r['animal_count'] ?? 1).toString()) ?? 1;
       final weight = double.tryParse((r['carcass_weight'] ?? 0).toString()) ?? 0;
@@ -101,54 +119,37 @@ class ReportPdfGenerator {
         totalCow += count;
       } else if (_isCara(type)) {
         totalCara += count;
-      } else if (_isHog(type)) {
-        totalHogs += count;
       } else {
         totalHogs += count;
       }
 
-      // Compute revenue
-      final payment = r['payment'] as Map<String, dynamic>?;
-      if (payment != null) {
-        final amt = double.tryParse((payment['total_amount'] ?? payment['amount'] ?? 0).toString()) ?? 0;
-        if (amt > 0) {
-          computedRevenue += amt;
-        } else if (weight > 0) {
-          computedRevenue += (weight * 5.0) + 250.0;
-        }
-      } else {
-        final reqAmt = double.tryParse((r['total_amount'] ?? r['total_fee'] ?? 0).toString()) ?? 0;
-        if (reqAmt > 0) {
-          computedRevenue += reqAmt;
-        } else if (weight > 0) {
-          computedRevenue += (weight * 5.0) + 250.0;
-        }
-      }
+      computedRevenue += _extractFee(r, weight);
     }
 
     final finalRevenue = totalRevenue ?? computedRevenue;
     final finalProcessedCount = totalLivestockProcessed ??
         (totalHogs + totalCow + totalCara + totalGoat);
 
-    String mainTitle = 'DAILY SLAUGHTERHOUSE PRODUCTION & REVENUE REPORT';
+    String productionTitle = 'DAILY SLAUGHTERHOUSE PRODUCTION REPORT';
     if (reportType.toLowerCase().contains('weekly')) {
-      mainTitle = 'WEEKLY SLAUGHTERHOUSE PRODUCTION & REVENUE REPORT';
+      productionTitle = 'WEEKLY SLAUGHTERHOUSE PRODUCTION REPORT';
     } else if (reportType.toLowerCase().contains('monthly')) {
-      mainTitle = 'MONTHLY SLAUGHTERHOUSE PRODUCTION & REVENUE REPORT';
+      productionTitle = 'MONTHLY SLAUGHTERHOUSE PRODUCTION REPORT';
     }
 
     if (reportSection == 'all') {
-      // ═══════════════════════════════════════════════════════════════
-      // SINGLE COMPREHENSIVE PDF:
-      // Includes Total Revenue, Livestock Processed, and Sections 1, 2, & 3
-      // ═══════════════════════════════════════════════════════════════
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.legal,
-          margin: const pw.EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 22),
           build: (pw.Context context) {
             return [
-              _buildHeader(logoImage, mainTitle, effectivePeriodLabel),
+              _buildOfficialHeader(
+                logo: logoCity,
+                title: productionTitle,
+                subtitle: '(Incoming Livestock and Carcass Production)',
+                dateLabel: effectivePeriodLabel,
+              ),
               pw.SizedBox(height: 10),
               _buildHighlightsSummary(
                 revenue: finalRevenue,
@@ -157,17 +158,17 @@ class ReportPdfGenerator {
                 healthIssueCount: healthIssueRequests.length,
                 uninspectedCount: uninspectedRequests.length,
               ),
+              pw.SizedBox(height: 12),
+              _buildSectionTitle('1. PROCESSED LIVESTOCK & CARCASS PRODUCTION (PASSED INSPECTION)'),
+              pw.SizedBox(height: 4),
+              ..._buildMainTableWidgets(marketRequests, barangayRequests),
               pw.SizedBox(height: 14),
-              _buildSectionHeader('1. PROCESSED LIVESTOCK & CARCASS PRODUCTION (PASSED INSPECTION)'),
-              pw.SizedBox(height: 6),
-              _buildMainTable(marketRequests, barangayRequests),
-              pw.SizedBox(height: 16),
-              _buildSectionHeader('2. CASES INVOLVING LIVESTOCK WITH HEALTH ISSUES & CONDEMNATIONS (LISTED SEPARATELY)'),
-              pw.SizedBox(height: 6),
+              _buildSectionTitle('2. CASES INVOLVING LIVESTOCK WITH HEALTH ISSUES & CONDEMNATIONS'),
+              pw.SizedBox(height: 4),
               _buildHealthIssuesTable(healthIssueRequests),
-              pw.SizedBox(height: 16),
-              _buildSectionHeader('3. CASES INVOLVING LIVESTOCK THAT DID NOT UNDERGO INSPECTION (LISTED SEPARATELY)'),
-              pw.SizedBox(height: 6),
+              pw.SizedBox(height: 14),
+              _buildSectionTitle('3. HELD / CONFINED LIVESTOCK — FAILED ANTE-MORTEM (2-DAY OBSERVATION)'),
+              pw.SizedBox(height: 4),
               _buildUninspectedTable(uninspectedRequests),
               pw.SizedBox(height: 14),
               _buildSummaryTable(
@@ -185,17 +186,20 @@ class ReportPdfGenerator {
         ),
       );
     } else if (reportSection == 'production') {
-      // Production section only
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.legal,
-          margin: const pw.EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 22),
           build: (pw.Context context) {
             return [
-              _buildHeader(logoImage, 'DAILY SLAUGHTERHOUSE PRODUCTION REPORT', effectivePeriodLabel,
-                  subtitle: '(Incoming Livestock and Carcass Production)'),
-              pw.SizedBox(height: 12),
-              _buildMainTable(marketRequests, barangayRequests),
+              _buildOfficialHeader(
+                logo: logoCity,
+                title: productionTitle,
+                subtitle: '(Incoming Livestock and Carcass Production)',
+                dateLabel: effectivePeriodLabel,
+              ),
+              pw.SizedBox(height: 10),
+              ..._buildMainTableWidgets(marketRequests, barangayRequests),
               pw.SizedBox(height: 14),
               _buildSummaryTable(
                 hogs: totalHogs,
@@ -212,33 +216,35 @@ class ReportPdfGenerator {
         ),
       );
     } else if (reportSection == 'health_issues') {
-      // Health issues section only
+      // Exact official CONDEMNATION SLIP format
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.legal,
-          margin: const pw.EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 32, vertical: 28),
           build: (pw.Context context) {
-            return [
-              _buildHeader(logoImage, 'LIVESTOCK HEALTH ISSUES & CONDEMNATIONS REPORT', effectivePeriodLabel,
-                  subtitle: '(Ante-Mortem Rejections, Pathology Detected, and Post-Mortem Condemnations)'),
-              pw.SizedBox(height: 12),
-              _buildHealthIssuesTable(healthIssueRequests),
-              pw.SizedBox(height: 18),
-              _buildSignatures(),
-            ];
+            return _buildCondemnationSlipContent(
+              logoLeft: logoDa,
+              logoRight: logoCity,
+              dateLabel: effectivePeriodLabel,
+              timeLabel: DateFormat('h:mm a').format(DateTime.now()),
+              healthIssues: healthIssueRequests,
+            );
           },
         ),
       );
     } else if (reportSection == 'uninspected') {
-      // Uninspected section only
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.legal,
-          margin: const pw.EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 22),
           build: (pw.Context context) {
             return [
-              _buildHeader(logoImage, 'UNINSPECTED LIVESTOCK REGISTRATION REPORT', effectivePeriodLabel,
-                  subtitle: '(Cancelled, Withdrawn, and Non-Presented Registrations)'),
+              _buildOfficialHeader(
+                logo: logoCity,
+                title: 'HELD / CONFINED LIVESTOCK REPORT (FAILED ANTE-MORTEM)',
+                subtitle: '(Mandatory 2-Day Observation Hold Awaiting Re-Evaluation)',
+                dateLabel: effectivePeriodLabel,
+              ),
               pw.SizedBox(height: 12),
               _buildUninspectedTable(uninspectedRequests),
               pw.SizedBox(height: 18),
@@ -253,80 +259,70 @@ class ReportPdfGenerator {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  HEADER
+  //  OFFICIAL HEADER (PURE BLACK & WHITE, CENTERED)
   // ═══════════════════════════════════════════════════════════════
-  static pw.Widget _buildHeader(
-    pw.MemoryImage? logo,
-    String title,
-    String periodLabel, {
-    String subtitle = '(Official Operations, Inspection Results, and Revenue Summary)',
+  static pw.Widget _buildOfficialHeader({
+    required pw.MemoryImage? logo,
+    required String title,
+    required String subtitle,
+    required String dateLabel,
   }) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        if (logo != null)
-          pw.Container(
-            width: 46,
-            height: 46,
-            child: pw.Image(logo),
-          )
-        else
-          pw.Container(width: 46, height: 46),
-        pw.SizedBox(width: 10),
-        pw.Expanded(
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text('Republic of the Philippines', style: const pw.TextStyle(fontSize: 8.5)),
-              pw.Text('Province of Albay', style: const pw.TextStyle(fontSize: 8.5)),
-              pw.Text('City of Tabaco', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-              pw.Text('OFFICE OF THE CITY VETERINARIAN & CITY SLAUGHTERHOUSE',
-                  style: const pw.TextStyle(fontSize: 8)),
-              pw.SizedBox(height: 3),
-              pw.Text(
-                title,
-                style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-                textAlign: pw.TextAlign.center,
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            if (logo != null)
+              pw.Container(width: 44, height: 44, child: pw.Image(logo))
+            else
+              pw.SizedBox(width: 44, height: 44),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Text('Republic of the Philippines', style: const pw.TextStyle(fontSize: 8.5)),
+                  pw.Text('Province of Albay', style: const pw.TextStyle(fontSize: 8.5)),
+                  pw.Text('City of Tabaco', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('OFFICE OF THE CITY VETERINARIAN & CITY SLAUGHTERHOUSE',
+                      style: const pw.TextStyle(fontSize: 7.5)),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    title,
+                    style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                  pw.Text(
+                    subtitle,
+                    style: const pw.TextStyle(fontSize: 8),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                ],
               ),
-              pw.Text(
-                subtitle,
-                style: const pw.TextStyle(fontSize: 7.5),
-              ),
-            ],
-          ),
+            ),
+            pw.SizedBox(width: 44, height: 44),
+          ],
         ),
-        pw.Container(
-          width: 135,
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: [
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                decoration: const pw.BoxDecoration(
-                  border: pw.Border(bottom: pw.BorderSide(width: 0.5)),
-                ),
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text('REPORTING PERIOD:', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-                    pw.Text(
-                      periodLabel,
-                      style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ],
-                ),
+        pw.SizedBox(height: 6),
+        pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.end,
+          children: [
+            pw.Text('Date: ', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+            pw.Container(
+              padding: const pw.EdgeInsets.only(bottom: 1, left: 4, right: 4),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(color: _borderColor, width: 0.6)),
               ),
-            ],
-          ),
+              child: pw.Text(dateLabel, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+            ),
+          ],
         ),
       ],
     );
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  TOP KPI HIGHLIGHTS SUMMARY BOX
-  //  Includes Total Revenue, Livestock Processed, Carcass Weight, etc.
+  //  TOP HIGHLIGHTS SUMMARY (CRISP BLACK & WHITE)
   // ═══════════════════════════════════════════════════════════════
   static pw.Widget _buildHighlightsSummary({
     required double revenue,
@@ -335,269 +331,576 @@ class ReportPdfGenerator {
     required int healthIssueCount,
     required int uninspectedCount,
   }) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: pw.BoxDecoration(
-        color: PdfColor.fromHex('#F7FAFC'),
-        border: pw.TableBorder.all(color: PdfColor.fromHex('#CBD5E0'), width: 0.8),
-        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
-      ),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-        children: [
-          _summaryKpi('TOTAL REVENUE', '$_currency${NumberFormat('#,##0.00').format(revenue)}', PdfColor.fromHex('#1B4332')),
-          _summaryKpi('LIVESTOCK PROCESSED', '$processedCount Heads', PdfColor.fromHex('#2D6A4F')),
-          _summaryKpi('TOTAL CARCASS WEIGHT', '${totalWeight.toStringAsFixed(1)} kg', PdfColor.fromHex('#2B6CB0')),
-          _summaryKpi('HEALTH ISSUES / CONDEMNED', '$healthIssueCount Cases', PdfColor.fromHex('#C53030')),
-          _summaryKpi('DID NOT UNDERGO INSPECTION', '$uninspectedCount Cases', PdfColor.fromHex('#718096')),
-        ],
-      ),
-    );
-  }
-
-  static pw.Widget _summaryKpi(String label, String value, PdfColor color) {
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
+    return pw.Table(
+      border: pw.TableBorder.all(color: _borderColor, width: _borderW),
       children: [
-        pw.Text(label, style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.grey700)),
-        pw.SizedBox(height: 2),
-        pw.Text(
-          value,
-          style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: color),
+        pw.TableRow(
+          children: [
+            _summaryBoxCell('TOTAL REVENUE', '$_currency${NumberFormat('#,##0.00').format(revenue)}'),
+            _summaryBoxCell('LIVESTOCK PROCESSED', '$processedCount Heads'),
+            _summaryBoxCell('TOTAL CARCASS WEIGHT', '${totalWeight.toStringAsFixed(1)} kg'),
+            _summaryBoxCell('HEALTH ISSUES / CONDEMNED', '$healthIssueCount Cases'),
+            _summaryBoxCell('HELD / CONFINED (2-DAY)', '$uninspectedCount Cases'),
+          ],
         ),
       ],
     );
   }
 
-  static pw.Widget _buildSectionHeader(String title) {
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      color: PdfColor.fromHex('#2D3748'),
-      child: pw.Text(
-        title,
-        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+  static pw.Widget _summaryBoxCell(String label, String value) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          pw.Text(label, style: const pw.TextStyle(fontSize: 6), textAlign: pw.TextAlign.center),
+          pw.SizedBox(height: 2),
+          pw.Text(value, style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold), textAlign: pw.TextAlign.center),
+        ],
       ),
     );
   }
 
+  static pw.Widget _buildSectionTitle(String title) {
+    return pw.Text(
+      title,
+      style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold),
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════════
-  //  SECTION 1: PROCESSED LIVESTOCK TABLE
-  //  Columns: No | Name | Markings | Heads (Hog, Cow, Cara, Goat, Poultry) |
-  //           Weight (Hog, Cow, Cara, Goat, Poultry) | Fees (PHP) | Remarks
+  //  SECTION 1: PROCESSED LIVESTOCK TABLE WITH TRUE MERGED HEADERS
   // ═══════════════════════════════════════════════════════════════
-  static pw.Widget _buildMainTable(
+  static List<pw.Widget> _buildMainTableWidgets(
     List<Map<String, dynamic>> marketRequests,
     List<Map<String, dynamic>> barangayRequests,
   ) {
-    final headerStyle = pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold);
-    const cellStyle = pw.TextStyle(fontSize: 6);
-    final sectionStyle = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
+    final headerStyle = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
+    final subHeaderStyle = pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold);
+    const cellStyle = pw.TextStyle(fontSize: 6.5);
+    final sectionStyle = pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold);
 
-    final rows = <pw.TableRow>[];
+    final widgets = <pw.Widget>[];
 
-    // Header Row 1
-    rows.add(
-      pw.TableRow(
-        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#EDF2F7')),
-        children: [
-          _headerCellCenter('No.', headerStyle),
-          _headerCell('Name of Owner / Customer', headerStyle),
-          _headerCellCenter('Markings', headerStyle),
-          _headerCellCenter('NUMBER OF HEADS', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('CARCASS WEIGHT (KG)', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('FEES (PHP)', headerStyle),
-          _headerCellCenter('REMARKS', headerStyle),
-        ],
-      ),
-    );
-
-    // Header Row 2: Sub-columns for livestock categories
-    rows.add(
-      pw.TableRow(
-        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#F7FAFC')),
-        children: [
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('MARKET SECTION', headerStyle),
-          _headerCellCenter('', headerStyle),
-          _headerCellCenter('HOG', headerStyle),
-          _headerCellCenter('COW', headerStyle),
-          _headerCellCenter('CARA', headerStyle),
-          _headerCellCenter('GOAT', headerStyle),
-          _headerCellCenter('HOG', headerStyle),
-          _headerCellCenter('COW', headerStyle),
-          _headerCellCenter('CARA', headerStyle),
-          _headerCellCenter('GOAT', headerStyle),
-          _headerCellCenter('TOTAL', headerStyle),
-          _headerCellCenter('', headerStyle),
-        ],
-      ),
-    );
-
-    // Market records
-    if (marketRequests.isEmpty) {
-      rows.add(
-        pw.TableRow(
+    // 1. TRUE MERGED MULTI-ROW HEADER BAND (Zero broken vertical wrapping)
+    widgets.add(
+      pw.Container(
+        height: 30,
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: _borderColor, width: _borderW),
+        ),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            _emptyCell(cellStyle),
-            pw.Padding(
-              padding: const pw.EdgeInsets.all(3),
-              child: pw.Text('No market transactions for this period',
-                  style: pw.TextStyle(fontSize: 6, fontStyle: pw.FontStyle.italic, color: PdfColors.grey600)),
+            _headerColBox('No.', _wNo, headerStyle, rightBorder: true),
+            pw.Expanded(
+              flex: 26,
+              child: _headerFlexBox('Name of Owner', headerStyle, rightBorder: true),
             ),
-            ...List.generate(11, (_) => _emptyCell(cellStyle)),
+            _headerColBox('Markings', _wMark, headerStyle, rightBorder: true),
+            // Merged super-header: No. of Heads (spans 4 sub-columns)
+            pw.Container(
+              width: _wHead * 4,
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(right: pw.BorderSide(color: _borderColor, width: _borderW)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  pw.Expanded(
+                    child: pw.Container(
+                      decoration: const pw.BoxDecoration(
+                        border: pw.Border(bottom: pw.BorderSide(color: _borderColor, width: _borderW)),
+                      ),
+                      child: pw.Center(
+                        child: pw.Text('No. of Heads', style: headerStyle, textAlign: pw.TextAlign.center),
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        _subColCell('Hogs', _wHead, subHeaderStyle, rightBorder: true),
+                        _subColCell('Cow', _wHead, subHeaderStyle, rightBorder: true),
+                        _subColCell('Cara', _wHead, subHeaderStyle, rightBorder: true),
+                        _subColCell('Goat', _wHead, subHeaderStyle, rightBorder: false),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Merged super-header: Carcass Weight (Kgs) (spans 4 sub-columns)
+            pw.Container(
+              width: _wWt * 4,
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(right: pw.BorderSide(color: _borderColor, width: _borderW)),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  pw.Expanded(
+                    child: pw.Container(
+                      decoration: const pw.BoxDecoration(
+                        border: pw.Border(bottom: pw.BorderSide(color: _borderColor, width: _borderW)),
+                      ),
+                      child: pw.Center(
+                        child: pw.Text('Carcass Weight (Kgs)', style: headerStyle, textAlign: pw.TextAlign.center),
+                      ),
+                    ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Row(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        _subColCell('Hogs', _wWt, subHeaderStyle, rightBorder: true),
+                        _subColCell('Cow', _wWt, subHeaderStyle, rightBorder: true),
+                        _subColCell('Cara', _wWt, subHeaderStyle, rightBorder: true),
+                        _subColCell('Goat', _wWt, subHeaderStyle, rightBorder: false),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _headerColBox('Fees\n(PHP)', _wFee, headerStyle, rightBorder: true),
+            pw.Expanded(
+              flex: 16,
+              child: _headerFlexBox('Remarks', headerStyle, rightBorder: false),
+            ),
           ],
         ),
-      );
+      ),
+    );
+
+    // 2. FULL-WIDTH MARKET SECTION BANNER + DATA TABLE
+    widgets.add(_fullWidthSectionBanner('MARKET SECTION', sectionStyle));
+
+    if (marketRequests.isEmpty) {
+      widgets.add(_fullWidthEmptyRow('No market transactions for this period'));
     } else {
-      for (int i = 0; i < marketRequests.length; i++) {
-        rows.add(_buildProcessedDataRow(i + 1, marketRequests[i], cellStyle));
-      }
+      widgets.add(_buildDataRowsTable(marketRequests, cellStyle));
     }
 
-    // Barangay Header
-    rows.add(
-      pw.TableRow(
-        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#EDF2F7')),
-        children: [
-          _emptyCell(cellStyle),
-          pw.Padding(
-            padding: const pw.EdgeInsets.all(2),
-            child: pw.Center(child: pw.Text('BARANGAY SECTION', style: sectionStyle)),
-          ),
-          ...List.generate(11, (_) => _emptyCell(cellStyle)),
-        ],
+    // 3. FULL-WIDTH BARANGAY BANNER + DATA TABLE
+    widgets.add(_fullWidthSectionBanner('BARANGAY', sectionStyle));
+
+    if (barangayRequests.isEmpty) {
+      widgets.add(_fullWidthEmptyRow('No barangay transactions for this period'));
+    } else {
+      widgets.add(_buildDataRowsTable(barangayRequests, cellStyle));
+    }
+
+    return widgets;
+  }
+
+  static pw.Widget _headerColBox(String text, double width, pw.TextStyle style, {required bool rightBorder}) {
+    return pw.Container(
+      width: width,
+      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+      decoration: pw.BoxDecoration(
+        border: rightBorder ? const pw.Border(right: pw.BorderSide(color: _borderColor, width: _borderW)) : null,
+      ),
+      child: pw.Center(child: pw.Text(text, style: style, textAlign: pw.TextAlign.center)),
+    );
+  }
+
+  static pw.Widget _headerFlexBox(String text, pw.TextStyle style, {required bool rightBorder}) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+      decoration: pw.BoxDecoration(
+        border: rightBorder ? const pw.Border(right: pw.BorderSide(color: _borderColor, width: _borderW)) : null,
+      ),
+      child: pw.Center(child: pw.Text(text, style: style, textAlign: pw.TextAlign.center)),
+    );
+  }
+
+  static pw.Widget _subColCell(String text, double width, pw.TextStyle style, {required bool rightBorder}) {
+    return pw.Container(
+      width: width,
+      padding: const pw.EdgeInsets.symmetric(vertical: 2.5, horizontal: 1),
+      decoration: pw.BoxDecoration(
+        border: rightBorder ? const pw.Border(right: pw.BorderSide(color: _borderColor, width: _borderW)) : null,
+      ),
+      child: pw.Center(child: pw.Text(text, style: style, textAlign: pw.TextAlign.center)),
+    );
+  }
+
+  static pw.Widget _fullWidthSectionBanner(String label, pw.TextStyle style) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(vertical: 3.5, horizontal: 6),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(
+          left: pw.BorderSide(color: _borderColor, width: _borderW),
+          right: pw.BorderSide(color: _borderColor, width: _borderW),
+          bottom: pw.BorderSide(color: _borderColor, width: _borderW),
+        ),
+      ),
+      child: pw.Text(label, style: style),
+    );
+  }
+
+  static pw.Widget _fullWidthEmptyRow(String text) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(
+          left: pw.BorderSide(color: _borderColor, width: _borderW),
+          right: pw.BorderSide(color: _borderColor, width: _borderW),
+          bottom: pw.BorderSide(color: _borderColor, width: _borderW),
+        ),
+      ),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(fontSize: 6.5, fontStyle: pw.FontStyle.italic),
       ),
     );
+  }
 
-    // Barangay records
-    if (barangayRequests.isEmpty) {
+  static pw.Widget _buildDataRowsTable(List<Map<String, dynamic>> list, pw.TextStyle style) {
+    final rows = <pw.TableRow>[];
+    for (int i = 0; i < list.length; i++) {
+      final req = list[i];
+      final name = req['customer_name']?.toString() ?? '\u2014';
+      final markings = (req['marking'] ?? req['customer_marking'] ?? '').toString();
+      final livestockType = (req['livestock_type']?.toString() ?? '').toLowerCase();
+      final animalCount = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+      final carcassWeight = double.tryParse((req['carcass_weight'] ?? 0).toString()) ?? 0;
+
+      String hogsHeads = '', cowHeads = '', caraHeads = '', goatHeads = '';
+      String hogsWeight = '', cowWeight = '', caraWeight = '', goatWeight = '';
+
+      if (_isGoat(livestockType)) {
+        goatHeads = animalCount.toString();
+        if (carcassWeight > 0) goatWeight = carcassWeight.toStringAsFixed(1);
+      } else if (_isCow(livestockType)) {
+        cowHeads = animalCount.toString();
+        if (carcassWeight > 0) cowWeight = carcassWeight.toStringAsFixed(1);
+      } else if (_isCara(livestockType)) {
+        caraHeads = animalCount.toString();
+        if (carcassWeight > 0) caraWeight = carcassWeight.toStringAsFixed(1);
+      } else {
+        hogsHeads = animalCount.toString();
+        if (carcassWeight > 0) hogsWeight = carcassWeight.toStringAsFixed(1);
+      }
+
+      final fee = _extractFee(req, carcassWeight);
+      final feeStr = fee > 0 ? NumberFormat('#,##0.00').format(fee) : '\u2014';
+      final remarks = _sanitizeNotes(req['process_notes']?.toString() ?? '');
+
       rows.add(
         pw.TableRow(
           children: [
-            _emptyCell(cellStyle),
-            pw.Padding(
-              padding: const pw.EdgeInsets.all(3),
-              child: pw.Text('No barangay transactions for this period',
-                  style: pw.TextStyle(fontSize: 6, fontStyle: pw.FontStyle.italic, color: PdfColors.grey600)),
-            ),
-            ...List.generate(11, (_) => _emptyCell(cellStyle)),
+            _tableCellCenter('${i + 1}', style),
+            _tableCell(name, style),
+            _tableCellCenter(markings, style),
+            _tableCellCenter(hogsHeads, style),
+            _tableCellCenter(cowHeads, style),
+            _tableCellCenter(caraHeads, style),
+            _tableCellCenter(goatHeads, style),
+            _tableCellCenter(hogsWeight, style),
+            _tableCellCenter(cowWeight, style),
+            _tableCellCenter(caraWeight, style),
+            _tableCellCenter(goatWeight, style),
+            _tableCellCenter(feeStr, style),
+            _tableCell(remarks, style),
           ],
         ),
       );
-    } else {
-      for (int i = 0; i < barangayRequests.length; i++) {
-        rows.add(_buildProcessedDataRow(i + 1, barangayRequests[i], cellStyle));
-      }
     }
 
     return pw.Table(
-      border: pw.TableBorder.all(width: 0.5, color: PdfColor.fromHex('#CBD5E0')),
+      border: const pw.TableBorder(
+        left: pw.BorderSide(color: _borderColor, width: _borderW),
+        right: pw.BorderSide(color: _borderColor, width: _borderW),
+        bottom: pw.BorderSide(color: _borderColor, width: _borderW),
+        horizontalInside: pw.BorderSide(color: _borderColor, width: _borderW),
+        verticalInside: pw.BorderSide(color: _borderColor, width: _borderW),
+      ),
       columnWidths: const {
-        0: pw.FixedColumnWidth(16),  // No.
-        1: pw.FlexColumnWidth(2.6),  // Name
-        2: pw.FlexColumnWidth(1.1),  // Markings
-        3: pw.FixedColumnWidth(20),  // Heads Hog
-        4: pw.FixedColumnWidth(20),  // Heads Cow
-        5: pw.FixedColumnWidth(20),  // Heads Cara
-        6: pw.FixedColumnWidth(20),  // Heads Goat
-        7: pw.FixedColumnWidth(24),  // Weight Hog
-        8: pw.FixedColumnWidth(24),  // Weight Cow
-        9: pw.FixedColumnWidth(24),  // Weight Cara
-        10: pw.FixedColumnWidth(24), // Weight Goat
-        11: pw.FixedColumnWidth(38), // Fee Total
-        12: pw.FlexColumnWidth(1.8), // Remarks
+        0: pw.FixedColumnWidth(_wNo),
+        1: pw.FlexColumnWidth(26),
+        2: pw.FixedColumnWidth(_wMark),
+        3: pw.FixedColumnWidth(_wHead),
+        4: pw.FixedColumnWidth(_wHead),
+        5: pw.FixedColumnWidth(_wHead),
+        6: pw.FixedColumnWidth(_wHead),
+        7: pw.FixedColumnWidth(_wWt),
+        8: pw.FixedColumnWidth(_wWt),
+        9: pw.FixedColumnWidth(_wWt),
+        10: pw.FixedColumnWidth(_wWt),
+        11: pw.FixedColumnWidth(_wFee),
+        12: pw.FlexColumnWidth(16),
       },
       children: rows,
     );
   }
 
-  static pw.TableRow _buildProcessedDataRow(int number, Map<String, dynamic> req, pw.TextStyle style) {
-    final name = req['customer_name']?.toString() ?? '\u2014';
-    final markings = req['marking']?.toString() ?? '';
-    final livestockType = (req['livestock_type']?.toString() ?? '').toLowerCase();
-    final animalCount = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
-    final carcassWeight = double.tryParse((req['carcass_weight'] ?? 0).toString()) ?? 0;
+  // ═══════════════════════════════════════════════════════════════
+  //  OFFICIAL CONDEMNATION SLIP (EXACT TEMPLATE MATCH)
+  // ═══════════════════════════════════════════════════════════════
+  static List<pw.Widget> _buildCondemnationSlipContent({
+    required pw.MemoryImage? logoLeft,
+    required pw.MemoryImage? logoRight,
+    required String dateLabel,
+    required String timeLabel,
+    required List<Map<String, dynamic>> healthIssues,
+  }) {
+    final headerStyle = pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold);
+    const bodyStyle = pw.TextStyle(fontSize: 8.5, lineSpacing: 2.5);
+    const cellStyle = pw.TextStyle(fontSize: 8);
 
-    String hogsHeads = '', cowHeads = '', caraHeads = '', goatHeads = '';
-    String hogsWeight = '', cowWeight = '', caraWeight = '', goatWeight = '';
+    // Build table rows (minimum 3 rows so blank lines remain printable like the official slip)
+    final tableRows = <pw.TableRow>[
+      pw.TableRow(
+        children: [
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: pw.Text(
+              'FOOD ANIMAL/MEAT/MEAT\nPRODUCTS/PROCESSED MEAT',
+              style: headerStyle,
+            ),
+          ),
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: pw.Center(child: pw.Text('QUANTITY/WEIGHT', style: headerStyle)),
+          ),
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: pw.Center(child: pw.Text('CAUSE OF CONDEMNATION', style: headerStyle)),
+          ),
+        ],
+      ),
+    ];
 
-    if (_isGoat(livestockType)) {
-      goatHeads = animalCount.toString();
-      if (carcassWeight > 0) goatWeight = carcassWeight.toStringAsFixed(1);
-    } else if (_isCow(livestockType)) {
-      cowHeads = animalCount.toString();
-      if (carcassWeight > 0) cowWeight = carcassWeight.toStringAsFixed(1);
-    } else if (_isCara(livestockType)) {
-      caraHeads = animalCount.toString();
-      if (carcassWeight > 0) caraWeight = carcassWeight.toStringAsFixed(1);
-    } else if (_isHog(livestockType)) {
-      hogsHeads = animalCount.toString();
-      if (carcassWeight > 0) hogsWeight = carcassWeight.toStringAsFixed(1);
-    } else {
-      hogsHeads = animalCount.toString();
-      if (carcassWeight > 0) hogsWeight = carcassWeight.toStringAsFixed(1);
+    for (final req in healthIssues) {
+      final species = (req['livestock_type'] ?? 'Livestock').toString();
+      final owner = (req['customer_name'] ?? '').toString().trim();
+      final itemText = owner.isNotEmpty ? '$species ($owner)' : species;
+      final heads = int.tryParse((req['animal_count'] ?? 1).toString()) ?? 1;
+      final wt = double.tryParse((req['carcass_weight'] ?? 0).toString()) ?? 0;
+      final qtyText = wt > 0
+          ? '$heads ${heads == 1 ? "head" : "heads"} / ${wt.toStringAsFixed(1)} kg'
+          : '$heads ${heads == 1 ? "head" : "heads"}';
+      final cause = _sanitizeNotes(
+        (req['condemnation_reason'] ??
+                req['veterinary_findings'] ??
+                req['process_notes'] ??
+                'Failed veterinary inspection')
+            .toString(),
+        fallback: 'Did not meet sanitary & inspection standards',
+      );
+
+      tableRows.add(
+        pw.TableRow(
+          children: [
+            pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(itemText, style: cellStyle)),
+            pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Center(child: pw.Text(qtyText, style: cellStyle))),
+            pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text(cause, style: cellStyle)),
+          ],
+        ),
+      );
     }
 
-    // Fee calculation
-    double fee = 0;
-    final payment = req['payment'] as Map<String, dynamic>?;
-    if (payment != null) {
-      fee = double.tryParse((payment['total_amount'] ?? payment['amount'] ?? 0).toString()) ?? 0;
-    }
-    if (fee == 0) {
-      fee = double.tryParse((req['total_amount'] ?? req['total_fee'] ?? 0).toString()) ?? 0;
-    }
-    if (fee == 0 && carcassWeight > 0) {
-      fee = (carcassWeight * 5.0) + 250.0;
+    // Pad to at least 3 data rows like the official printed slip
+    final padCount = healthIssues.length < 3 ? 3 - healthIssues.length : 0;
+    for (int i = 0; i < padCount; i++) {
+      tableRows.add(
+        pw.TableRow(
+          children: [
+            pw.SizedBox(height: 22),
+            pw.SizedBox(height: 22),
+            pw.SizedBox(height: 22),
+          ],
+        ),
+      );
     }
 
-    final feeStr = fee > 0 ? NumberFormat('#,##0.00').format(fee) : '\u2014';
-    final notes = req['process_notes']?.toString() ?? '';
-    final remarks = notes.isNotEmpty && notes != 'null' ? notes : 'Passed Inspection';
+    return [
+      // Dual-logo header
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          if (logoLeft != null)
+            pw.Container(width: 48, height: 48, child: pw.Image(logoLeft))
+          else
+            pw.SizedBox(width: 48, height: 48),
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text('Republic of the Philippines', style: const pw.TextStyle(fontSize: 9)),
+                pw.Text('Province of Albay', style: const pw.TextStyle(fontSize: 9)),
+                pw.Text('CITY OF TABACO', style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold)),
+              ],
+            ),
+          ),
+          if (logoRight != null)
+            pw.Container(width: 48, height: 48, child: pw.Image(logoRight))
+          else
+            pw.SizedBox(width: 48, height: 48),
+        ],
+      ),
+      pw.SizedBox(height: 22),
 
-    return pw.TableRow(
+      // Underlined establishment lines
+      _underlinedFieldRow('Name of Establishment:', 'Tabaco City Slaughterhouse'),
+      pw.SizedBox(height: 6),
+      pw.Row(
+        children: [
+          pw.Expanded(child: _underlinedFieldRow('City:', 'Tabaco City')),
+          pw.SizedBox(width: 36),
+          pw.Expanded(child: _underlinedFieldRow('Province:', 'Albay')),
+        ],
+      ),
+      pw.SizedBox(height: 6),
+      pw.Row(
+        children: [
+          pw.Expanded(child: _underlinedFieldRow('Date:', dateLabel)),
+          pw.SizedBox(width: 36),
+          pw.Expanded(child: _underlinedFieldRow('Time:', timeLabel)),
+        ],
+      ),
+      pw.SizedBox(height: 20),
+
+      // Title
+      pw.Center(
+        child: pw.Text(
+          'CONDEMNATION SLIP',
+          style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+        ),
+      ),
+      pw.SizedBox(height: 10),
+
+      // Legal citation paragraph
+      pw.Text(
+        '    Pursuant to Republic Act No. 7394, otherwise known as the "Consumer Act of the Philippines" under Articles 10 and 17; and Republic Act No. 9296, "The Meat Inspection Code of the Philippines," and the Department of Agriculture Administrative Order No. 7, Rules and Regulations of RA 9296 series of 2005; and NMIS Administrative Order No. 6, the following meat/meat products/processed meat is hereby condemned.',
+        style: bodyStyle,
+        textAlign: pw.TextAlign.justify,
+      ),
+      pw.SizedBox(height: 14),
+
+      // 3-Column Condemnation Table
+      pw.Table(
+        border: pw.TableBorder.all(color: _borderColor, width: _borderW),
+        columnWidths: const {
+          0: pw.FlexColumnWidth(1.3),
+          1: pw.FlexColumnWidth(1.0),
+          2: pw.FlexColumnWidth(1.4),
+        },
+        children: tableRows,
+      ),
+      pw.SizedBox(height: 26),
+
+      // 2x2 Official Signatory Grid
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(
+            child: _condemnationSignatureBlock(
+              'Condemned by:',
+              'Veterinarian/Meat Control Officer/Meat Inspector',
+              '(Signature Over Printed Name)',
+            ),
+          ),
+          pw.SizedBox(width: 40),
+          pw.Expanded(
+            child: _condemnationSignatureBlock(
+              'Conforme:',
+              'Name of Owner/Representative',
+              '(Signature Over Printed Name)',
+            ),
+          ),
+        ],
+      ),
+      pw.SizedBox(height: 26),
+      pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Expanded(
+            child: _condemnationSignatureBlock(
+              'Disposed by:',
+              'Veterinarian/Meat Control Officer/Meat Inspector',
+              '(Signature Over Printed Name)',
+            ),
+          ),
+          pw.SizedBox(width: 40),
+          pw.Expanded(
+            child: _condemnationSignatureBlock(
+              'Witness:',
+              '',
+              '(Signature Over Printed Name)',
+            ),
+          ),
+        ],
+      ),
+    ];
+  }
+
+  static pw.Widget _underlinedFieldRow(String label, String value) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
       children: [
-        _dataCellCenter(number.toString(), style),
-        _dataCell(name, style),
-        _dataCellCenter(markings, style),
-        _dataCellCenter(hogsHeads, style),
-        _dataCellCenter(cowHeads, style),
-        _dataCellCenter(caraHeads, style),
-        _dataCellCenter(goatHeads, style),
-        _dataCellCenter(hogsWeight, style),
-        _dataCellCenter(cowWeight, style),
-        _dataCellCenter(caraWeight, style),
-        _dataCellCenter(goatWeight, style),
-        _dataCellCenter(feeStr, style),
-        _dataCell(remarks, style),
+        pw.Text(label, style: const pw.TextStyle(fontSize: 8.5)),
+        pw.SizedBox(width: 6),
+        pw.Expanded(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.only(bottom: 1, left: 4),
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(bottom: pw.BorderSide(color: _borderColor, width: 0.6)),
+            ),
+            child: pw.Text(value, style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _condemnationSignatureBlock(String heading, String roleLine, String subLine) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(heading, style: const pw.TextStyle(fontSize: 8.5)),
+        pw.SizedBox(height: 22),
+        pw.Container(
+          width: double.infinity,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(bottom: pw.BorderSide(color: _borderColor, width: 0.6)),
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        if (roleLine.isNotEmpty)
+          pw.Center(
+            child: pw.Text(roleLine, style: const pw.TextStyle(fontSize: 7.5), textAlign: pw.TextAlign.center),
+          ),
+        pw.Center(
+          child: pw.Text(subLine, style: const pw.TextStyle(fontSize: 7.5), textAlign: pw.TextAlign.center),
+        ),
       ],
     );
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SECTION 2: HEALTH ISSUES & CONDEMNATIONS (SEPARATE LIST)
+  //  SECTION 2 TABLE (USED INSIDE FULL REPORT, BLACK & WHITE)
   // ═══════════════════════════════════════════════════════════════
   static pw.Widget _buildHealthIssuesTable(List<Map<String, dynamic>> healthIssues) {
     final headerStyle = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
-    const cellStyle = pw.TextStyle(fontSize: 6);
+    const cellStyle = pw.TextStyle(fontSize: 6.5);
 
     if (healthIssues.isEmpty) {
       return pw.Container(
-        padding: const pw.EdgeInsets.all(8),
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(6),
         decoration: pw.BoxDecoration(
-          border: pw.TableBorder.all(color: PdfColor.fromHex('#E2E8F0'), width: 0.5),
-          color: PdfColor.fromHex('#F7FAFC'),
+          border: pw.Border.all(color: _borderColor, width: _borderW),
         ),
         child: pw.Center(
           child: pw.Text(
-            'No health issues or condemnations reported during this period. All processed animals met sanitary standards.',
-            style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic, color: PdfColors.grey700),
+            'No health issues or condemnations reported during this period.',
+            style: pw.TextStyle(fontSize: 6.5, fontStyle: pw.FontStyle.italic),
           ),
         ),
       );
@@ -605,15 +908,14 @@ class ReportPdfGenerator {
 
     final rows = <pw.TableRow>[
       pw.TableRow(
-        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#FFF5F5')),
         children: [
-          _headerCellCenter('No.', headerStyle),
-          _headerCell('Reference No.', headerStyle),
-          _headerCell('Customer Name', headerStyle),
-          _headerCellCenter('Livestock / Heads', headerStyle),
-          _headerCellCenter('Inspection Stage', headerStyle),
-          _headerCell('Veterinary Findings / Health Issues', headerStyle),
-          _headerCellCenter('Action Taken / Disposition', headerStyle),
+          _tableCellCenter('No.', headerStyle),
+          _tableCell('Reference No.', headerStyle),
+          _tableCell('Customer Name', headerStyle),
+          _tableCellCenter('Livestock / Heads', headerStyle),
+          _tableCellCenter('Inspection Stage', headerStyle),
+          _tableCell('Veterinary Findings / Cause', headerStyle),
+          _tableCellCenter('Disposition', headerStyle),
         ],
       ),
     ];
@@ -621,7 +923,7 @@ class ReportPdfGenerator {
     for (int i = 0; i < healthIssues.length; i++) {
       final req = healthIssues[i];
       final id = req['id']?.toString() ?? '';
-      final ref = 'MI-${DateTime.now().year}-${id.padLeft(3, '0')}';
+      final ref = req['reference_no']?.toString() ?? 'MI-${DateTime.now().year}-${id.padLeft(3, '0')}';
       final name = req['customer_name']?.toString() ?? '\u2014';
       final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
 
@@ -630,76 +932,68 @@ class ReportPdfGenerator {
       final status = (req['status'] ?? '').toString();
 
       String stage = 'Ante-Mortem';
-      String disposition = 'Ante-Mortem Failed — Taken Back';
-
+      String disposition = 'Taken Back';
       if (post == 'Failed' || status == 'condemned' || status == 'post_mortem_failed') {
-        stage = 'Post-Mortem Inspection';
+        stage = 'Post-Mortem';
         disposition = 'Carcass Condemned';
       } else if (anti == 'Failed' || status == 'anti_mortem_failed' || status == 'taken_back') {
-        stage = 'Ante-Mortem Inspection';
-        disposition = 'Rejected / Taken Back by Owner';
+        stage = 'Ante-Mortem';
+        disposition = 'Rejected / Taken Back';
       }
 
-      String findings = (req['veterinary_findings']?.toString() ??
-              req['condemnation_reason']?.toString() ??
-              req['process_notes']?.toString() ??
-              'Health abnormality detected during inspection')
-          .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
-          .trim();
-      if (findings.isEmpty || findings == 'null') {
-        findings = 'Did not meet health & inspection standards';
-      }
+      final findings = _sanitizeNotes(
+        (req['veterinary_findings'] ?? req['condemnation_reason'] ?? req['process_notes'] ?? '').toString(),
+        fallback: 'Did not meet sanitary & inspection standards',
+      );
 
       rows.add(
         pw.TableRow(
           children: [
-            _dataCellCenter('${i + 1}', cellStyle),
-            _dataCell(ref, cellStyle),
-            _dataCell(name, cellStyle),
-            _dataCellCenter(livestock, cellStyle),
-            _dataCellCenter(stage,
-                pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#C53030'))),
-            _dataCell(findings, cellStyle),
-            _dataCellCenter(disposition,
-                pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#9B2C2C'))),
+            _tableCellCenter('${i + 1}', cellStyle),
+            _tableCell(ref, cellStyle),
+            _tableCell(name, cellStyle),
+            _tableCellCenter(livestock, cellStyle),
+            _tableCellCenter(stage, cellStyle),
+            _tableCell(findings, cellStyle),
+            _tableCellCenter(disposition, cellStyle),
           ],
         ),
       );
     }
 
     return pw.Table(
-      border: pw.TableBorder.all(width: 0.5, color: PdfColor.fromHex('#FED7D7')),
+      border: pw.TableBorder.all(width: _borderW, color: _borderColor),
       columnWidths: const {
-        0: pw.FixedColumnWidth(18),
+        0: pw.FixedColumnWidth(20),
         1: pw.FixedColumnWidth(64),
-        2: pw.FlexColumnWidth(2.4),
-        3: pw.FlexColumnWidth(2.0),
-        4: pw.FlexColumnWidth(2.0),
-        5: pw.FlexColumnWidth(3.8),
-        6: pw.FlexColumnWidth(2.6),
+        2: pw.FlexColumnWidth(2.2),
+        3: pw.FlexColumnWidth(1.8),
+        4: pw.FlexColumnWidth(1.5),
+        5: pw.FlexColumnWidth(3.2),
+        6: pw.FlexColumnWidth(1.8),
       },
       children: rows,
     );
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SECTION 3: DID NOT UNDERGO INSPECTION (SEPARATE LIST)
+  //  SECTION 3: HELD / CONFINED LIVESTOCK — FAILED ANTE-MORTEM (B&W)
   // ═══════════════════════════════════════════════════════════════
   static pw.Widget _buildUninspectedTable(List<Map<String, dynamic>> uninspected) {
     final headerStyle = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
-    const cellStyle = pw.TextStyle(fontSize: 6);
+    const cellStyle = pw.TextStyle(fontSize: 6.5);
 
     if (uninspected.isEmpty) {
       return pw.Container(
-        padding: const pw.EdgeInsets.all(8),
+        width: double.infinity,
+        padding: const pw.EdgeInsets.all(6),
         decoration: pw.BoxDecoration(
-          border: pw.TableBorder.all(color: PdfColor.fromHex('#E2E8F0'), width: 0.5),
-          color: PdfColor.fromHex('#F7FAFC'),
+          border: pw.Border.all(color: _borderColor, width: _borderW),
         ),
         child: pw.Center(
           child: pw.Text(
-            'All registered livestock underwent official veterinary inspection as scheduled.',
-            style: pw.TextStyle(fontSize: 7, fontStyle: pw.FontStyle.italic, color: PdfColors.grey700),
+            'No livestock currently held or confined from ante-mortem inspection during this period.',
+            style: pw.TextStyle(fontSize: 6.5, fontStyle: pw.FontStyle.italic),
           ),
         ),
       );
@@ -707,15 +1001,14 @@ class ReportPdfGenerator {
 
     final rows = <pw.TableRow>[
       pw.TableRow(
-        decoration: pw.BoxDecoration(color: PdfColor.fromHex('#F7FAFC')),
         children: [
-          _headerCellCenter('No.', headerStyle),
-          _headerCell('Reference No.', headerStyle),
-          _headerCell('Customer Name', headerStyle),
-          _headerCellCenter('Livestock / Heads', headerStyle),
-          _headerCellCenter('Scheduled Date', headerStyle),
-          _headerCellCenter('Registration Status', headerStyle),
-          _headerCell('Reason / Remarks', headerStyle),
+          _tableCellCenter('No.', headerStyle),
+          _tableCell('Reference No.', headerStyle),
+          _tableCell('Customer Name', headerStyle),
+          _tableCellCenter('Livestock / Heads', headerStyle),
+          _tableCellCenter('Date Held', headerStyle),
+          _tableCellCenter('Hold Status', headerStyle),
+          _tableCell('Ante-Mortem Findings / Remarks', headerStyle),
         ],
       ),
     ];
@@ -723,54 +1016,47 @@ class ReportPdfGenerator {
     for (int i = 0; i < uninspected.length; i++) {
       final req = uninspected[i];
       final id = req['id']?.toString() ?? '';
-      final ref = 'MI-${DateTime.now().year}-${id.padLeft(3, '0')}';
+      final ref = req['reference_no']?.toString() ?? 'MI-${DateTime.now().year}-${id.padLeft(3, '0')}';
       final name = req['customer_name']?.toString() ?? '\u2014';
       final livestock = '${req['livestock_type'] ?? 'Unknown'} (${req['animal_count'] ?? 1} head)';
-      final sched = req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
-      final status = (req['status'] ?? 'Pending').toString();
-
-      String reason = 'Inspection pending or omitted before slaughter';
-      if (status == 'cancelled') {
-        reason = 'Booking cancelled by customer prior to arrival';
-      } else if (status == 'rejected') {
-        reason = 'Registration rejected during document verification';
-      } else if (status == 'pending' || status == 'approved') {
-        reason = 'Pending animal arrival & ante-mortem inspection';
-      }
+      final sched = req['inspection_created_at']?.toString() ?? req['preferred_date']?.toString() ?? req['created_at']?.toString() ?? '\u2014';
+      final findings = _sanitizeNotes(
+        (req['veterinary_findings'] ?? req['process_notes'] ?? '').toString(),
+        fallback: 'Failed ante-mortem — held under mandatory 2-day confinement for re-evaluation',
+      );
 
       rows.add(
         pw.TableRow(
           children: [
-            _dataCellCenter('${i + 1}', cellStyle),
-            _dataCell(ref, cellStyle),
-            _dataCell(name, cellStyle),
-            _dataCellCenter(livestock, cellStyle),
-            _dataCellCenter(sched.length > 10 ? sched.substring(0, 10) : sched, cellStyle),
-            _dataCellCenter(status.toUpperCase(),
-                pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#4A5568'))),
-            _dataCell(reason, cellStyle),
+            _tableCellCenter('${i + 1}', cellStyle),
+            _tableCell(ref, cellStyle),
+            _tableCell(name, cellStyle),
+            _tableCellCenter(livestock, cellStyle),
+            _tableCellCenter(sched.length > 10 ? sched.substring(0, 10) : sched, cellStyle),
+            _tableCellCenter('CONFINED (2-DAY HOLD)', cellStyle),
+            _tableCell(findings, cellStyle),
           ],
         ),
       );
     }
 
     return pw.Table(
-      border: pw.TableBorder.all(width: 0.5, color: PdfColor.fromHex('#E2E8F0')),
+      border: pw.TableBorder.all(width: _borderW, color: _borderColor),
       columnWidths: const {
-        0: pw.FixedColumnWidth(18),
+        0: pw.FixedColumnWidth(20),
         1: pw.FixedColumnWidth(64),
-        2: pw.FlexColumnWidth(2.5),
-        3: pw.FlexColumnWidth(2.0),
-        4: pw.FlexColumnWidth(2.0),
-        5: pw.FlexColumnWidth(2.2),
-        6: pw.FlexColumnWidth(3.5),
+        2: pw.FlexColumnWidth(2.4),
+        3: pw.FlexColumnWidth(1.8),
+        4: pw.FlexColumnWidth(1.6),
+        5: pw.FlexColumnWidth(1.8),
+        6: pw.FlexColumnWidth(3.2),
       },
       children: rows,
     );
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SUMMARY COMMODITIES & REVENUE TABLE
+  //  ANIMAL COMMODITIES SLAUGHTERED SUMMARY TABLE (BLACK & WHITE)
   // ═══════════════════════════════════════════════════════════════
   static pw.Widget _buildSummaryTable({
     required int hogs,
@@ -783,41 +1069,45 @@ class ReportPdfGenerator {
     final style = pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold);
     final totalHeads = hogs + cow + cara + goat;
 
-    return pw.Table(
-      border: pw.TableBorder.all(width: 0.5, color: PdfColor.fromHex('#CBD5E0')),
-      columnWidths: const {
-        0: pw.FlexColumnWidth(1.0),
-        1: pw.FlexColumnWidth(1.0),
-        2: pw.FlexColumnWidth(1.0),
-        3: pw.FlexColumnWidth(1.0),
-        4: pw.FlexColumnWidth(1.3),
-        5: pw.FlexColumnWidth(1.5),
-        6: pw.FlexColumnWidth(1.7),
-      },
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
-        pw.TableRow(
-          decoration: pw.BoxDecoration(color: PdfColor.fromHex('#EDF2F7')),
+        pw.Text('ANIMAL COMMODITIES SLAUGHTERED', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold)),
+        pw.SizedBox(height: 4),
+        pw.Table(
+          border: pw.TableBorder.all(width: _borderW, color: _borderColor),
+          columnWidths: const {
+            0: pw.FlexColumnWidth(1.0),
+            1: pw.FlexColumnWidth(1.0),
+            2: pw.FlexColumnWidth(1.0),
+            3: pw.FlexColumnWidth(1.0),
+            4: pw.FlexColumnWidth(1.2),
+            5: pw.FlexColumnWidth(1.4),
+            6: pw.FlexColumnWidth(1.6),
+          },
           children: [
-            _headerCellCenter('HOGS', style),
-            _headerCellCenter('COW / CATTLE', style),
-            _headerCellCenter('CARABAO', style),
-            _headerCellCenter('GOAT / SHEEP', style),
-            _headerCellCenter('TOTAL HEADS', style),
-            _headerCellCenter('TOTAL WEIGHT', style),
-            _headerCellCenter('TOTAL REVENUE', style),
-          ],
-        ),
-        pw.TableRow(
-          children: [
-            _headerCellCenter(hogs.toString(), style),
-            _headerCellCenter(cow.toString(), style),
-            _headerCellCenter(cara.toString(), style),
-            _headerCellCenter(goat.toString(), style),
-            _headerCellCenter('$totalHeads Heads',
-                pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#2D6A4F'))),
-            _headerCellCenter('${totalWeight.toStringAsFixed(1)} kg', style),
-            _headerCellCenter('$_currency${NumberFormat('#,##0.00').format(totalRevenue)}',
-                pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColor.fromHex('#1B4332'))),
+            pw.TableRow(
+              children: [
+                _tableCellCenter('HOGS', style),
+                _tableCellCenter('COW', style),
+                _tableCellCenter('CARABAO', style),
+                _tableCellCenter('GOAT', style),
+                _tableCellCenter('TOTAL HEADS', style),
+                _tableCellCenter('TOTAL WEIGHT', style),
+                _tableCellCenter('TOTAL REVENUE', style),
+              ],
+            ),
+            pw.TableRow(
+              children: [
+                _tableCellCenter(hogs.toString(), style),
+                _tableCellCenter(cow.toString(), style),
+                _tableCellCenter(cara.toString(), style),
+                _tableCellCenter(goat.toString(), style),
+                _tableCellCenter('$totalHeads Heads', style),
+                _tableCellCenter('${totalWeight.toStringAsFixed(1)} kg', style),
+                _tableCellCenter('$_currency${NumberFormat('#,##0.00').format(totalRevenue)}', style),
+              ],
+            ),
           ],
         ),
       ],
@@ -825,12 +1115,12 @@ class ReportPdfGenerator {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  OFFICIAL SIGNATURES
+  //  OFFICIAL SIGNATURES (EXACT TABACO CITY FORM TITLES)
   // ═══════════════════════════════════════════════════════════════
   static pw.Widget _buildSignatures() {
     final labelStyle = pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold);
     final nameStyle = pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, decoration: pw.TextDecoration.underline);
-    final titleStyle = const pw.TextStyle(fontSize: 6.5);
+    const titleStyle = pw.TextStyle(fontSize: 6.5);
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -847,7 +1137,6 @@ class ReportPdfGenerator {
           ],
         ),
         pw.SizedBox(height: 12),
-
         pw.Text('MEAT INSPECTORS ON DUTY:', style: labelStyle),
         pw.SizedBox(height: 8),
         pw.Row(
@@ -862,7 +1151,6 @@ class ReportPdfGenerator {
           ],
         ),
         pw.SizedBox(height: 12),
-
         pw.Text('CERTIFIED AND VALIDATED BY:', style: labelStyle),
         pw.SizedBox(height: 8),
         pw.Row(
@@ -877,7 +1165,7 @@ class ReportPdfGenerator {
                 pw.Text('Slaughterhouse Designate', style: titleStyle),
               ],
             ),
-            pw.SizedBox(width: 40),
+            pw.SizedBox(width: 48),
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
@@ -885,12 +1173,12 @@ class ReportPdfGenerator {
                 pw.Text('Slaughterhouse Master 1', style: titleStyle),
               ],
             ),
-            pw.SizedBox(width: 40),
+            pw.SizedBox(width: 48),
             pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text('KIM RONAN ROMERO, DVM', style: nameStyle),
-                pw.Text('CITY VETERINARIAN', style: titleStyle),
+                pw.Text('OIC-City Veterinarian', style: titleStyle),
               ],
             ),
           ],
@@ -900,8 +1188,34 @@ class ReportPdfGenerator {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  //  SPECIES RECOGNITION HELPERS
+  //  HELPERS
   // ═══════════════════════════════════════════════════════════════
+  static double _extractFee(Map<String, dynamic> req, double weight) {
+    double fee = 0;
+    final payment = req['payment'] as Map<String, dynamic>?;
+    if (payment != null) {
+      fee = double.tryParse((payment['total_amount'] ?? payment['amount'] ?? 0).toString()) ?? 0;
+    }
+    if (fee == 0) {
+      fee = double.tryParse((req['total_amount'] ?? req['total_fee'] ?? 0).toString()) ?? 0;
+    }
+    if (fee == 0 && weight > 0) {
+      fee = (weight * 5.0) + 250.0;
+    }
+    return fee;
+  }
+
+  static String _sanitizeNotes(String raw, {String fallback = 'Passed Inspection'}) {
+    final cleaned = raw
+        .replaceAll(RegExp(r'\[AM_PASSED_AT:[^\]]+\]\s*\|?\s*'), '')
+        .replaceAll(RegExp(r'\[PHONE:[^\]]+\]\s*\|?\s*'), '')
+        .trim();
+    if (cleaned.isEmpty || cleaned.toLowerCase() == 'null') {
+      return fallback;
+    }
+    return cleaned;
+  }
+
   static bool _isGoat(String t) =>
       t.contains('goat') || t.contains('sheep') || t.contains('caprine') || t.contains('kambing');
 
@@ -911,44 +1225,17 @@ class ReportPdfGenerator {
   static bool _isCara(String t) =>
       t.contains('cara') || t.contains('carabao') || t.contains('buffalo') || t.contains('kalabaw');
 
-  static bool _isHog(String t) =>
-      t.contains('hog') || t.contains('pig') || t.contains('swine') || t.contains('baboy');
-
-  // ═══════════════════════════════════════════════════════════════
-  //  CELL HELPERS
-  // ═══════════════════════════════════════════════════════════════
-  static pw.Widget _headerCell(String text, pw.TextStyle style) {
+  static pw.Widget _tableCell(String text, pw.TextStyle style) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 1.5),
+      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 4),
       child: pw.Text(text, style: style),
     );
   }
 
-  static pw.Widget _headerCellCenter(String text, pw.TextStyle style) {
+  static pw.Widget _tableCellCenter(String text, pw.TextStyle style) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 1.5),
+      padding: const pw.EdgeInsets.symmetric(vertical: 3, horizontal: 3),
       child: pw.Center(child: pw.Text(text, style: style, textAlign: pw.TextAlign.center)),
-    );
-  }
-
-  static pw.Widget _dataCell(String text, pw.TextStyle style) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 1.5),
-      child: pw.Text(text, style: style, maxLines: 1),
-    );
-  }
-
-  static pw.Widget _dataCellCenter(String text, pw.TextStyle style) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 1.5),
-      child: pw.Center(child: pw.Text(text, style: style, maxLines: 1)),
-    );
-  }
-
-  static pw.Widget _emptyCell(pw.TextStyle style) {
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2, horizontal: 1.5),
-      child: pw.Text('', style: style),
     );
   }
 }
