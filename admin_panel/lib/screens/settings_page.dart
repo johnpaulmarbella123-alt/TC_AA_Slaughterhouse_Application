@@ -948,11 +948,11 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           const SizedBox(height: 24),
 
-          // Header with Add Staff Button
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
+          // Header with Add Staff Button (responsive wrap on mobile)
+          LayoutBuilder(
+            builder: (ctx, constraints) {
+              final isNarrow = constraints.maxWidth < 680;
+              final headerText = Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
@@ -972,8 +972,8 @@ class _SettingsPageState extends State<SettingsPage>
                     ),
                   ),
                 ],
-              ),
-              ElevatedButton.icon(
+              );
+              final addBtn = ElevatedButton.icon(
                 onPressed: () => _showAddStaffDialog(isDark),
                 icon: const Icon(Icons.person_add, size: 18),
                 label: const Text('Add Staff Member'),
@@ -982,8 +982,26 @@ class _SettingsPageState extends State<SettingsPage>
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                 ),
-              ),
-            ],
+              );
+              if (isNarrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    headerText,
+                    const SizedBox(height: 12),
+                    addBtn,
+                  ],
+                );
+              }
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(child: headerText),
+                  const SizedBox(width: 16),
+                  addBtn,
+                ],
+              );
+            },
           ),
           const SizedBox(height: 16),
 
@@ -1388,187 +1406,210 @@ class _SettingsPageState extends State<SettingsPage>
     final isSuperAdminRow = normalizedStaffRole == 'Super Admin';
     final assignableRoles =
         rolesList.where((r) => r != 'Super Admin').toList();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: staff.isActive
-                ? _roleColor(normalizedStaffRole).withValues(alpha: 0.15)
-                : Colors.grey.shade300,
-            child: Text(
-              staff.fullName.isNotEmpty
-                  ? staff.fullName.substring(0, 1).toUpperCase()
-                  : 'S',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: staff.isActive
-                    ? _roleColor(normalizedStaffRole)
-                    : Colors.grey.shade600,
+    final isCompact = MediaQuery.sizeOf(context).width < 700;
+
+    final avatarWidget = CircleAvatar(
+      radius: 20,
+      backgroundColor: staff.isActive
+          ? _roleColor(normalizedStaffRole).withValues(alpha: 0.15)
+          : Colors.grey.shade300,
+      child: Text(
+        staff.fullName.isNotEmpty
+            ? staff.fullName.substring(0, 1).toUpperCase()
+            : 'S',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: staff.isActive
+              ? _roleColor(normalizedStaffRole)
+              : Colors.grey.shade600,
+        ),
+      ),
+    );
+
+    final nameEmailWidget = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          staff.fullName,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 13.5,
+            color: isDark ? Colors.white : const Color(0xFF1E293B),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          staff.email,
+          style: TextStyle(
+            fontSize: 12,
+            color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+          ),
+        ),
+      ],
+    );
+
+    final roleWidget = isSuperAdminRow
+        ? Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: _roleColor('Super Admin').withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: _roleColor('Super Admin').withValues(alpha: 0.35),
               ),
             ),
-          ),
-          const SizedBox(width: 16),
-          // Name & Email
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
+                Icon(Icons.shield_outlined,
+                    size: 14, color: _roleColor('Super Admin')),
+                const SizedBox(width: 6),
                 Text(
-                  staff.fullName,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13.5,
-                    color: isDark ? Colors.white : const Color(0xFF1E293B),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  staff.email,
+                  'Super Admin',
                   style: TextStyle(
                     fontSize: 12,
-                    color: isDark
-                        ? const Color(0xFF94A3B8)
-                        : Colors.grey.shade600,
+                    fontWeight: FontWeight.w700,
+                    color: _roleColor('Super Admin'),
                   ),
                 ),
               ],
             ),
+          )
+        : DropdownButton<String>(
+            value: assignableRoles.contains(normalizedStaffRole)
+                ? normalizedStaffRole
+                : 'Clerk',
+            dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            underline: const SizedBox(),
+            items: assignableRoles.map((r) {
+              return DropdownMenuItem(
+                value: r,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _roleColor(r).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    r,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _roleColor(r),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+            onChanged: (newRole) async {
+              if (newRole != null) {
+                await _settingsService.updateStaffRole(staff.id, newRole);
+                if (mounted) setState(() {});
+              }
+            },
+          );
+
+    final statusToggleWidget = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          staff.isActive ? 'Active' : 'Inactive',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: staff.isActive ? const Color(0xFF16A34A) : Colors.grey,
           ),
-          // Role Selector (locked badge for Super Admin)
+        ),
+        Switch(
+          value: staff.isActive,
+          activeThumbColor: const Color(0xFF2D6A4F),
+          onChanged: isSuperAdminRow
+              ? null
+              : (_) async {
+                  await _settingsService.toggleStaffStatus(staff.id);
+                  if (mounted) setState(() {});
+                },
+        ),
+      ],
+    );
+
+    final keyButton = IconButton(
+      icon: const Icon(Icons.key_outlined, color: Color(0xFF2D6A4F), size: 20),
+      tooltip: 'Set / Reset Login Password',
+      onPressed: () => _showResetStaffPasswordDialog(staff, isDark),
+    );
+
+    final deleteOrLockWidget = isSuperAdminRow
+        ? const Tooltip(
+            message: 'Protected Super Admin account',
+            child: Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Icon(Icons.lock_outline, color: Colors.grey, size: 18),
+            ),
+          )
+        : IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+            tooltip: 'Remove Staff',
+            onPressed: () async {
+              final staffName = staff.fullName;
+              await _settingsService.deleteStaffAccount(staff.id);
+              if (!mounted) return;
+              setState(() {});
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Removed $staffName from staff accounts.'),
+                  backgroundColor: const Color(0xFF2D6A4F),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            },
+          );
+
+    if (isCompact) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                avatarWidget,
+                const SizedBox(width: 12),
+                Expanded(child: nameEmailWidget),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                roleWidget,
+                statusToggleWidget,
+                keyButton,
+                deleteOrLockWidget,
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      child: Row(
+        children: [
+          avatarWidget,
+          const SizedBox(width: 16),
+          Expanded(flex: 3, child: nameEmailWidget),
           Expanded(
             flex: 3,
-            child: isSuperAdminRow
-                ? Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _roleColor('Super Admin').withValues(alpha: 0.14),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(
-                          color: _roleColor('Super Admin').withValues(alpha: 0.35),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.shield_outlined,
-                              size: 14, color: _roleColor('Super Admin')),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Super Admin',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: _roleColor('Super Admin'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                : DropdownButton<String>(
-                    value: assignableRoles.contains(normalizedStaffRole)
-                        ? normalizedStaffRole
-                        : 'Clerk',
-                    dropdownColor:
-                        isDark ? const Color(0xFF1E293B) : Colors.white,
-                    underline: const SizedBox(),
-                    items: assignableRoles.map((r) {
-                      return DropdownMenuItem(
-                        value: r,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _roleColor(r).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            r,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: _roleColor(r),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (newRole) async {
-                      if (newRole != null) {
-                        await _settingsService.updateStaffRole(
-                            staff.id, newRole);
-                        if (mounted) setState(() {});
-                      }
-                    },
-                  ),
+            child: Align(alignment: Alignment.centerLeft, child: roleWidget),
           ),
-          // Active Status Switch
-          Row(
-            children: [
-              Text(
-                staff.isActive ? 'Active' : 'Inactive',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: staff.isActive
-                      ? const Color(0xFF16A34A)
-                      : Colors.grey,
-                ),
-              ),
-              Switch(
-                value: staff.isActive,
-                activeThumbColor: const Color(0xFF2D6A4F),
-                onChanged: isSuperAdminRow
-                    ? null
-                    : (_) async {
-                        await _settingsService.toggleStaffStatus(staff.id);
-                        if (mounted) setState(() {});
-                      },
-              ),
-            ],
-          ),
+          statusToggleWidget,
           const SizedBox(width: 4),
-          // Set / Reset Password Action
-          IconButton(
-            icon: const Icon(Icons.key_outlined,
-                color: Color(0xFF2D6A4F), size: 20),
-            tooltip: 'Set / Reset Login Password',
-            onPressed: () => _showResetStaffPasswordDialog(staff, isDark),
-          ),
-          // Delete Action (protected for Super Admin)
-          if (isSuperAdminRow)
-            const Tooltip(
-              message: 'Protected Super Admin account',
-              child: Padding(
-                padding: EdgeInsets.all(8.0),
-                child: Icon(Icons.lock_outline, color: Colors.grey, size: 18),
-              ),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.delete_outline,
-                  color: Colors.redAccent, size: 20),
-              tooltip: 'Remove Staff',
-              onPressed: () async {
-                final staffName = staff.fullName;
-                await _settingsService.deleteStaffAccount(staff.id);
-                if (!mounted) return;
-                setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Removed $staffName from staff accounts.'),
-                    backgroundColor: const Color(0xFF2D6A4F),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-              },
-            ),
+          keyButton,
+          deleteOrLockWidget,
         ],
       ),
     );
@@ -3351,26 +3392,32 @@ class _SettingsPageState extends State<SettingsPage>
                   ),
                 ),
               ),
-              SegmentedButton<String>(
-                showSelectedIcon: false,
-                style: ButtonStyle(
-                  fixedSize: const WidgetStatePropertyAll(Size(108, 40)),
-                  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8)),
-                  textStyle: const WidgetStatePropertyAll(
-                    TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                segments: [
-                  const ButtonSegment(value: 'all', label: Text('All', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  const ButtonSegment(value: 'active', label: Text('Active', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  const ButtonSegment(value: 'deactivated', label: Text('Deactivated', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                  ButtonSegment(
-                    value: 'deleted',
-                    label: Text('Deleted (${_deletedCustomerAccounts.length})', maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-                selected: {_customerStatusFilter},
-                onSelectionChanged: (s) => setState(() => _customerStatusFilter = s.first),
+              Builder(
+                builder: (context) {
+                  final screenW = MediaQuery.sizeOf(context).width;
+                  final segWidth = screenW < 480 ? ((screenW - 44) / 4).clamp(72.0, 108.0) : 108.0;
+                  return SegmentedButton<String>(
+                    showSelectedIcon: false,
+                    style: ButtonStyle(
+                      fixedSize: WidgetStatePropertyAll(Size(segWidth, 40)),
+                      padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 4)),
+                      textStyle: WidgetStatePropertyAll(
+                        TextStyle(fontSize: screenW < 480 ? 11.5 : 13, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    segments: [
+                      const ButtonSegment(value: 'all', label: Text('All', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      const ButtonSegment(value: 'active', label: Text('Active', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      const ButtonSegment(value: 'deactivated', label: Text('Deactivated', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      ButtonSegment(
+                        value: 'deleted',
+                        label: Text('Deleted (${_deletedCustomerAccounts.length})', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                    selected: {_customerStatusFilter},
+                    onSelectionChanged: (s) => setState(() => _customerStatusFilter = s.first),
+                  );
+                },
               ),
             ],
           ),
@@ -3521,180 +3568,199 @@ class _SettingsPageState extends State<SettingsPage>
                 final warnCount = (c['warning_count'] as num?)?.toInt() ?? 0;
                 final lastWarnReason = (c['last_warning_reason'] ?? '').toString().trim();
 
+                final isCompactCard = MediaQuery.sizeOf(context).width < 760;
+                final avatarWidget = CircleAvatar(
+                  radius: 22,
+                  backgroundColor: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                  child: Icon(
+                    isActive ? Icons.person_outline : Icons.block,
+                    color: isActive ? const Color(0xFF16A34A) : const Color(0xFFD97706),
+                  ),
+                );
+                final infoColumn = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textCol)),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: roleLabel == 'Role Not Selected Yet'
+                                ? const Color(0xFFF1F5F9)
+                                : const Color(0xFFE0F2FE),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            roleLabel,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: roleLabel == 'Role Not Selected Yet'
+                                  ? const Color(0xFF64748B)
+                                  : const Color(0xFF0369A1),
+                            ),
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isActive ? 'Active' : 'Deactivated',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: isActive ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                            ),
+                          ),
+                        ),
+                        if (warnCount > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF7ED),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFFFDBA74)),
+                            ),
+                            child: Text(
+                              '$warnCount ${warnCount == 1 ? 'Warning' : 'Warnings'}',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFC2410C)),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    if (contact.isNotEmpty)
+                      Text(contact, style: TextStyle(fontSize: 12.5, color: subCol)),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Location: $location  •  Requests: $reqCount',
+                      style: TextStyle(fontSize: 12, color: subCol),
+                    ),
+                    if (warnCount > 0 && lastWarnReason.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Last warning: $lastWarnReason',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFC2410C), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                    if (!isActive && reason.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Deactivation reason: $reason',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFFD97706), fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ],
+                );
+                final actionsWrap = Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if ((c['role_document_url'] ?? '').toString().trim().isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          final docUrl = c['role_document_url'].toString().trim();
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text('$name — $roleLabel Document'),
+                              content: SizedBox(
+                                width: AdminResponsive.dialogWidth(context, 480),
+                                child: SingleChildScrollView(
+                                  child: Image.network(
+                                    docUrl,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, _, _) => SelectableText('Document URL:\n$docUrl'),
+                                  ),
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx),
+                                  child: const Text('Close'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.description_outlined, size: 16),
+                        label: const Text('View Document'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF0284C7),
+                          side: const BorderSide(color: Color(0xFF0284C7)),
+                        ),
+                      ),
+                    if (isActive)
+                      OutlinedButton.icon(
+                        onPressed: () => _issueCustomerWarning(c),
+                        icon: const Icon(Icons.warning_amber_rounded, size: 16),
+                        label: const Text('Warn'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFC2410C),
+                          side: const BorderSide(color: Color(0xFFFB923C)),
+                        ),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: () => _toggleCustomerActive(c),
+                      icon: Icon(isActive ? Icons.pause_circle_outline : Icons.check_circle_outline, size: 16),
+                      label: Text(isActive ? 'Deactivate' : 'Reactivate'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A),
+                        side: BorderSide(color: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A)),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => _deleteCustomerAccount(c),
+                      icon: const Icon(Icons.delete_outline, size: 16),
+                      label: const Text('Delete'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFDC2626),
+                        side: const BorderSide(color: Color(0xFFDC2626)),
+                      ),
+                    ),
+                  ],
+                );
+
                 return Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: EdgeInsets.all(isCompactCard ? 14 : 16),
                   decoration: BoxDecoration(
                     color: cardBg,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: isActive ? borderCol : const Color(0xFFF59E0B).withValues(alpha: 0.6)),
                   ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CircleAvatar(
-                        radius: 22,
-                        backgroundColor: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                        child: Icon(
-                          isActive ? Icons.person_outline : Icons.block,
-                          color: isActive ? const Color(0xFF16A34A) : const Color(0xFFD97706),
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
+                  child: isCompactCard
+                      ? Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 6,
-                              crossAxisAlignment: WrapCrossAlignment.center,
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: textCol)),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: roleLabel == 'Role Not Selected Yet'
-                                        ? const Color(0xFFF1F5F9)
-                                        : const Color(0xFFE0F2FE),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    roleLabel,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: roleLabel == 'Role Not Selected Yet'
-                                          ? const Color(0xFF64748B)
-                                          : const Color(0xFF0369A1),
-                                    ),
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: isActive ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    isActive ? 'Active' : 'Deactivated',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: isActive ? const Color(0xFF15803D) : const Color(0xFFB45309),
-                                    ),
-                                  ),
-                                ),
-                                if (warnCount > 0)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFFFFF7ED),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFFFDBA74)),
-                                    ),
-                                    child: Text(
-                                      '$warnCount ${warnCount == 1 ? 'Warning' : 'Warnings'}',
-                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFFC2410C)),
-                                    ),
-                                  ),
+                                avatarWidget,
+                                const SizedBox(width: 12),
+                                Expanded(child: infoColumn),
                               ],
                             ),
-                            const SizedBox(height: 6),
-                            if (contact.isNotEmpty)
-                              Text(contact, style: TextStyle(fontSize: 12.5, color: subCol)),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Location: $location  •  Requests: $reqCount',
-                              style: TextStyle(fontSize: 12, color: subCol),
-                            ),
-                            if (warnCount > 0 && lastWarnReason.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                'Last warning: $lastWarnReason',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFFC2410C), fontWeight: FontWeight.w600),
-                              ),
-                            ],
-                            if (!isActive && reason.isNotEmpty) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                'Deactivation reason: $reason',
-                                style: const TextStyle(fontSize: 12, color: Color(0xFFD97706), fontWeight: FontWeight.w600),
-                              ),
-                            ],
+                            const SizedBox(height: 12),
+                            actionsWrap,
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            avatarWidget,
+                            const SizedBox(width: 14),
+                            Expanded(child: infoColumn),
+                            const SizedBox(width: 12),
+                            actionsWrap,
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          if ((c['role_document_url'] ?? '').toString().trim().isNotEmpty)
-                            OutlinedButton.icon(
-                              onPressed: () {
-                                final docUrl = c['role_document_url'].toString().trim();
-                                showDialog(
-                                  context: context,
-                                  builder: (ctx) => AlertDialog(
-                                    title: Text('$name — $roleLabel Document'),
-                                    content: SizedBox(
-                                      width: 480,
-                                      child: SingleChildScrollView(
-                                        child: Image.network(
-                                          docUrl,
-                                          fit: BoxFit.contain,
-                                          errorBuilder: (_, _, _) => SelectableText('Document URL:\n$docUrl'),
-                                        ),
-                                      ),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(ctx),
-                                        child: const Text('Close'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.description_outlined, size: 16),
-                              label: const Text('View Document'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFF0284C7),
-                                side: const BorderSide(color: Color(0xFF0284C7)),
-                              ),
-                            ),
-                          if (isActive)
-                            OutlinedButton.icon(
-                              onPressed: () => _issueCustomerWarning(c),
-                              icon: const Icon(Icons.warning_amber_rounded, size: 16),
-                              label: const Text('Warn'),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: const Color(0xFFC2410C),
-                                side: const BorderSide(color: Color(0xFFFB923C)),
-                              ),
-                            ),
-                          OutlinedButton.icon(
-                            onPressed: () => _toggleCustomerActive(c),
-                            icon: Icon(isActive ? Icons.pause_circle_outline : Icons.check_circle_outline, size: 16),
-                            label: Text(isActive ? 'Deactivate' : 'Reactivate'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A),
-                              side: BorderSide(color: isActive ? const Color(0xFFD97706) : const Color(0xFF16A34A)),
-                            ),
-                          ),
-                          OutlinedButton.icon(
-                            onPressed: () => _deleteCustomerAccount(c),
-                            icon: const Icon(Icons.delete_outline, size: 16),
-                            label: const Text('Delete'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFDC2626),
-                              side: const BorderSide(color: Color(0xFFDC2626)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
                 );
               },
             ),

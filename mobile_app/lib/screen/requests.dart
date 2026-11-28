@@ -6,11 +6,11 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'how_it_works.dart';
 import '../services/document_verifier.dart';
 import '../utils/text_capitalization_formatters.dart';
+import '../widgets/animated_select_dropdown.dart';
 
 class RequestsContent extends StatefulWidget {
   final ValueNotifier<String?>? preselectedLivestockNotifier;
@@ -1325,9 +1325,10 @@ class _RequestsContentState extends State<RequestsContent>
 
   // ---------------- DOCUMENT PICKER ----------------
 
-  Future<void> _pickDocument(String type) async {
-    // 1. Choose source: Camera, Gallery, or Device Files
-    final selection = await showModalBottomSheet<String>(
+  Future<void> _pickDocument(String type, {ImageSource? directSource}) async {
+    // 1. Choose source: Camera or Image Gallery (no generic file upload)
+    ImageSource? source = directSource;
+    source ??= await showModalBottomSheet<ImageSource>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -1355,29 +1356,23 @@ class _RequestsContentState extends State<RequestsContent>
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
                 child: Text(
-                  "Please provide a scanned copy or clear photo of the official document.",
+                  "Please take a clear photo or upload an image of the official document.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.camera_alt, color: Color(0xFF1E855A)),
+                leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF1E855A)),
                 title: const Text("Take Photo"),
                 subtitle: const Text("Capture the physical certificate directly"),
-                onTap: () => Navigator.pop(context, 'camera'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library, color: Color(0xFF1E855A)),
-                title: const Text("Select from Gallery"),
-                subtitle: const Text("Choose image from your photo album"),
-                onTap: () => Navigator.pop(context, 'gallery'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.folder_open, color: Color(0xFF1E855A)),
-                title: const Text("Choose Files"),
-                subtitle: const Text("Select image or scanned document file"),
-                onTap: () => Navigator.pop(context, 'files'),
+                leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF1E855A)),
+                title: const Text("Upload Image"),
+                subtitle: const Text("Choose an image from your photo gallery"),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
               ),
               const SizedBox(height: 8),
             ],
@@ -1386,69 +1381,37 @@ class _RequestsContentState extends State<RequestsContent>
       },
     );
 
-    if (selection == null) return;
+    if (source == null) return;
 
     File? selectedFile;
     Uint8List? selectedBytes;
 
     try {
-      if (selection == 'camera') {
-        final XFile? image = await picker.pickImage(
-          source: ImageSource.camera,
-          maxWidth: 1024,
-          maxHeight: 1024,
-          imageQuality: 70,
-        );
-        if (image != null) {
-          selectedBytes = await image.readAsBytes();
-          if (!kIsWeb) {
-            try {
-              selectedFile = File(image.path);
-            } catch (_) {}
-          }
-        }
-      } else if (selection == 'gallery') {
-        final XFile? image = await picker.pickImage(
-          source: ImageSource.gallery,
-          maxWidth: 1024,
-          maxHeight: 1024,
-          imageQuality: 70,
-        );
-        if (image != null) {
-          selectedBytes = await image.readAsBytes();
-          if (!kIsWeb) {
-            try {
-              selectedFile = File(image.path);
-            } catch (_) {}
-          }
-        }
-      } else if (selection == 'files') {
-        final result = await FilePicker.platform.pickFiles(
-          type: FileType.custom,
-          allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
-          withData: true,
-        );
-        if (result != null && result.files.isNotEmpty) {
-          selectedBytes = result.files.single.bytes;
-          if (!kIsWeb && result.files.single.path != null) {
-            try {
-              selectedFile = File(result.files.single.path!);
-              selectedBytes ??= await selectedFile.readAsBytes();
-            } catch (_) {}
-          }
+      final XFile? image = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 70,
+      );
+      if (image != null) {
+        selectedBytes = await image.readAsBytes();
+        if (!kIsWeb) {
+          try {
+            selectedFile = File(image.path);
+          } catch (_) {}
         }
       }
 
       if (selectedBytes == null || selectedBytes.isEmpty) return;
       if (!mounted) return;
 
-      // 2. File size check
+      // 2. Image size check
       final int fileSize = selectedBytes.length;
       if (fileSize < 1024) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Selected file is too small. Please provide a clear scanned certificate."),
+            content: Text("Selected image is too small. Please provide a clear photo of the certificate."),
             backgroundColor: Colors.red,
           ),
         );
@@ -2335,25 +2298,24 @@ class _RequestsContentState extends State<RequestsContent>
                       ),
                       const SizedBox(height: 12),
                       if (isChoosingBarangay) ...[
-                        DropdownButtonFormField<String>(
+                        const Text(
+                          "City / Municipality *",
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        ),
+                        const SizedBox(height: 6),
+                        AnimatedSelectDropdown<String?>(
                           value: firstDistrictAlbayMunicipalities.any((m) => m['name'] == selectedMunicipality)
                               ? selectedMunicipality
                               : null,
+                          items: firstDistrictAlbayMunicipalities.map((m) => m['name']!).toList(),
+                          labelBuilder: (m) => m ?? 'Select City / Municipality',
+                          placeholder: 'Select City / Municipality',
                           isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: "City / Municipality *",
-                            filled: true,
-                            fillColor: Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          hint: const Text("Select City / Municipality"),
-                          items: firstDistrictAlbayMunicipalities
-                              .map((m) => DropdownMenuItem(
-                                    value: m['name'],
-                                    child: Text(m['name']!, overflow: TextOverflow.ellipsis),
-                                  ))
-                              .toList(),
+                          backgroundColor: Colors.white,
+                          borderColor: const Color(0xFFCBD5E1),
+                          textColor: const Color(0xFF1E293B),
+                          iconColor: const Color(0xFF64748B),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           onChanged: (val) {
                             if (val == null) return;
                             final selected = firstDistrictAlbayMunicipalities.firstWhere(
@@ -2368,32 +2330,33 @@ class _RequestsContentState extends State<RequestsContent>
                           },
                         ),
                         const SizedBox(height: 12),
-                        DropdownButtonFormField<String>(
+                        const Text(
+                          "Barangay Name *",
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        ),
+                        const SizedBox(height: 6),
+                        AnimatedSelectDropdown<String?>(
                           value: barangays.any((b) => b['name'] == selectedBarangay)
                               ? selectedBarangay
                               : null,
-                          isExpanded: true,
-                          decoration: InputDecoration(
-                            labelText: "Barangay Name *",
-                            filled: true,
-                            fillColor: selectedMunicipality == null ? Colors.grey.shade100 : Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          hint: Text(
-                            selectedMunicipality == null
-                                ? "Select Municipality first"
-                                : (_isLoadingBarangays ? "Loading barangays..." : "Select Barangay"),
-                          ),
                           items: barangays
-                              .map((b) => DropdownMenuItem<String>(
-                                    value: b['name']?.toString(),
-                                    child: Text(b['name']?.toString() ?? '', overflow: TextOverflow.ellipsis),
-                                  ))
+                              .map((b) => b['name']?.toString() ?? '')
+                              .where((n) => n.isNotEmpty)
                               .toList(),
-                          onChanged: selectedMunicipality == null || _isLoadingBarangays
-                              ? null
-                              : (val) => setState(() => selectedBarangay = val),
+                          labelBuilder: (b) => b ?? (selectedMunicipality == null
+                              ? 'Select Municipality first'
+                              : (_isLoadingBarangays ? 'Loading barangays...' : 'Select Barangay')),
+                          placeholder: selectedMunicipality == null
+                              ? 'Select Municipality first'
+                              : (_isLoadingBarangays ? 'Loading barangays...' : 'Select Barangay'),
+                          isExpanded: true,
+                          enabled: selectedMunicipality != null && !_isLoadingBarangays,
+                          backgroundColor: selectedMunicipality == null ? Colors.grey.shade100 : Colors.white,
+                          borderColor: const Color(0xFFCBD5E1),
+                          textColor: const Color(0xFF1E293B),
+                          iconColor: const Color(0xFF64748B),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          onChanged: (val) => setState(() => selectedBarangay = val),
                         ),
                         const SizedBox(height: 12),
                         SizedBox(
@@ -2401,7 +2364,7 @@ class _RequestsContentState extends State<RequestsContent>
                           child: OutlinedButton.icon(
                             onPressed: () => _pickDocument("Barangay Certificate"),
                             icon: Icon(
-                              barangayCertificateUrl != null ? Icons.verified_outlined : Icons.upload_file,
+                              barangayCertificateUrl != null ? Icons.verified_outlined : Icons.add_photo_alternate_outlined,
                               color: barangayCertificateUrl != null ? const Color(0xFF1E855A) : Colors.black87,
                             ),
                             label: Text(
@@ -2455,7 +2418,7 @@ class _RequestsContentState extends State<RequestsContent>
                           child: OutlinedButton.icon(
                             onPressed: () => _pickDocument("Business Permit"),
                             icon: Icon(
-                              businessPermitUrl != null ? Icons.verified_outlined : Icons.upload_file,
+                              businessPermitUrl != null ? Icons.verified_outlined : Icons.add_photo_alternate_outlined,
                               color: businessPermitUrl != null ? const Color(0xFF1E855A) : Colors.black87,
                             ),
                             label: Text(
@@ -3064,28 +3027,27 @@ class _RequestsContentState extends State<RequestsContent>
                       const SizedBox(height: 16),
 
                       // MUNICIPALITY
-                      DropdownButtonFormField<String>(
-                        value: selectedMunicipality,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: "Municipality",
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide.none,
-                          ),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          "Municipality",
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: Color(0xFF1E293B)),
                         ),
-                        items: municipalities.map<DropdownMenuItem<String>>((city) {
-                          return DropdownMenuItem<String>(
-                            value: city['name'],
-                            child: Text(
-                              city['name'],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
+                      ),
+                      const SizedBox(height: 6),
+                      AnimatedSelectDropdown<String?>(
+                        value: selectedMunicipality,
+                        items: municipalities.map<String>((city) => city['name'].toString()).toList(),
+                        labelBuilder: (c) => c ?? 'Select Municipality',
+                        placeholder: 'Select Municipality',
+                        isExpanded: true,
+                        backgroundColor: Colors.grey.shade100,
+                        borderColor: const Color(0xFFE2E8F0),
+                        textColor: const Color(0xFF1E293B),
+                        iconColor: const Color(0xFF64748B),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                         onChanged: (value) {
+                          if (value == null) return;
                           final selected = municipalities.firstWhere(
                             (m) => m['name'] == value,
                           );
@@ -3102,29 +3064,33 @@ class _RequestsContentState extends State<RequestsContent>
                       const SizedBox(height: 16),
 
                       // BARANGAY
-                      DropdownButtonFormField<String>(
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          "Barangay",
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: Color(0xFF1E293B)),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      AnimatedSelectDropdown<String?>(
                         value: barangays.any((b) => b['name'] == selectedBarangay)
                             ? selectedBarangay
                             : null,
+                        items: barangays
+                            .map<String>((b) => b['name']?.toString() ?? '')
+                            .where((n) => n.isNotEmpty)
+                            .toList(),
+                        labelBuilder: (b) => b ?? 'Select Barangay',
+                        placeholder: selectedMunicipality == null
+                            ? 'Select Municipality first'
+                            : (_isLoadingBarangays ? 'Loading barangays...' : 'Select Barangay'),
                         isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: "Barangay",
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                        items: barangays.map<DropdownMenuItem<String>>((b) {
-                          return DropdownMenuItem<String>(
-                            value: b['name'],
-                            child: Text(
-                              b['name'],
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          );
-                        }).toList(),
+                        enabled: selectedMunicipality != null && !_isLoadingBarangays,
+                        backgroundColor: Colors.grey.shade100,
+                        borderColor: const Color(0xFFE2E8F0),
+                        textColor: const Color(0xFF1E293B),
+                        iconColor: const Color(0xFF64748B),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
                         onChanged: (value) {
                           setState(() {
                             selectedBarangay = value;
@@ -3356,24 +3322,17 @@ class _RequestsContentState extends State<RequestsContent>
       children: [
         Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
+        AnimatedSelectDropdown<String?>(
           value: selectedLivestock,
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.grey.shade100,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          ),
-          hint: const Text("Select type", style: TextStyle(color: Colors.grey, fontSize: 14)),
-          items: options.map((String value) {
-            return DropdownMenuItem<String>(
-              value: value,
-              child: Text(value, style: const TextStyle(fontSize: 14)),
-            );
-          }).toList(),
+          items: options,
+          labelBuilder: (v) => v ?? 'Select type',
+          placeholder: 'Select type',
+          isExpanded: true,
+          backgroundColor: Colors.grey.shade100,
+          borderColor: const Color(0xFFE2E8F0),
+          textColor: const Color(0xFF1E293B),
+          iconColor: const Color(0xFF64748B),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           onChanged: (newValue) {
             setState(() {
               selectedLivestock = newValue;
@@ -3465,42 +3424,66 @@ class _RequestsContentState extends State<RequestsContent>
               style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: selectedDocType,
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: "Uploading as",
-                filled: true,
-                fillColor: Colors.grey.shade100,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none,
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                "Uploading as",
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
               ),
-              items: docOptions
-                  .map((d) => DropdownMenuItem(
-                        value: d,
-                        child: Text(d, style: const TextStyle(fontSize: 13)),
-                      ))
-                  .toList(),
+            ),
+            const SizedBox(height: 6),
+            AnimatedSelectDropdown<String>(
+              value: selectedDocType,
+              items: docOptions,
+              labelBuilder: (d) => d,
+              isExpanded: true,
+              openUpward: true,
+              backgroundColor: Colors.grey.shade100,
+              borderColor: const Color(0xFFE2E8F0),
+              textColor: const Color(0xFF1E293B),
+              iconColor: const Color(0xFF64748B),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               onChanged: (value) {
-                setState(() => selectedDocType = value!);
+                setState(() => selectedDocType = value);
               },
             ),
             const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () {
-                _pickDocument(selectedDocType);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black87,
-                elevation: 0,
-                side: BorderSide(color: Colors.grey.shade300),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              child: const Text("Choose files"),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      _pickDocument(selectedDocType, directSource: ImageSource.camera);
+                    },
+                    icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                    label: const Text("Take Photo"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E855A),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      _pickDocument(selectedDocType, directSource: ImageSource.gallery);
+                    },
+                    icon: const Icon(Icons.photo_library_outlined, size: 18),
+                    label: const Text("Upload Image"),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xFF1E293B),
+                      side: BorderSide(color: Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -3685,22 +3668,17 @@ class _RequestsContentState extends State<RequestsContent>
                         children: [
                           Text('Sex *', style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
                           const SizedBox(height: 4),
-                          DropdownButtonFormField<String>(
-                            initialValue: entry.sex,
-                            isDense: true,
+                          AnimatedSelectDropdown<String>(
+                            value: const ['', 'Male', 'Female'].contains(entry.sex) ? entry.sex : '',
+                            items: const ['', 'Male', 'Female'],
+                            labelBuilder: (s) => s.isEmpty ? 'Select' : s,
                             isExpanded: true,
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                            ),
-                            items: const [
-                              DropdownMenuItem(value: '', child: Text('—', overflow: TextOverflow.ellipsis)),
-                              DropdownMenuItem(value: 'Male', child: Text('Male', overflow: TextOverflow.ellipsis)),
-                              DropdownMenuItem(value: 'Female', child: Text('Female', overflow: TextOverflow.ellipsis)),
-                            ],
-                            onChanged: (val) => setState(() => entry.sex = val ?? ''),
+                            backgroundColor: Colors.white,
+                            borderColor: const Color(0xFFCBD5E1),
+                            textColor: const Color(0xFF1E293B),
+                            iconColor: const Color(0xFF64748B),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+                            onChanged: (val) => setState(() => entry.sex = val),
                           ),
                         ],
                       ),

@@ -480,99 +480,118 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
   // TOP APP BAR (Icon + Title + Search bar + Walk-In Button)
   // ═══════════════════════════════════════════════════════════
   Widget _buildTopBar() {
+    final isCompact = MediaQuery.sizeOf(context).width < 720;
+    final titleRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(4),
+          child: const Icon(
+            Icons.warning_amber_rounded,
+            color: Color(0xFFEF4444), // Coral Red Hazard
+            size: 26,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            'Illegal Slaughter Reports',
+            style: TextStyle(
+              fontSize: isCompact ? 18 : 20,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF0F172A),
+              letterSpacing: -0.3,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    final walkInBtn = ElevatedButton.icon(
+      onPressed: _showLogWalkInReportDialog,
+      icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+      label: const Text(
+        'Log Walk-In Report',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFFEF4444),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
+
+    final searchBox = Container(
+      width: isCompact ? double.infinity : 260,
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: TextField(
+        controller: _searchCtrl,
+        onChanged: (_) => setState(() {}),
+        style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          prefixIcon: const Icon(
+            Icons.search,
+            size: 18,
+            color: Color(0xFF94A3B8),
+          ),
+          prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 18),
+          suffixIcon: _searchCtrl.text.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
+                  onPressed: () {
+                    _searchCtrl.clear();
+                    setState(() {});
+                  },
+                )
+              : null,
+          hintText: 'Search reports...',
+          hintStyle: const TextStyle(
+            color: Color(0xFF94A3B8),
+            fontSize: 13,
+            fontWeight: FontWeight.w400,
+          ),
+          border: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          enabledBorder: InputBorder.none,
+        ),
+      ),
+    );
+
+    if (isCompact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          titleRow,
+          const SizedBox(height: 12),
+          Align(alignment: Alignment.centerLeft, child: walkInBtn),
+          const SizedBox(height: 10),
+          searchBox,
+        ],
+      );
+    }
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Red warning icon + Illegal Slaughter Reports
+        titleRow,
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              child: const Icon(
-                Icons.warning_amber_rounded,
-                color: Color(0xFFEF4444), // Coral Red Hazard
-                size: 26,
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Text(
-              'Illegal Slaughter Reports',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF0F172A),
-                letterSpacing: -0.3,
-              ),
-            ),
-          ],
-        ),
-
-        // Right side: Log Walk-In Report Button + Search Input
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ElevatedButton.icon(
-              onPressed: _showLogWalkInReportDialog,
-              icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
-              label: const Text(
-                'Log Walk-In Report',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFEF4444),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            ),
+            walkInBtn,
             const SizedBox(width: 12),
-            Container(
-              width: 260,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                onChanged: (_) => setState(() {}),
-                style: const TextStyle(fontSize: 13, color: Color(0xFF1E293B)),
-                decoration: InputDecoration(
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  prefixIcon: const Icon(
-                    Icons.search,
-                    size: 18,
-                    color: Color(0xFF94A3B8),
-                  ),
-                  prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 18),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear, size: 16, color: Color(0xFF94A3B8)),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() {});
-                          },
-                        )
-                      : null,
-                  hintText: 'Search reports...',
-                  hintStyle: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                  ),
-                  border: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                ),
-              ),
-            ),
+            searchBox,
           ],
         ),
       ],
@@ -639,6 +658,7 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
   // TABLE CARD (Matching user's Screenshot 1)
   // ═══════════════════════════════════════════════════════════
   Widget _buildReportsTableCard(List<Map<String, dynamic>> reports) {
+    final isMobile = MediaQuery.sizeOf(context).width < 700;
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -655,76 +675,77 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          // Table Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+          // Desktop Table Header (hidden on mobile stacked cards)
+          if (!isMobile)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8FAFC),
+                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+              child: const Row(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Text(
+                      'Report ID / Date',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Text(
+                      'Location',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Reporter',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(
+                      'Status',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 50,
+                    child: Text(
+                      'Action',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF475569),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: const Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    'Report ID / Date',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 4,
-                  child: Text(
-                    'Location',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Reporter',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    'Status',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: 50,
-                  child: Text(
-                    'Action',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF475569),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
 
-          // Table Rows
+          // Table Rows or Stacked Mobile Cards
           if (reports.isEmpty)
             Padding(
               padding: const EdgeInsets.all(48),
@@ -756,10 +777,135 @@ class _IllegalSlaughterReportsViewState extends State<IllegalSlaughterReportsVie
               ),
               itemBuilder: (context, index) {
                 final report = reports[index];
-                return _buildTableRow(report);
+                return isMobile ? _buildMobileReportCard(report) : _buildTableRow(report);
               },
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildMobileReportCard(Map<String, dynamic> report) {
+    final ref = (report['reference_no'] ?? 'REP-UNKNOWN').toString();
+    final dateStr = formatTableDate(report['incident_date'] ?? report['created_at']);
+    final location = (report['location'] ?? 'Location not specified').toString();
+    final isAnon = report['is_anonymous'] == true || report['reporter_name'] == 'Anonymous';
+    final reporterName = isAnon ? 'Anonymous' : (report['reporter_name'] ?? 'Citizen').toString();
+    final status = normalizeStatus(report['status']);
+    final isWalkIn = report['report_source'] == 'walk_in' ||
+        ref.startsWith('WI-') ||
+        (report['description'] ?? '').toString().contains('[Walk-In');
+
+    return InkWell(
+      onTap: () => _openReportCenterModal(report),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        color: Colors.white,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        ref,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF0F172A),
+                        ),
+                      ),
+                      if (isWalkIn)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: const Text(
+                            'Walk-In',
+                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFFB45309)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_rounded, size: 18, color: Color(0xFF64748B)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: getStatusBgColor(status),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: getStatusTextColor(status),
+                    ),
+                  ),
+                ),
+                buildSeverityBadge(report['severity_level'] ?? detectSeverity(report['description'])),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF64748B)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    location,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155), fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                const Icon(Icons.person_outline, size: 14, color: Color(0xFF94A3B8)),
+                const SizedBox(width: 4),
+                Text(
+                  reporterName,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontStyle: isAnon ? FontStyle.italic : FontStyle.normal,
+                    color: const Color(0xFF64748B),
+                  ),
+                ),
+                const Text('  •  ', style: TextStyle(color: Color(0xFF94A3B8))),
+                const Icon(Icons.access_time_outlined, size: 13, color: Color(0xFF94A3B8)),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    dateStr,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -608,12 +608,33 @@ class AppSettingsService extends ChangeNotifier {
           final title = decoded['headerTitle']?.toString().trim();
           final subtitle = decoded['headerSubtitle']?.toString().trim();
           if (logo != null && logo.isNotEmpty) _cityLogoPath = logo;
-          if (title != null && title.isNotEmpty) _headerTitle = title;
+          bool migratedLegacyTitle = false;
+          if (title != null && title.isNotEmpty) {
+            if (title.toLowerCase() == 'city abattoir system') {
+              _headerTitle = 'TC "AA" Slaughterhouse';
+              migratedLegacyTitle = true;
+            } else {
+              _headerTitle = title;
+            }
+          }
           if (subtitle != null && subtitle.isNotEmpty) _headerSubtitle = subtitle;
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('app_city_logo', _cityLogoPath);
           await prefs.setString('app_header_title', _headerTitle);
           await prefs.setString('app_header_subtitle', _headerSubtitle);
+          if (migratedLegacyTitle) {
+            try {
+              await client.from('system_settings').upsert({
+                'key': 'appearance',
+                'value': {
+                  'cityLogoPath': _cityLogoPath,
+                  'headerTitle': _headerTitle,
+                  'headerSubtitle': _headerSubtitle,
+                },
+                'updated_at': DateTime.now().toIso8601String(),
+              });
+            } catch (_) {}
+          }
         }
       } catch (e) {
         debugPrint('reloadFromSupabase appearance error: $e');
