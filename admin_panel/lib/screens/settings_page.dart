@@ -74,6 +74,7 @@ class _SettingsPageState extends State<SettingsPage>
   late TextEditingController _headerTitleCtrl;
   late TextEditingController _headerSubtitleCtrl;
   late String _selectedLogoPath;
+  bool _isSavingAppearance = false;
 
   // ─── 5. CUSTOMER ACCOUNTS STATE ───
   List<Map<String, dynamic>>? _customerAccounts = [];
@@ -2567,8 +2568,6 @@ class _SettingsPageState extends State<SettingsPage>
                   // Header Text Inputs
                   TextField(
                     controller: _headerTitleCtrl,
-                    textCapitalization: TextCapitalization.words,
-                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Header Title Text (Main Bold Line)',
                       hintText: 'TC "AA" Slaughterhouse',
@@ -2578,8 +2577,6 @@ class _SettingsPageState extends State<SettingsPage>
                   const SizedBox(height: 14),
                   TextField(
                     controller: _headerSubtitleCtrl,
-                    textCapitalization: TextCapitalization.words,
-                    inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Header Subtitle Text (Top Line)',
                       hintText: 'CITY OF TABACO, ALBAY',
@@ -2662,45 +2659,86 @@ class _SettingsPageState extends State<SettingsPage>
                   const SizedBox(height: 24),
 
                   // Actions
-                  Row(
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 10,
                     children: [
                       ElevatedButton.icon(
-                        onPressed: () {
-                          _settingsService.updateAppearance(
-                            headerTitle: _headerTitleCtrl.text.trim(),
-                            headerSubtitle: _headerSubtitleCtrl.text.trim(),
-                            cityLogoPath: _selectedLogoPath,
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Appearance updated successfully!'),
-                              backgroundColor: Color(0xFF2D6A4F),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.save, size: 18),
-                        label: const Text('Save Appearance Settings'),
+                        onPressed: _isSavingAppearance
+                            ? null
+                            : () async {
+                                setState(() => _isSavingAppearance = true);
+                                final savedToCloud =
+                                    await _settingsService.updateAppearance(
+                                  headerTitle: _headerTitleCtrl.text.trim(),
+                                  headerSubtitle: _headerSubtitleCtrl.text.trim(),
+                                  cityLogoPath: _selectedLogoPath,
+                                );
+                                if (!mounted) return;
+                                setState(() => _isSavingAppearance = false);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      savedToCloud
+                                          ? 'Appearance updated and synced!'
+                                          : 'Saved locally, but could not sync to server. Please check your connection or permissions.',
+                                    ),
+                                    backgroundColor: savedToCloud
+                                        ? const Color(0xFF2D6A4F)
+                                        : const Color(0xFFD97706),
+                                  ),
+                                );
+                              },
+                        icon: _isSavingAppearance
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.save, size: 18),
+                        label: Text(
+                          _isSavingAppearance
+                              ? 'Saving...'
+                              : 'Save Appearance Settings',
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF2D6A4F),
                           foregroundColor: Colors.white,
                         ),
                       ),
-                      const SizedBox(width: 14),
                       OutlinedButton.icon(
-                        onPressed: () {
-                          _settingsService.resetAppearance();
-                          setState(() {
-                            _headerTitleCtrl.text = _settingsService.headerTitle;
-                            _headerSubtitleCtrl.text = _settingsService.headerSubtitle;
-                            _selectedLogoPath = _settingsService.cityLogoPath;
-                          });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Reset appearance to defaults.'),
-                              backgroundColor: Color(0xFF475569),
-                            ),
-                          );
-                        },
+                        onPressed: _isSavingAppearance
+                            ? null
+                            : () async {
+                                setState(() => _isSavingAppearance = true);
+                                final savedToCloud =
+                                    await _settingsService.resetAppearance();
+                                if (!mounted) return;
+                                setState(() {
+                                  _isSavingAppearance = false;
+                                  _headerTitleCtrl.text =
+                                      _settingsService.headerTitle;
+                                  _headerSubtitleCtrl.text =
+                                      _settingsService.headerSubtitle;
+                                  _selectedLogoPath =
+                                      _settingsService.cityLogoPath;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      savedToCloud
+                                          ? 'Appearance reset to defaults and synced.'
+                                          : 'Reset locally, but could not sync to server.',
+                                    ),
+                                    backgroundColor: savedToCloud
+                                        ? const Color(0xFF475569)
+                                        : const Color(0xFFD97706),
+                                  ),
+                                );
+                              },
                         icon: const Icon(Icons.refresh, size: 18),
                         label: const Text('Reset Defaults'),
                       ),

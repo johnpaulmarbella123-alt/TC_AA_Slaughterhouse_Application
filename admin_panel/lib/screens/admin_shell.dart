@@ -158,6 +158,7 @@ class _AdminShellState extends State<AdminShell> {
             throw Exception('Account not found in Supabase');
           }
           AppSettingsService.instance.syncWithAuthUser(session.user);
+          await AppSettingsService.instance.reloadFromSupabase();
         } catch (_) {
           await Supabase.instance.client.auth.signOut();
           if (mounted) {
@@ -872,7 +873,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
         ? settings.headerTitle.trim()
         : 'TC "AA" Slaughterhouse';
     final headerSubtitle = settings.headerSubtitle.trim().isNotEmpty
-        ? settings.headerSubtitle.trim().toUpperCase()
+        ? settings.headerSubtitle.trim()
         : 'CITY OF TABACO, ALBAY';
     return Container(
       height: 78,

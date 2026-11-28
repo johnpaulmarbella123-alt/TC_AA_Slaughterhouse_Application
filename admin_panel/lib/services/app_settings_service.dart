@@ -1139,7 +1139,7 @@ class AppSettingsService extends ChangeNotifier {
     await prefs.setString('app_theme_mode', mode == ThemeMode.dark ? 'dark' : 'light');
   }
 
-  Future<void> updateAppearance({
+  Future<bool> updateAppearance({
     String? cityLogoPath,
     String? headerTitle,
     String? headerSubtitle,
@@ -1154,16 +1154,16 @@ class AppSettingsService extends ChangeNotifier {
       _headerSubtitle = headerSubtitle.trim();
     }
     notifyListeners();
-    await _saveAppearanceToPrefs();
+    return await _saveAppearanceToPrefs();
   }
 
-  Future<void> resetAppearance() async {
+  Future<bool> resetAppearance() async {
     _cityLogoPath = 'assets/images/logo1.png';
     _headerTitle = 'TC "AA" Slaughterhouse';
     _headerSubtitle = 'CITY OF TABACO, ALBAY';
     _themeMode = ThemeMode.light;
     notifyListeners();
-    await _saveAppearanceToPrefs();
+    return await _saveAppearanceToPrefs();
   }
 
   // ═══════════════════════════════════════════════════════════
@@ -1376,6 +1376,36 @@ class AppSettingsService extends ChangeNotifier {
         }
       }
 
+      // Load Appearance (Try Supabase system_settings first, keep local fallback)
+      try {
+        final appRow = await Supabase.instance.client
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'appearance')
+            .maybeSingle();
+        if (appRow != null && appRow['value'] != null) {
+          final rawVal = appRow['value'];
+          final Map<String, dynamic> decoded = rawVal is String
+              ? jsonDecode(rawVal) as Map<String, dynamic>
+              : Map<String, dynamic>.from(rawVal as Map);
+          final logo = decoded['cityLogoPath']?.toString().trim();
+          final title = decoded['headerTitle']?.toString().trim();
+          final subtitle = decoded['headerSubtitle']?.toString().trim();
+          if (logo != null && logo.isNotEmpty) _cityLogoPath = logo;
+          if (title != null && title.isNotEmpty) {
+            _headerTitle = title.toLowerCase() == 'city abattoir system'
+                ? 'TC "AA" Slaughterhouse'
+                : title;
+          }
+          if (subtitle != null && subtitle.isNotEmpty) _headerSubtitle = subtitle;
+          await prefs.setString('app_city_logo', _cityLogoPath);
+          await prefs.setString('app_header_title', _headerTitle);
+          await prefs.setString('app_header_subtitle', _headerSubtitle);
+        }
+      } catch (e) {
+        debugPrint('AppSettingsService init appearance load error: $e');
+      }
+
       _initialized = true;
       notifyListeners();
     } catch (e) {
@@ -1473,7 +1503,7 @@ class AppSettingsService extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveAppearanceToPrefs() async {
+  Future<bool> _saveAppearanceToPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('app_city_logo', _cityLogoPath);
@@ -1484,19 +1514,26 @@ class AppSettingsService extends ChangeNotifier {
       await _ensureAdminAuth();
       final client = Supabase.instance.client;
       if (client.auth.currentSession != null) {
-        await client.from('system_settings').upsert({
-          'key': 'appearance',
-          'value': {
-            'cityLogoPath': _cityLogoPath,
-            'headerTitle': _headerTitle,
-            'headerSubtitle': _headerSubtitle,
+        await client.from('system_settings').upsert(
+          {
+            'key': 'appearance',
+            'value': {
+              'cityLogoPath': _cityLogoPath,
+              'headerTitle': _headerTitle,
+              'headerSubtitle': _headerSubtitle,
+            },
+            'updated_at': DateTime.now().toIso8601String(),
           },
-          'updated_at': DateTime.now().toIso8601String(),
-        });
+          onConflict: 'key',
+        );
         debugPrint('Saved appearance to Supabase system_settings successfully.');
+        return true;
       }
+      debugPrint('Appearance saved locally only: no active Supabase session.');
+      return false;
     } catch (e) {
-      debugPrint('Error saving appearance: $e');
+      debugPrint('Error saving appearance to Supabase: $e');
+      return false;
     }
   }
 }
