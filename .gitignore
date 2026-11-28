@@ -1,1 +1,3 @@
 *.apk
+backups/
+scripts/.backup.env
