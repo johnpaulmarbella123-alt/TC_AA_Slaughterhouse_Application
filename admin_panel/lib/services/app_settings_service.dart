@@ -1105,7 +1105,7 @@ class AppSettingsService extends ChangeNotifier {
   String _cityLogoPath = 'assets/images/logo1.png';
   String get cityLogoPath => _cityLogoPath;
 
-  String _headerTitle = 'City Abattoir System';
+  String _headerTitle = 'TC "AA" Slaughterhouse';
   String get headerTitle => _headerTitle;
 
   String _headerSubtitle = 'CITY OF TABACO, ALBAY';
@@ -1138,7 +1138,7 @@ class AppSettingsService extends ChangeNotifier {
 
   Future<void> resetAppearance() async {
     _cityLogoPath = 'assets/images/logo1.png';
-    _headerTitle = 'City Abattoir System';
+    _headerTitle = 'TC "AA" Slaughterhouse';
     _headerSubtitle = 'CITY OF TABACO, ALBAY';
     _themeMode = ThemeMode.light;
     notifyListeners();
@@ -1168,7 +1168,9 @@ class AppSettingsService extends ChangeNotifier {
       }
       final savedTitle = prefs.getString('app_header_title');
       if (savedTitle != null && savedTitle.isNotEmpty) {
-        _headerTitle = savedTitle;
+        _headerTitle = savedTitle.trim() == 'City Abattoir System'
+            ? 'TC "AA" Slaughterhouse'
+            : savedTitle;
       }
       final savedSubtitle = prefs.getString('app_header_subtitle');
       if (savedSubtitle != null && savedSubtitle.isNotEmpty) {

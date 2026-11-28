@@ -59,7 +59,7 @@ class _AdminShellState extends State<AdminShell> {
       case 8:
         return 'Illegal Slaughter Reports';
       default:
-        return 'City Abattoir System';
+        return 'TC "AA" Slaughterhouse';
     }
   }
 
@@ -870,7 +870,7 @@ class _AdminSidebarState extends State<_AdminSidebar>
         : 'assets/images/logo1.png';
     final headerTitle = settings.headerTitle.trim().isNotEmpty
         ? settings.headerTitle.trim()
-        : 'City Abattoir System';
+        : 'TC "AA" Slaughterhouse';
     final headerSubtitle = settings.headerSubtitle.trim().isNotEmpty
         ? settings.headerSubtitle.trim().toUpperCase()
         : 'CITY OF TABACO, ALBAY';

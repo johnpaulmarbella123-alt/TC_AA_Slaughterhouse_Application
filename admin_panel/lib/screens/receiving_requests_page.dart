@@ -11,6 +11,7 @@ import '../services/app_settings_service.dart';
 import '../services/admin_realtime_hub.dart';
 import '../services/audit_log_service.dart';
 import '../widgets/animals_in_lot_editor.dart';
+import '../widgets/animated_select_dropdown.dart';
 import '../services/ear_tag_registry_service.dart';
 import '../services/regular_dealers_service.dart';
 import 'package:flutter/services.dart';
@@ -3108,11 +3109,17 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               // ── Animal Type ──
               _buildLabel('Animal Type'),
               const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedAnimalType,
-                hint: const Text('Select Type', style: TextStyle(fontSize: 13)),
-                decoration: _dropdownDecoration(),
-                items: _animalTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+              AnimatedSelectDropdown<String?>(
+                value: _selectedAnimalType,
+                items: _animalTypes,
+                labelBuilder: (t) => t ?? 'Select Type',
+                placeholder: 'Select Type',
+                isExpanded: true,
+                backgroundColor: Colors.white,
+                borderColor: const Color(0xFFCBD5E1),
+                textColor: const Color(0xFF1E293B),
+                iconColor: const Color(0xFF64748B),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 onChanged: (v) => setState(() => _selectedAnimalType = v),
               ),
               const SizedBox(height: 16),
@@ -3242,15 +3249,18 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
                         style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF9A3412)),
                       ),
                       const SizedBox(height: 6),
-                      DropdownButtonFormField<String>(
-                        initialValue: _selectedEmergencyCause,
-                        decoration: _dropdownDecoration(),
-                        items: _emergencyCauses
-                            .map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 13))))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setState(() => _selectedEmergencyCause = v);
-                        },
+                      AnimatedSelectDropdown<String>(
+                        value: _selectedEmergencyCause,
+                        items: _emergencyCauses,
+                        labelBuilder: (c) => c,
+                        isExpanded: true,
+                        openUpward: true,
+                        backgroundColor: Colors.white,
+                        borderColor: const Color(0xFFCBD5E1),
+                        textColor: const Color(0xFF1E293B),
+                        iconColor: const Color(0xFF64748B),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        onChanged: (v) => setState(() => _selectedEmergencyCause = v),
                       ),
                     ],
                   ],
@@ -3342,28 +3352,29 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
       // Municipality
       _buildLabel('City / Municipality'),
       const SizedBox(height: 6),
-      DropdownButtonFormField<String>(
-              initialValue: _selectedMunicipality,
-              isExpanded: true,
-              hint: const Text('Select Municipality', style: TextStyle(fontSize: 13)),
-              decoration: _dropdownDecoration(),
-              items: _municipalities.map<DropdownMenuItem<String>>((m) {
-                return DropdownMenuItem<String>(
-                  value: m['name'] as String,
-                  child: Text(m['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
-                );
-              }).toList(),
-              onChanged: (value) {
-                final selected = _municipalities.firstWhere((m) => m['name'] == value);
-                setState(() {
-                  _selectedMunicipality = value;
-                  _selectedMunicipalityCode = selected['code'] as String;
-                  _selectedBarangay = null;
-                  _syncOriginToUneditedHeads();
-                });
-                _loadBarangays(_selectedMunicipalityCode!);
-              },
-            ),
+      AnimatedSelectDropdown<String?>(
+        value: _selectedMunicipality,
+        items: _municipalities.map<String>((m) => m['name'] as String).toList(),
+        labelBuilder: (m) => m ?? 'Select Municipality',
+        placeholder: 'Select Municipality',
+        isExpanded: true,
+        backgroundColor: Colors.white,
+        borderColor: const Color(0xFFCBD5E1),
+        textColor: const Color(0xFF1E293B),
+        iconColor: const Color(0xFF64748B),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        onChanged: (value) {
+          if (value == null) return;
+          final selected = _municipalities.firstWhere((m) => m['name'] == value);
+          setState(() {
+            _selectedMunicipality = value;
+            _selectedMunicipalityCode = selected['code'] as String;
+            _selectedBarangay = null;
+            _syncOriginToUneditedHeads();
+          });
+          _loadBarangays(_selectedMunicipalityCode!);
+        },
+      ),
       const SizedBox(height: 16),
 
       // Barangay
@@ -3374,25 +3385,24 @@ class _NewReceivingEntryDialogState extends State<_NewReceivingEntryDialog> {
               height: 48,
               child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D6A4F))),
             )
-          : DropdownButtonFormField<String>(
-              initialValue: _selectedBarangay,
+          : AnimatedSelectDropdown<String?>(
+              value: _selectedBarangay,
+              items: _barangays.map<String>((b) => b['name'] as String).toList(),
+              labelBuilder: (b) => b ?? 'Select Barangay',
+              placeholder: 'Select Barangay',
               isExpanded: true,
-              hint: const Text('Select Barangay', style: TextStyle(fontSize: 13)),
-              decoration: _dropdownDecoration(),
-              items: _barangays.map<DropdownMenuItem<String>>((b) {
-                return DropdownMenuItem<String>(
-                  value: b['name'] as String,
-                  child: Text(b['name'] as String, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13)),
-                );
-              }).toList(),
-              onChanged: _selectedMunicipality == null
-                  ? null
-                  : (value) {
-                      setState(() {
-                        _selectedBarangay = value;
-                        _syncOriginToUneditedHeads();
-                      });
-                    },
+              enabled: _selectedMunicipality != null,
+              backgroundColor: Colors.white,
+              borderColor: const Color(0xFFCBD5E1),
+              textColor: const Color(0xFF1E293B),
+              iconColor: const Color(0xFF64748B),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              onChanged: (value) {
+                setState(() {
+                  _selectedBarangay = value;
+                  _syncOriginToUneditedHeads();
+                });
+              },
             ),
     ];
   }

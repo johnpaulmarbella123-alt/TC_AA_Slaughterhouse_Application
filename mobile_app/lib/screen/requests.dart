@@ -125,6 +125,8 @@ class _RequestsContentState extends State<RequestsContent>
   RealtimeChannel? _roleChangeChannel;
   String? _subscribedRoleChangeUserId;
   Timer? _pendingRoleChangePollTimer;
+  bool _isFacilityOperational = true;
+  RealtimeChannel? _facilityStatusChannel;
 
   String? selectedLivestock;
 
@@ -151,6 +153,8 @@ class _RequestsContentState extends State<RequestsContent>
     WidgetsBinding.instance.addObserver(this);
     loadMunicipalities(selectedProvinceCode!);
     _loadCustomerProfile();
+    _loadFacilityOperationalStatus();
+    _subscribeFacilityStatusRealtime();
     final initialUserId = supabase.auth.currentUser?.id;
     if (initialUserId != null) {
       _subscribeRoleChangeRealtime(initialUserId);
@@ -175,6 +179,50 @@ class _RequestsContentState extends State<RequestsContent>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshRoleChangeStatus(showToastOnTransition: true);
+      _loadFacilityOperationalStatus();
+    }
+  }
+
+  Future<void> _loadFacilityOperationalStatus() async {
+    try {
+      final row = await supabase
+          .from('system_settings')
+          .select('value')
+          .eq('key', 'schedule_capacity')
+          .maybeSingle();
+      if (!mounted) return;
+      final val = row?['value'];
+      if (val is Map && val.containsKey('isOperational')) {
+        final operational = val['isOperational'] != false;
+        if (_isFacilityOperational != operational) {
+          setState(() => _isFacilityOperational = operational);
+        }
+      }
+    } catch (e) {
+      debugPrint('Facility operational status load notice: $e');
+    }
+  }
+
+  void _subscribeFacilityStatusRealtime() {
+    try {
+      _facilityStatusChannel = supabase
+          .channel('public:system_settings_facility_status')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'system_settings',
+            callback: (payload) {
+              if (!mounted) return;
+              final key = payload.newRecord['key']?.toString() ??
+                  payload.oldRecord['key']?.toString();
+              if (key == null || key == 'schedule_capacity') {
+                _loadFacilityOperationalStatus();
+              }
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Facility status realtime notice: $e');
     }
   }
 
@@ -712,6 +760,12 @@ class _RequestsContentState extends State<RequestsContent>
       } catch (_) {}
       _roleChangeChannel = null;
     }
+    if (_facilityStatusChannel != null) {
+      try {
+        supabase.removeChannel(_facilityStatusChannel!);
+      } catch (_) {}
+      _facilityStatusChannel = null;
+    }
     widget.preselectedLivestockNotifier?.removeListener(_handleLivestockPreselection);
     _authSubscription?.cancel();
     _customerNameController.dispose();
@@ -731,6 +785,17 @@ class _RequestsContentState extends State<RequestsContent>
   // ---------------- SUBMIT ----------------
 
   Future<void> submitRequest() async {
+    if (!_isFacilityOperational) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            'Slaughterhouse bookings are currently paused (Facility Temporarily Suspended / On Holiday).',
+          ),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+      return;
+    }
     // basic validation so you don't send empty junk to Supabase
     if (_customerNameController.text.trim().isEmpty ||
         selectedLivestock == null ||
@@ -2674,6 +2739,51 @@ class _RequestsContentState extends State<RequestsContent>
                       ),
                     ),
                     const SizedBox(height: 24),
+                    if (!_isFacilityOperational) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFFBEB),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFF59E0B), width: 1.5),
+                          ),
+                          child: const Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+                              SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Facility Temporarily Suspended / On Holiday',
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF92400E),
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Slaughterhouse intake and new mobile bookings are temporarily paused. Please check back once normal operations resume.',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(0xFF78350F),
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     if (!_roleLocked) ...[
                       _buildRoleSelectionView(context),
                       const SizedBox(height: 40),
@@ -3151,10 +3261,12 @@ class _RequestsContentState extends State<RequestsContent>
                           const SizedBox(width: 12),
                           Expanded(
                             child: ElevatedButton(
-                              onPressed: isLoading ? null : submitRequest,
+                              onPressed: (isLoading || !_isFacilityOperational) ? null : submitRequest,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF1E855A),
+                                disabledBackgroundColor: Colors.grey.shade400,
                                 foregroundColor: Colors.white,
+                                disabledForegroundColor: Colors.white,
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -3168,7 +3280,12 @@ class _RequestsContentState extends State<RequestsContent>
                                         color: Colors.white,
                                       ),
                                     )
-                                  : const Text("Submit Requests"),
+                                  : Text(
+                                      _isFacilityOperational
+                                          ? "Submit Requests"
+                                          : "Bookings Suspended",
+                                      textAlign: TextAlign.center,
+                                    ),
                             ),
                           ),
                         ],

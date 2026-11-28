@@ -2530,7 +2530,7 @@ class _SettingsPageState extends State<SettingsPage>
                     inputFormatters: const [WordsCapitalizationFormatter()],
                     decoration: const InputDecoration(
                       labelText: 'Header Title Text (Main Bold Line)',
-                      hintText: 'City Abattoir System',
+                      hintText: 'TC "AA" Slaughterhouse',
                       prefixIcon: Icon(Icons.title),
                     ),
                   ),
@@ -3352,11 +3352,22 @@ class _SettingsPageState extends State<SettingsPage>
                 ),
               ),
               SegmentedButton<String>(
+                showSelectedIcon: false,
+                style: ButtonStyle(
+                  fixedSize: const WidgetStatePropertyAll(Size(108, 40)),
+                  padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8)),
+                  textStyle: const WidgetStatePropertyAll(
+                    TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
                 segments: [
-                  const ButtonSegment(value: 'all', label: Text('All')),
-                  const ButtonSegment(value: 'active', label: Text('Active')),
-                  const ButtonSegment(value: 'deactivated', label: Text('Deactivated')),
-                  ButtonSegment(value: 'deleted', label: Text('Deleted (${_deletedCustomerAccounts.length})')),
+                  const ButtonSegment(value: 'all', label: Text('All', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const ButtonSegment(value: 'active', label: Text('Active', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  const ButtonSegment(value: 'deactivated', label: Text('Deactivated', maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  ButtonSegment(
+                    value: 'deleted',
+                    label: Text('Deleted (${_deletedCustomerAccounts.length})', maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
                 ],
                 selected: {_customerStatusFilter},
                 onSelectionChanged: (s) => setState(() => _customerStatusFilter = s.first),

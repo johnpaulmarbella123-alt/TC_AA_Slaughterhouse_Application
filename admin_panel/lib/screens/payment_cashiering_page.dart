@@ -16,6 +16,7 @@ import '../services/staff_notification_service.dart';
 import '../utils/daily_queue_filter.dart';
 import '../utils/admin_responsive.dart';
 import '../widgets/walk_in_sms_helper.dart';
+import '../widgets/animated_select_dropdown.dart';
 import '../services/walk_in_sms_service.dart';
 
 class PaymentCashieringPage extends StatefulWidget {
@@ -1375,27 +1376,18 @@ class _PaymentCashieringPageState extends State<PaymentCashieringPage> {
           ),
         ),
         const SizedBox(width: 12),
-        // Dropdown Button (Compact 36px height)
-        Container(
-          height: 36,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFEDF2F7),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _filterStatus,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey, size: 18),
-              items: ['All', 'Verified', 'Pending']
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e, style: const TextStyle(fontSize: 13))))
-                  .toList(),
-              onChanged: (val) {
-                if (val != null) setState(() => _filterStatus = val);
-              },
-            ),
-          ),
+        // Rounded Dropdown Filter Button (matching Reports module style)
+        AnimatedSelectDropdown<String>(
+          value: _filterStatus,
+          items: const ['All', 'Verified', 'Pending'],
+          labelBuilder: (e) => e,
+          minMenuWidth: 150,
+          backgroundColor: const Color(0xFFEDF2F7),
+          borderColor: const Color(0xFFE2E8F0),
+          textColor: const Color(0xFF1E293B),
+          iconColor: const Color(0xFF64748B),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          onChanged: (val) => setState(() => _filterStatus = val),
         ),
       ],
     );

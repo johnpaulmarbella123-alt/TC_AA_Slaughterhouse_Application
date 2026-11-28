@@ -66,6 +66,15 @@ class MyApp extends StatelessWidget {
           ),
           themeMode: AppSettingsService.instance.themeMode,
           debugShowCheckedModeBanner: false,
+          builder: (context, child) {
+            final mq = MediaQuery.of(context);
+            final w = mq.size.width;
+            final double scale = w < 600 ? 0.88 : (w < 900 ? 0.94 : 1.0);
+            return MediaQuery(
+              data: mq.copyWith(textScaler: TextScaler.linear(scale)),
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
           navigatorObservers: [DialogBlurObserver.instance],
           initialRoute: (Supabase.instance.client.auth.currentSession == null &&
                   !AppSettingsService.instance.hasActiveStaffSession)

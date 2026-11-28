@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/app_settings_service.dart';
 import '../services/audit_log_service.dart';
+import '../utils/admin_responsive.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -302,90 +303,99 @@ class _LoginPageState extends State<LoginPage> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         // ── Slaughterhouse Green Header Banner ──
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF0F5132),
-                          ),
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              if (canPop)
-                                Positioned(
-                                  top: -8,
-                                  left: -8,
-                                  child: IconButton(
-                                    icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 20),
-                                    tooltip: 'Back',
-                                    onPressed: () => Navigator.of(context).pop(),
-                                  ),
-                                ),
-                              Column(
-                                mainAxisSize: MainAxisSize.min,
+                        Builder(
+                          builder: (context) {
+                            final isPhone = AdminResponsive.isPhone(context);
+                            final sealSize = isPhone ? 62.0 : 80.0;
+                            return Container(
+                              width: double.infinity,
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isPhone ? 16 : 24,
+                                vertical: isPhone ? 18 : 28,
+                              ),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF0F5132),
+                              ),
+                              child: Stack(
+                                alignment: Alignment.center,
                                 children: [
-                                  Container(
-                                    width: 80,
-                                    height: 80,
-                                    padding: const EdgeInsets.all(4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      shape: BoxShape.circle,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(alpha: 0.20),
-                                          blurRadius: 8,
-                                          offset: const Offset(0, 2),
-                                        ),
-                                      ],
-                                    ),
-                                    child: ClipOval(
-                                      child: Image.asset(
-                                        'assets/images/logo1.png',
-                                        fit: BoxFit.contain,
+                                  if (canPop)
+                                    Positioned(
+                                      top: -8,
+                                      left: -8,
+                                      child: IconButton(
+                                        icon: const Icon(Icons.arrow_back, color: Colors.white70, size: 20),
+                                        tooltip: 'Back',
+                                        onPressed: () => Navigator.of(context).pop(),
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 12),
-                                  const Text(
-                                    'REPUBLIC OF THE PHILIPPINES • PROVINCE OF ALBAY',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Color(0xFFCBD5E1),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      letterSpacing: 1.4,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  const Text(
-                                    'City of Tabaco',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  const Text(
-                                    'City Abattoir Management System',
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Color(0xFFA7F3D0),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                                  Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        width: sealSize,
+                                        height: sealSize,
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(alpha: 0.20),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: ClipOval(
+                                          child: Image.asset(
+                                            'assets/images/logo1.png',
+                                            fit: BoxFit.contain,
+                                          ),
+                                        ),
+                                      ),
+                                      SizedBox(height: isPhone ? 10 : 12),
+                                      Text(
+                                        'REPUBLIC OF THE PHILIPPINES • PROVINCE OF ALBAY',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: const Color(0xFFCBD5E1),
+                                          fontSize: isPhone ? 10.5 : 12,
+                                          fontWeight: FontWeight.w500,
+                                          letterSpacing: isPhone ? 0.9 : 1.4,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'City of Tabaco',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: isPhone ? 18 : 20,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'TC "AA" Slaughterhouse Management System',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: const Color(0xFFA7F3D0),
+                                          fontSize: isPhone ? 13 : 14,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
 
                         // ── Clean White Form Body ──
                         Padding(
-                          padding: const EdgeInsets.all(24),
+                          padding: EdgeInsets.all(AdminResponsive.isPhone(context) ? 18 : 24),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [

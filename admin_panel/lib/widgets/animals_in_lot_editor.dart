@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'animated_select_dropdown.dart';
 
 /// Represents one animal head inside a slaughter request's `animals_in_lot` JSONB list.
 class AnimalLotItem {
@@ -450,22 +451,18 @@ class _AnimalsInLotEditorState extends State<AnimalsInLotEditor> {
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: const ['', 'Male', 'Female'].contains(item.sex) ? item.sex : '',
-                        decoration: InputDecoration(
-                          labelText: 'Sex (opt.)',
-                          isDense: true,
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        items: const [
-                          DropdownMenuItem(value: '', child: Text('—')),
-                          DropdownMenuItem(value: 'Male', child: Text('Male')),
-                          DropdownMenuItem(value: 'Female', child: Text('Female')),
-                        ],
+                      child: AnimatedSelectDropdown<String>(
+                        value: const ['', 'Male', 'Female'].contains(item.sex) ? item.sex : '',
+                        items: const ['', 'Male', 'Female'],
+                        labelBuilder: (s) => s.isEmpty ? 'Sex (opt.)' : s,
+                        isExpanded: true,
+                        backgroundColor: Colors.white,
+                        borderColor: const Color(0xFFCBD5E1),
+                        textColor: const Color(0xFF1E293B),
+                        iconColor: const Color(0xFF64748B),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                         onChanged: (v) {
-                          setState(() => item.sex = v ?? '');
+                          setState(() => item.sex = v);
                         },
                       ),
                     ),

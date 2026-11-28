@@ -15,6 +15,10 @@ class AnimatedSelectDropdown<T> extends StatefulWidget {
   final Color iconColor;
   final double? minMenuWidth;
   final EdgeInsetsGeometry padding;
+  final bool isExpanded;
+  final bool openUpward;
+  final String? placeholder;
+  final bool enabled;
 
   const AnimatedSelectDropdown({
     super.key,
@@ -29,6 +33,10 @@ class AnimatedSelectDropdown<T> extends StatefulWidget {
     this.iconColor = const Color(0xFF64748B),
     this.minMenuWidth,
     this.padding = const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    this.isExpanded = false,
+    this.openUpward = false,
+    this.placeholder,
+    this.enabled = true,
   });
 
   @override
@@ -60,7 +68,10 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
     );
     _fadeAnim = curved;
     _scaleAnim = Tween<double>(begin: 0.96, end: 1.0).animate(curved);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, -0.04), end: Offset.zero).animate(curved);
+    _slideAnim = Tween<Offset>(
+      begin: widget.openUpward ? const Offset(0, 0.04) : const Offset(0, -0.04),
+      end: Offset.zero,
+    ).animate(curved);
   }
 
   @override
@@ -71,6 +82,7 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
   }
 
   void _toggleDropdown() {
+    if (!widget.enabled) return;
     if (_isOpen) {
       _closeDropdown();
     } else {
@@ -113,7 +125,9 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
           CompositedTransformFollower(
             link: _layerLink,
             showWhenUnlinked: false,
-            offset: Offset(dx, triggerSize.height + 6),
+            targetAnchor: widget.openUpward ? Alignment.topLeft : Alignment.bottomLeft,
+            followerAnchor: widget.openUpward ? Alignment.bottomLeft : Alignment.topLeft,
+            offset: Offset(dx, widget.openUpward ? -6 : 6),
             child: Material(
               color: Colors.transparent,
               child: FadeTransition(
@@ -122,7 +136,7 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
                   position: _slideAnim,
                   child: ScaleTransition(
                     scale: _scaleAnim,
-                    alignment: Alignment.topLeft,
+                    alignment: widget.openUpward ? Alignment.bottomLeft : Alignment.topLeft,
                     child: Container(
                       width: menuWidth,
                       constraints: const BoxConstraints(maxHeight: 360),
@@ -240,12 +254,14 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
     final activeIcon = widget.iconBuilder?.call(widget.value);
     return CompositedTransformTarget(
       link: _layerLink,
-      child: Material(
-        color: widget.backgroundColor,
-        borderRadius: BorderRadius.circular(9),
-        child: InkWell(
-          onTap: _toggleDropdown,
+      child: Opacity(
+        opacity: widget.enabled ? 1.0 : 0.6,
+        child: Material(
+          color: widget.backgroundColor,
           borderRadius: BorderRadius.circular(9),
+          child: InkWell(
+            onTap: widget.enabled ? _toggleDropdown : null,
+            borderRadius: BorderRadius.circular(9),
           child: Container(
             padding: widget.padding,
             decoration: BoxDecoration(
@@ -257,27 +273,46 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
               ),
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: widget.isExpanded ? MainAxisSize.max : MainAxisSize.min,
               children: [
                 if (activeIcon != null) ...[
                   Icon(activeIcon, size: 16, color: widget.iconColor),
                   const SizedBox(width: 8),
                 ],
-                Text(
-                  widget.labelBuilder(widget.value),
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: widget.textColor,
+                if (widget.isExpanded)
+                  Expanded(
+                    child: Text(
+                      widget.value == null && widget.placeholder != null
+                          ? widget.placeholder!
+                          : widget.labelBuilder(widget.value),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: widget.value == null ? FontWeight.w500 : FontWeight.w600,
+                        color: widget.value == null ? Colors.grey.shade500 : widget.textColor,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  )
+                else
+                  Text(
+                    widget.value == null && widget.placeholder != null
+                        ? widget.placeholder!
+                        : widget.labelBuilder(widget.value),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: widget.textColor,
+                    ),
                   ),
-                ),
                 const SizedBox(width: 8),
                 AnimatedRotation(
                   turns: _isOpen ? 0.5 : 0.0,
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeOutCubic,
                   child: Icon(
-                    Icons.keyboard_arrow_down_rounded,
+                    widget.openUpward
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
                     size: 19,
                     color: widget.iconColor,
                   ),
@@ -286,6 +321,7 @@ class _AnimatedSelectDropdownState<T> extends State<AnimatedSelectDropdown<T>>
             ),
           ),
         ),
+      ),
       ),
     );
   }
