@@ -1325,10 +1325,9 @@ class _RequestsContentState extends State<RequestsContent>
 
   // ---------------- DOCUMENT PICKER ----------------
 
-  Future<void> _pickDocument(String type, {ImageSource? directSource}) async {
-    // 1. Choose source: Camera or Image Gallery (no generic file upload)
-    ImageSource? source = directSource;
-    source ??= await showModalBottomSheet<ImageSource>(
+  Future<void> _pickDocument(String type) async {
+    // 1. Choose source: Camera, Gallery, or Device Files
+    final selection = await showModalBottomSheet<String>(
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -1356,23 +1355,23 @@ class _RequestsContentState extends State<RequestsContent>
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
                 child: Text(
-                  "Please take a clear photo or upload an image of the official document.",
+                  "Please provide a scanned copy or clear photo of the official document.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ),
               const Divider(),
               ListTile(
-                leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF1E855A)),
+                leading: const Icon(Icons.camera_alt, color: Color(0xFF1E855A)),
                 title: const Text("Take Photo"),
                 subtitle: const Text("Capture the physical certificate directly"),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
+                onTap: () => Navigator.pop(context, 'camera'),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF1E855A)),
-                title: const Text("Upload Image"),
-                subtitle: const Text("Choose an image from your photo gallery"),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
+                leading: const Icon(Icons.photo_library, color: Color(0xFF1E855A)),
+                title: const Text("Select from Gallery"),
+                subtitle: const Text("Choose image from your photo album"),
+                onTap: () => Navigator.pop(context, 'gallery'),
               ),
               const SizedBox(height: 8),
             ],
@@ -1381,37 +1380,54 @@ class _RequestsContentState extends State<RequestsContent>
       },
     );
 
-    if (source == null) return;
+    if (selection == null) return;
 
     File? selectedFile;
     Uint8List? selectedBytes;
 
     try {
-      final XFile? image = await picker.pickImage(
-        source: source,
-        maxWidth: 1024,
-        maxHeight: 1024,
-        imageQuality: 70,
-      );
-      if (image != null) {
-        selectedBytes = await image.readAsBytes();
-        if (!kIsWeb) {
-          try {
-            selectedFile = File(image.path);
-          } catch (_) {}
+      if (selection == 'camera') {
+        final XFile? image = await picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 70,
+        );
+        if (image != null) {
+          selectedBytes = await image.readAsBytes();
+          if (!kIsWeb) {
+            try {
+              selectedFile = File(image.path);
+            } catch (_) {}
+          }
+        }
+      } else if (selection == 'gallery') {
+        final XFile? image = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          imageQuality: 70,
+        );
+        if (image != null) {
+          selectedBytes = await image.readAsBytes();
+          if (!kIsWeb) {
+            try {
+              selectedFile = File(image.path);
+            } catch (_) {}
+          }
         }
       }
 
       if (selectedBytes == null || selectedBytes.isEmpty) return;
       if (!mounted) return;
 
-      // 2. Image size check
+      // 2. File size check
       final int fileSize = selectedBytes.length;
       if (fileSize < 1024) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Selected image is too small. Please provide a clear photo of the certificate."),
+            content: Text("Selected file is too small. Please provide a clear scanned certificate."),
             backgroundColor: Colors.red,
           ),
         );
@@ -2364,7 +2380,7 @@ class _RequestsContentState extends State<RequestsContent>
                           child: OutlinedButton.icon(
                             onPressed: () => _pickDocument("Barangay Certificate"),
                             icon: Icon(
-                              barangayCertificateUrl != null ? Icons.verified_outlined : Icons.add_photo_alternate_outlined,
+                              barangayCertificateUrl != null ? Icons.verified_outlined : Icons.upload_file,
                               color: barangayCertificateUrl != null ? const Color(0xFF1E855A) : Colors.black87,
                             ),
                             label: Text(
@@ -2418,7 +2434,7 @@ class _RequestsContentState extends State<RequestsContent>
                           child: OutlinedButton.icon(
                             onPressed: () => _pickDocument("Business Permit"),
                             icon: Icon(
-                              businessPermitUrl != null ? Icons.verified_outlined : Icons.add_photo_alternate_outlined,
+                              businessPermitUrl != null ? Icons.verified_outlined : Icons.upload_file,
                               color: businessPermitUrl != null ? const Color(0xFF1E855A) : Colors.black87,
                             ),
                             label: Text(
@@ -3448,42 +3464,18 @@ class _RequestsContentState extends State<RequestsContent>
               },
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      _pickDocument(selectedDocType, directSource: ImageSource.camera);
-                    },
-                    icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                    label: const Text("Take Photo"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1E855A),
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      _pickDocument(selectedDocType, directSource: ImageSource.gallery);
-                    },
-                    icon: const Icon(Icons.photo_library_outlined, size: 18),
-                    label: const Text("Upload Image"),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xFF1E293B),
-                      side: BorderSide(color: Colors.grey.shade300),
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ],
+            ElevatedButton(
+              onPressed: () {
+                _pickDocument(selectedDocType);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black87,
+                elevation: 0,
+                side: BorderSide(color: Colors.grey.shade300),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text("Choose files"),
             ),
           ],
         ),
